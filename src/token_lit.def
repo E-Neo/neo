@@ -1,0 +1,7 @@
+/* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
+
+NEO_TOKEN_LIT(TRUE, true)
+NEO_TOKEN_LIT(FALSE, false)
+NEO_TOKEN_LIT(LBRACE, {)
+NEO_TOKEN_LIT(RBRACE, })
+NEO_TOKEN_LIT(SEMICOLON, ;)

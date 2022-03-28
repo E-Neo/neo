@@ -1,0 +1,9 @@
+/* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
+
+NEO_ASTKIND(INVALID, invalid)
+NEO_ASTKIND(EXPR, expr)
+  NEO_ASTKIND(VOID, void)
+  NEO_ASTKIND(LIT_TRUE, literal_true)
+  NEO_ASTKIND(LIT_FALSE, literal_false)
+  NEO_ASTKIND(BLOCK, block)
+  NEO_ASTKIND(IF_THEN_ELSE, if_then_else)

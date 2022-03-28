@@ -1,0 +1,4 @@
+/* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
+
+NEO_TOKEN(INVALID)
+NEO_TOKEN(NAME)
