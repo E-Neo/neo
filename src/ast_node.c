@@ -108,8 +108,8 @@ ASTNodeManager_push_block (ASTNodeManager *self, Span span,
 
 ASTNodeId
 ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
-                                  ASTNodeId if_expr, ASTNodeId then_expr,
-                                  ASTNodeId else_expr)
+                                  ASTNodeId if_expr, ASTNodeId then_block,
+                                  ASTNodeId else_block)
 {
   ASTNodeId id = Vec_ASTNode_len (&self->nodes_);
   Vec_ASTNode_push (&self->nodes_,
@@ -117,7 +117,7 @@ ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
                                .span_ = span,
                                .if_then_else_ = (ASTIfThenElse){
                                    .if_expr_ = if_expr,
-                                   .then_block_ = then_expr,
-                                   .else_block_ = else_expr } });
+                                   .then_block_ = then_block,
+                                   .else_block_ = else_block } });
   return id;
 }

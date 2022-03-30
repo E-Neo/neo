@@ -25,7 +25,6 @@ typedef struct ThreadPoolData
   Vec_thrd_t threads_;
   mtx_t lock_;
   cnd_t new_job_notify_;
-  size_t num_running_;
 } ThreadPoolData;
 
 typedef struct ThreadPool

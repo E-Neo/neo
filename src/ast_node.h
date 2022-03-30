@@ -66,7 +66,7 @@ ASTNodeId ASTNodeManager_push_block (ASTNodeManager *self, Span span,
                                      Vec_ASTNodeId exprs);
 ASTNodeId ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
                                             ASTNodeId if_expr,
-                                            ASTNodeId then_expr,
-                                            ASTNodeId else_expr);
+                                            ASTNodeId then_block,
+                                            ASTNodeId else_block);
 
 #endif

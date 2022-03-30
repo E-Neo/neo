@@ -2,9 +2,9 @@
 
 #include "vec.h"
 
-#include "vec_macro.h"
-
 #include <threads.h>
+
+#include "vec_macro.h"
 
 NEO_IMPL_VEC (char, char)
 NEO_IMPL_VEC (const_char_ptr, const char *)

@@ -53,10 +53,7 @@ ThreadPoolData_broadcast_new_job_notify (ThreadPoolData *self)
 static void
 exit_work (void *pool_data)
 {
-  ThreadPoolData *data = pool_data;
-  ThreadPoolData_lock (data);
-  data->num_running_--;
-  ThreadPoolData_unlock (data);
+  (void)pool_data;
 }
 
 static int
@@ -91,7 +88,6 @@ ThreadPool_new (size_t num_threads)
     }
   data->jobs_ = Queue_ThreadPoolJob_new ();
   data->threads_ = Vec_thrd_t_with_capacity (num_threads);
-  data->num_running_ = 0;
   if (mtx_init (&data->lock_, mtx_plain) != thrd_success
       || cnd_init (&data->new_job_notify_) != thrd_success)
     {
@@ -101,14 +97,11 @@ ThreadPool_new (size_t num_threads)
     {
       Vec_thrd_t_push_uninit (&data->threads_);
       if (thrd_create (Vec_thrd_t_begin (&data->threads_) + i, do_work, data)
-              != thrd_success
-          || thrd_detach (Vec_thrd_t_cbegin (&data->threads_)[i])
-                 != thrd_success)
+          != thrd_success)
         {
           abort ();
         }
       ThreadPoolData_lock (data);
-      data->num_running_++;
       ThreadPoolData_unlock (data);
     }
   return (ThreadPool){ .num_threads_ = num_threads, .data_ = data };
@@ -121,16 +114,13 @@ ThreadPool_drop (ThreadPool *self)
     {
       ThreadPool_execute (self, exit_work, self->data_);
     }
-  while (true)
+  for (const thrd_t *thread = Vec_thrd_t_cbegin (&self->data_->threads_);
+       thread < Vec_thrd_t_cend (&self->data_->threads_); thread++)
     {
-      ThreadPoolData_lock (self->data_);
-      if (self->data_->num_running_ == 0)
+      if (thrd_join (*thread, NULL) != thrd_success)
         {
-          ThreadPoolData_unlock (self->data_);
-          break;
+          abort ();
         }
-      ThreadPoolData_unlock (self->data_);
-      thrd_yield ();
     }
   mtx_destroy (&self->data_->lock_);
   cnd_destroy (&self->data_->new_job_notify_);
