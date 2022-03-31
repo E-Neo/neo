@@ -66,7 +66,7 @@ Lexer_seeing_token_lit (const Lexer *self, enum TokenKind kind)
 #define NEO_TOKEN_LIT(T, L)                                                   \
   case TOKEN_##T:                                                             \
     {                                                                         \
-      const char token[] = #L;                                                \
+      const char token[] = L;                                                 \
       size_t token_len = sizeof (token) - 1;                                  \
       assert (token_len > 0);                                                 \
       const char *token_end = self->cursor_ + token_len;                      \
@@ -227,6 +227,13 @@ NEO_TEST (test_seeing_token_lit_01)
   ASSERT_U64_EQ (Lexer_seeing_token_lit (&lexer, TOKEN_LBRACE), 1);
 }
 
+NEO_TEST (test_seeing_token_lit_02)
+{
+  Span span = Span_from_cstring ("()");
+  Lexer lexer = Lexer_new (&span);
+  ASSERT_U64_EQ (Lexer_seeing_token_lit (&lexer, TOKEN_LPAREN), 1);
+}
+
 NEO_TEST (test_lex_true_00)
 {
   Vec_Token tokens = lex_tokens ("true");
@@ -246,5 +253,5 @@ NEO_TEST (test_lex_true_01)
 }
 
 NEO_TESTS (lexer_tests, test_seeing_token_lit_00, test_seeing_token_lit_01,
-           test_lex_true_00, test_lex_true_01)
+           test_seeing_token_lit_02, test_lex_true_00, test_lex_true_01)
 #endif

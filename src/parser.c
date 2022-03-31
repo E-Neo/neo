@@ -120,7 +120,8 @@ Parser_parse_block (Parser *self)
           Vec_ASTNodeId_drop (&exprs);
           return INVALID_AST_NODE_ID;
         }
-      if (Vec_ASTNodeId_is_empty (&exprs))
+      if (Vec_ASTNodeId_is_empty (&exprs)
+          || (self->cursor_ - 1)->kind_ == TOKEN_RBRACE)
         {
           if (Parser_seeing (self, TOKEN_SEMICOLON))
             {

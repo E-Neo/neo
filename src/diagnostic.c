@@ -14,6 +14,7 @@
 #include "vec_macro.h"
 
 #define ESC_DEFAULT "\e[0m"
+#define ESC_BOLD "\e[1m"
 #define ESC_RED "\e[1;31m"
 #define ESC_GREEN "\e[1;32m"
 #define ESC_YELLOW "\e[1;33m"
@@ -249,8 +250,16 @@ DiagnosticManager_fmt_diagnostic (const DiagnosticManager *self,
   String output = String_new ();
   String_push_cstring (&output,
                        level_to_cstring (diag->level_, self->colored_));
+  if (self->colored_)
+    {
+      String_push_cstring (&output, ESC_BOLD);
+    }
   String_push_cstring (&output, ": ");
   String_push_string (&output, &diag->message_);
+  if (self->colored_)
+    {
+      String_push_cstring (&output, ESC_DEFAULT);
+    }
   String_push_cstring (&output, "\n");
   for (const SpanInfo *span_info = Vec_SpanInfo_cbegin (&diag->span_infos_);
        span_info < Vec_SpanInfo_cend (&diag->span_infos_); span_info++)

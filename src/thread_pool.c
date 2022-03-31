@@ -101,8 +101,6 @@ ThreadPool_new (size_t num_threads)
         {
           abort ();
         }
-      ThreadPoolData_lock (data);
-      ThreadPoolData_unlock (data);
     }
   return (ThreadPool){ .num_threads_ = num_threads, .data_ = data };
 }
