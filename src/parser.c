@@ -32,12 +32,6 @@ Parser_end_pos (const Parser *self)
   return String_cend (SourceFile_get_content (self->diag_mgr_->file_));
 }
 
-static bool
-Parser_ended (const Parser *self)
-{
-  return self->cursor_ >= Vec_Token_cend (self->tokens_);
-}
-
 Span
 Parser_end_span (const Parser *self)
 {
@@ -47,10 +41,6 @@ Parser_end_span (const Parser *self)
 static bool
 Parser_seeing (const Parser *self, enum TokenKind kind)
 {
-  if (Parser_ended (self))
-    {
-      return false;
-    }
   if (self->cursor_->kind_ == kind)
     {
       return true;
@@ -67,12 +57,6 @@ Parser_skip (Parser *self, size_t count)
 static bool
 Parser_expect (Parser *self, enum TokenKind kind)
 {
-  if (Parser_ended (self))
-    {
-      DiagnosticManager_diagnose_expected_token (self->diag_mgr_,
-                                                 Parser_end_span (self), kind);
-      return false;
-    }
   if (self->cursor_->kind_ == kind)
     {
       Parser_skip (self, 1);
@@ -109,17 +93,6 @@ Parser_parse_block (Parser *self)
   Vec_ASTNodeId exprs = Vec_ASTNodeId_new ();
   while (!Parser_seeing (self, TOKEN_RBRACE))
     {
-      if (Parser_ended (self))
-        {
-          enum TokenKind token_kind = TOKEN_RBRACE;
-          enum ASTKind node_kind = AST_EXPR;
-          DiagnosticManager_diagnose_expected_tokens_or_nodes (
-              self->diag_mgr_, Parser_end_span (self),
-              Array_TokenKind_new (&token_kind, 1),
-              Array_ASTKind_new (&node_kind, 1));
-          Vec_ASTNodeId_drop (&exprs);
-          return INVALID_AST_NODE_ID;
-        }
       if (Vec_ASTNodeId_is_empty (&exprs)
           || (self->cursor_ - 1)->kind_ == TOKEN_RBRACE)
         {
@@ -245,12 +218,6 @@ Parser_parse_if_then_else (Parser *self)
 static ASTNodeId
 Parser_parse_expr (Parser *self)
 {
-  if (Parser_ended (self))
-    {
-      DiagnosticManager_diagnose_expected_node (
-          self->diag_mgr_, Span_new (Parser_end_pos (self), 0), AST_EXPR);
-      return INVALID_AST_NODE_ID;
-    }
   switch (self->cursor_->kind_)
     {
     case TOKEN_INVALID:
@@ -294,7 +261,7 @@ ASTNodeId
 Parser_parse (Parser *self)
 {
   ASTNodeId id = Parser_parse_expr (self);
-  if (id && !Parser_ended (self))
+  if (id && !Token_is_eof (self->cursor_))
     {
       DiagnosticManager_diagnose_unexpected_token (self->diag_mgr_,
                                                    self->cursor_->span_);
@@ -323,12 +290,13 @@ ParserTest_init (ParserTest *self, const char *content)
   Span content_span = Span_from_string (SourceFile_get_content (&self->file_));
   Lexer lexer = Lexer_new (&content_span);
   self->tokens_ = Vec_Token_new ();
-  Option_Token opt_token = Lexer_next (&lexer);
-  while (Option_Token_is_some (&opt_token))
+  Token token;
+  do
     {
-      Vec_Token_push (&self->tokens_, Option_Token_unwrap (&opt_token));
-      opt_token = Lexer_next (&lexer);
+      token = Lexer_next (&lexer);
+      Vec_Token_push (&self->tokens_, token);
     }
+  while (!Token_is_eof (&token));
   self->ast_mgr_ = ASTNodeManager_new ();
   self->diag_mgr_ = DiagnosticManager_new (&self->file_);
   self->parser_

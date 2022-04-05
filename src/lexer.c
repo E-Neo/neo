@@ -160,7 +160,7 @@ Lexer_new (const Span *span)
   return (Lexer){ .span_ = *span, .cursor_ = Span_cbegin (span) };
 }
 
-Option_Token
+Token
 Lexer_next (Lexer *self)
 {
   Lexer_skip_whitespace_or_comments (self);
@@ -171,8 +171,8 @@ Lexer_next (Lexer *self)
     {                                                                         \
       token_begin = self->cursor_;                                            \
       Lexer_skip (self, skip_count);                                          \
-      return Option_Token_some ((Token){                                      \
-          .kind_ = TOKEN_##T, .span_ = Span_new (token_begin, skip_count) }); \
+      return (Token){ .kind_ = TOKEN_##T,                                     \
+                      .span_ = Span_new (token_begin, skip_count) };          \
     }
 #include "token_lit.def"
 #undef NEO_TOKEN_LIT
@@ -180,19 +180,18 @@ Lexer_next (Lexer *self)
     {
       token_begin = self->cursor_;
       Lexer_skip (self, skip_count);
-      return Option_Token_some ((Token){
-          .kind_ = TOKEN_NAME, .span_ = Span_new (token_begin, skip_count) });
+      return (Token){ .kind_ = TOKEN_NAME,
+                      .span_ = Span_new (token_begin, skip_count) };
     }
   if (self->cursor_ < Span_cend (&self->span_))
     {
       token_begin = self->cursor_;
       skip_count = Lexer_next_whitespace_or_comments (self);
       Lexer_skip (self, skip_count);
-      return Option_Token_some (
-          (Token){ .kind_ = TOKEN_INVALID,
-                   .span_ = Span_new (token_begin, skip_count) });
+      return (Token){ .kind_ = TOKEN_INVALID,
+                      .span_ = Span_new (token_begin, skip_count) };
     }
-  return Option_Token_none ();
+  return (Token){ .kind_ = TOKEN_EOF, .span_ = Span_new (self->cursor_, 0) };
 }
 
 #ifdef TESTS
@@ -204,12 +203,13 @@ lex_tokens (const char *content)
   Span span = Span_new (content, strlen (content));
   Lexer lexer = Lexer_new (&span);
   Vec_Token tokens = Vec_Token_new ();
-  Option_Token opt_token = Lexer_next (&lexer);
-  while (Option_Token_is_some (&opt_token))
+  Token token;
+  do
     {
-      Vec_Token_push (&tokens, Option_Token_unwrap (&opt_token));
-      opt_token = Lexer_next (&lexer);
+      token = Lexer_next (&lexer);
+      Vec_Token_push (&tokens, token);
     }
+  while (!Token_is_eof (&token));
   return tokens;
 }
 
@@ -237,7 +237,7 @@ NEO_TEST (test_seeing_token_lit_02)
 NEO_TEST (test_lex_true_00)
 {
   Vec_Token tokens = lex_tokens ("true");
-  ASSERT_U64_EQ (Vec_Token_len (&tokens), 1);
+  ASSERT_U64_EQ (Vec_Token_len (&tokens), 2);
   ASSERT_U64_EQ (Vec_Token_cbegin (&tokens)->kind_, TOKEN_TRUE);
   Vec_Token_drop (&tokens);
 }
@@ -245,7 +245,7 @@ NEO_TEST (test_lex_true_00)
 NEO_TEST (test_lex_true_01)
 {
   Vec_Token tokens = lex_tokens ("true false truetrue");
-  ASSERT_U64_EQ (Vec_Token_len (&tokens), 3);
+  ASSERT_U64_EQ (Vec_Token_len (&tokens), 4);
   ASSERT_U64_EQ (Vec_Token_cbegin (&tokens)[0].kind_, TOKEN_TRUE);
   ASSERT_U64_EQ (Vec_Token_cbegin (&tokens)[1].kind_, TOKEN_FALSE);
   ASSERT_U64_EQ (Vec_Token_cbegin (&tokens)[2].kind_, TOKEN_NAME);

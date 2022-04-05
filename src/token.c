@@ -3,10 +3,14 @@
 #include "token.h"
 
 #include "array_macro.h"
-#include "option_macro.h"
 #include "vec_macro.h"
 
-NEO_IMPL_OPTION (Token, Token)
+NEO_IMPL_ARRAY (TokenKind, enum TokenKind)
+
 NEO_IMPL_VEC (Token, Token)
 
-NEO_IMPL_ARRAY (TokenKind, enum TokenKind)
+bool
+Token_is_eof (const Token *self)
+{
+  return self->kind_ == TOKEN_EOF;
+}

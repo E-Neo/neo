@@ -3,8 +3,9 @@
 #ifndef NEO_TOKEN_H
 #define NEO_TOKEN_H
 
+#include <stdbool.h>
+
 #include "array_macro.h"
-#include "option_macro.h"
 #include "span.h"
 #include "vec_macro.h"
 
@@ -26,7 +27,8 @@ typedef struct Token
   Span span_;
 } Token;
 
-NEO_DECL_OPTION (Token, Token)
 NEO_DECL_VEC (Token, Token)
+
+bool Token_is_eof (const Token *self);
 
 #endif

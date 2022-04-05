@@ -13,7 +13,7 @@ typedef struct Lexer
 } Lexer;
 
 Lexer Lexer_new (const Span *span);
-Option_Token Lexer_next (Lexer *self);
+Token Lexer_next (Lexer *self);
 
 #ifdef TESTS
 #include "test.h"

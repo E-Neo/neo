@@ -47,7 +47,8 @@ SourceFile_serialize_span (const SourceFile *self, const Span *span)
   String_push_string (&json, &begin_json);
   String_drop (&begin_json);
   String_push_cstring (&json, ",\"end\":");
-  Position end = SourceFile_lookup_position (self, Span_cend (span) - 1);
+  Position end = SourceFile_lookup_position (
+      self, Span_len (span) ? Span_cend (span) - 1 : Span_cend (span));
   String end_json = Position_serialize (&end);
   String_push_string (&json, &end_json);
   String_drop (&end_json);
@@ -151,16 +152,16 @@ main ()
           /* Lexical analysis: */
           Lexer lexer = Lexer_new (&span);
           Vec_Token tokens = Vec_Token_new ();
-          Option_Token opt_token = Lexer_next (&lexer);
           puts ("Tokens:");
-          while (Option_Token_is_some (&opt_token))
+          Token token;
+          do
             {
-              Token token = Option_Token_unwrap (&opt_token);
+              token = Lexer_next (&lexer);
               SourceFile_display_token (&file, &token);
               puts ("");
               Vec_Token_push (&tokens, token);
-              opt_token = Lexer_next (&lexer);
             }
+          while (!Token_is_eof (&token));
           DiagnosticManager diag_mgr = DiagnosticManager_new (&file);
           ASTNodeManager ast_mgr = ASTNodeManager_new ();
           Parser parser = Parser_new (&tokens, &diag_mgr, &ast_mgr);
