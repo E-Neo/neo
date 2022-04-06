@@ -1,4 +1,4 @@
-CC = gcc -std=c17
+CC = gcc -std=c11
 CFLAGS = -Wall -Wextra
 
 MKDIR = mkdir -p

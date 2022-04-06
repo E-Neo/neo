@@ -59,12 +59,35 @@ Parser_expect (Parser *self, enum TokenKind kind)
 {
   if (self->cursor_->kind_ == kind)
     {
-      Parser_skip (self, 1);
       return true;
     }
   DiagnosticManager_diagnose_expected_token (self->diag_mgr_,
                                              self->cursor_->span_, kind);
   return false;
+}
+
+static bool
+Parser_expect_and_skip (Parser *self, enum TokenKind kind)
+{
+  if (Parser_expect (self, kind))
+    {
+      Parser_skip (self, 1);
+      return true;
+    }
+  return false;
+}
+
+static ASTNodeId
+Parser_parse_pattern (Parser *self)
+{
+  if (!Parser_expect (self, TOKEN_NAME))
+    {
+      return INVALID_AST_NODE_ID;
+    }
+  ASTNodeId pattern = ASTNodeManager_push_identifier_pattern (
+      self->ast_mgr_, self->cursor_->span_);
+  Parser_skip (self, 1);
+  return pattern;
 }
 
 static ASTNodeId Parser_parse_expr (Parser *self);
@@ -86,7 +109,7 @@ static ASTNodeId
 Parser_parse_block (Parser *self)
 {
   const char *span_begin = Span_cbegin (&self->cursor_->span_);
-  if (!Parser_expect (self, TOKEN_LBRACE))
+  if (!Parser_expect_and_skip (self, TOKEN_LBRACE))
     {
       return INVALID_AST_NODE_ID;
     }
@@ -106,7 +129,7 @@ Parser_parse_block (Parser *self)
         }
       else
         {
-          if (!Parser_expect (self, TOKEN_SEMICOLON))
+          if (!Parser_expect_and_skip (self, TOKEN_SEMICOLON))
             {
               Vec_ASTNodeId_drop (&exprs);
               return INVALID_AST_NODE_ID;
@@ -167,7 +190,7 @@ Parser_parse_if_then_else_without_first_token (Parser *self,
   if (Parser_seeing (self, TOKEN_ELIF))
     {
       const char *elif_begin = Span_cbegin (&self->cursor_->span_);
-      if (!Parser_expect (self, TOKEN_ELIF))
+      if (!Parser_expect_and_skip (self, TOKEN_ELIF))
         {
           return INVALID_AST_NODE_ID;
         }
@@ -196,7 +219,7 @@ Parser_parse_if_then_else_without_first_token (Parser *self,
                         0),
               Vec_ASTNodeId_new ()));
     }
-  if (!Parser_expect (self, TOKEN_ELSE))
+  if (!Parser_expect_and_skip (self, TOKEN_ELSE))
     {
       return INVALID_AST_NODE_ID;
     }
@@ -208,11 +231,54 @@ static ASTNodeId
 Parser_parse_if_then_else (Parser *self)
 {
   const char *span_begin = Span_cbegin (&self->cursor_->span_);
-  if (!Parser_expect (self, TOKEN_IF))
+  if (!Parser_expect_and_skip (self, TOKEN_IF))
     {
       return INVALID_AST_NODE_ID;
     }
   return Parser_parse_if_then_else_without_first_token (self, span_begin);
+}
+
+static ASTNodeId
+Parser_parse_let (Parser *self)
+{
+  const char *span_begin = Span_cbegin (&self->cursor_->span_);
+  if (!Parser_expect_and_skip (self, TOKEN_LET))
+    {
+      return INVALID_AST_NODE_ID;
+    }
+  ASTNodeId pattern = Parser_parse_pattern (self);
+  if (!pattern)
+    {
+      return INVALID_AST_NODE_ID;
+    }
+  if (!Parser_expect_and_skip (self, TOKEN_EQ))
+    {
+      return INVALID_AST_NODE_ID;
+    }
+  ASTNodeId expr = Parser_parse_expr (self);
+  if (!expr)
+    {
+      return INVALID_AST_NODE_ID;
+    }
+  return ASTNodeManager_push_let (
+      self->ast_mgr_,
+      Span_new (span_begin,
+                Span_cend (ASTNodeManager_get_span (self->ast_mgr_, expr))
+                    - span_begin),
+      pattern, expr);
+}
+
+static ASTNodeId
+Parser_parse_var (Parser *self)
+{
+  if (!Parser_expect (self, TOKEN_NAME))
+    {
+      return INVALID_AST_NODE_ID;
+    }
+  ASTNodeId var
+      = ASTNodeManager_push_var (self->ast_mgr_, self->cursor_->span_);
+  Parser_skip (self, 1);
+  return var;
 }
 
 static ASTNodeId
@@ -247,6 +313,14 @@ Parser_parse_expr (Parser *self)
     case TOKEN_IF:
       {
         return Parser_parse_if_then_else (self);
+      }
+    case TOKEN_LET:
+      {
+        return Parser_parse_let (self);
+      }
+    case TOKEN_NAME:
+      {
+        return Parser_parse_var (self);
       }
     default:
       {
@@ -391,6 +465,27 @@ NEO_TEST (test_parse_if_02)
   ParserTest_drop (&parser_test);
 }
 
+NEO_TEST (test_parse_let_identifier_00)
+{
+  ParserTest parser_test;
+  ParserTest_init (&parser_test, "let x = true");
+  ASSERT_U64_EQ (DiagnosticManager_num_total (
+                     ParserTest_get_diagnostic_manager (&parser_test)),
+                 0);
+  ParserTest_drop (&parser_test);
+}
+
+NEO_TEST (test_parse_let_identifier_01)
+{
+  ParserTest parser_test;
+  ParserTest_init (&parser_test, "let x = if true { true } else { false }");
+  ASSERT_U64_EQ (DiagnosticManager_num_total (
+                     ParserTest_get_diagnostic_manager (&parser_test)),
+                 0);
+  ParserTest_drop (&parser_test);
+}
+
 NEO_TESTS (parser_tests, test_parse_true_00, test_parse_true_01,
-           test_parse_if_00, test_parse_if_01, test_parse_if_02)
+           test_parse_if_00, test_parse_if_01, test_parse_if_02,
+           test_parse_let_identifier_00, test_parse_let_identifier_01)
 #endif

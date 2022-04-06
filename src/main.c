@@ -145,8 +145,8 @@ main ()
       String_push (&input_buf, ch);
       if (ch == '\n')
         {
-          Span span
-              = Span_new (String_cbegin (&input_buf), String_len (&input_buf));
+          Span span = Span_new (String_cbegin (&input_buf),
+                                String_len (&input_buf) - 1);
           SourceFile file
               = SourceFile_new (String_from_cstring ("<stdio>"), input_buf);
           /* Lexical analysis: */

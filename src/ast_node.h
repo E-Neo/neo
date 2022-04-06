@@ -36,6 +36,12 @@ typedef struct ASTIfThenElse
   ASTNodeId else_block_;
 } ASTIfThenElse;
 
+typedef struct ASTLet
+{
+  ASTNodeId pattern_;
+  ASTNodeId expr_;
+} ASTLet;
+
 typedef struct ASTNode
 {
   enum ASTKind kind_;
@@ -44,6 +50,7 @@ typedef struct ASTNode
   {
     ASTBlock block_;
     ASTIfThenElse if_then_else_;
+    ASTLet let_;
   };
 } ASTNode;
 
@@ -60,6 +67,8 @@ ASTNodeId ASTNodeManager_get_id (const ASTNodeManager *self,
 const Span *ASTNodeManager_get_span (const ASTNodeManager *self, ASTNodeId id);
 ASTNodeId ASTNodeManager_push_invalid (ASTNodeManager *self);
 ASTNodeId ASTNodeManager_push_void (ASTNodeManager *self, Span span);
+ASTNodeId ASTNodeManager_push_identifier_pattern (ASTNodeManager *self,
+                                                  Span span);
 ASTNodeId ASTNodeManager_push_lit (ASTNodeManager *self, Span span,
                                    enum ASTKind kind);
 ASTNodeId ASTNodeManager_push_block (ASTNodeManager *self, Span span,
@@ -68,5 +77,8 @@ ASTNodeId ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
                                             ASTNodeId if_expr,
                                             ASTNodeId then_block,
                                             ASTNodeId else_block);
+ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
+                                   ASTNodeId pattern, ASTNodeId expr);
+ASTNodeId ASTNodeManager_push_var (ASTNodeManager *self, Span span);
 
 #endif
