@@ -1,0 +1,10 @@
+/* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
+
+/* UNKNOWN must be the zeroth.  */
+NEO_TYPEKIND(UNKNOWN, Unknown)
+
+NEO_TYPEKIND(INVALID, Invalid)
+
+NEO_TYPEKIND(VOID, Void)
+NEO_TYPEKIND(TRUE, True)
+NEO_TYPEKIND(FALSE, False)

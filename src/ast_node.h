@@ -64,6 +64,8 @@ void ASTNodeManager_drop (ASTNodeManager *self);
 const Vec_ASTNode *ASTNodeManager_get_nodes (const ASTNodeManager *self);
 ASTNodeId ASTNodeManager_get_id (const ASTNodeManager *self,
                                  const ASTNode *node);
+const ASTNode *ASTNodeManager_get_node (const ASTNodeManager *self,
+                                        ASTNodeId id);
 const Span *ASTNodeManager_get_span (const ASTNodeManager *self, ASTNodeId id);
 ASTNodeId ASTNodeManager_push_invalid (ASTNodeManager *self);
 ASTNodeId ASTNodeManager_push_void (ASTNodeManager *self, Span span);

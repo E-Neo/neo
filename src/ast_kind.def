@@ -1,6 +1,8 @@
 /* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
 
+/* INVALID must be the zeroth.  */
 NEO_ASTKIND(INVALID, invalid)
+
 NEO_ASTKIND(VOID, void)
 NEO_ASTKIND(PATTERN, pattern)
   NEO_ASTKIND(IDENTIFIER_PATTERN, identifier_pattern)

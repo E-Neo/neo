@@ -53,6 +53,13 @@ ASTNodeManager_get_id (const ASTNodeManager *self, const ASTNode *node)
   return node - Vec_ASTNode_cbegin (&self->nodes_);
 }
 
+const ASTNode *
+ASTNodeManager_get_node (const ASTNodeManager *self, ASTNodeId id)
+{
+  assert (id < Vec_ASTNode_len (&self->nodes_));
+  return Vec_ASTNode_cbegin (&self->nodes_) + id;
+}
+
 const Span *
 ASTNodeManager_get_span (const ASTNodeManager *self, ASTNodeId id)
 {

@@ -2,6 +2,7 @@
 
 #include "span.h"
 
+#include <assert.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -166,6 +167,7 @@ SourceFile_lookup_position (const SourceFile *self, const char *pos)
 Span
 SourceFile_get_line (const SourceFile *self, size_t line)
 {
+  assert (line);
   const char *begin = Vec_const_char_ptr_cbegin (&self->lines_)[line - 1];
   const char *end = line >= Vec_const_char_ptr_len (&self->lines_)
                         ? String_cend (&self->content_)

@@ -75,5 +75,7 @@ void DiagnosticManager_diagnose_expected_node (DiagnosticManager *self,
                                                Span span, enum ASTKind node);
 void DiagnosticManager_diagnose_unexpected_token (DiagnosticManager *self,
                                                   Span span);
+void DiagnosticManager_diagnose_invalid_type (DiagnosticManager *self,
+                                              Span span);
 
 #endif

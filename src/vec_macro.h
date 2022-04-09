@@ -34,6 +34,7 @@
   void Vec_##N##_push_uninit (Vec_##N *self);                                 \
   void Vec_##N##_push (Vec_##N *self, T value);                               \
   T Vec_##N##_pop (Vec_##N *self);                                            \
+  void Vec_##N##_resize (Vec_##N *self, size_t new_len, T value);             \
   void Vec_##N##_clear (Vec_##N *self);
 
 #define NEO_IMPL_VEC(N, T)                                                    \
@@ -149,6 +150,20 @@
   {                                                                           \
     self->end_--;                                                             \
     return *self->end_;                                                       \
+  }                                                                           \
+                                                                              \
+  void Vec_##N##_resize (Vec_##N *self, size_t new_len, T value)              \
+  {                                                                           \
+    size_t old_len = Vec_##N##_len (self);                                    \
+    if (new_len <= old_len)                                                   \
+      {                                                                       \
+        return;                                                               \
+      }                                                                       \
+    Vec_##N##_reserve (self, new_len - old_len);                              \
+    for (size_t i = 0; i < new_len - old_len; i++)                            \
+      {                                                                       \
+        Vec_##N##_push (self, value);                                         \
+      }                                                                       \
   }                                                                           \
                                                                               \
   void Vec_##N##_clear (Vec_##N *self) { self->end_ = self->begin_; }

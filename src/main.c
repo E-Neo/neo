@@ -9,6 +9,8 @@
 #include "span.h"
 #include "string.h"
 #include "token.h"
+#include "type.h"
+#include "type_checker.h"
 #include "vec.h"
 
 #define INTEGER_BUFFER_SIZE (64)
@@ -133,6 +135,30 @@ ASTNodeManager_display (const ASTNodeManager *ast_mgr)
     }
 }
 
+static void
+Type_display (const Type *self)
+{
+  switch (self->kind_)
+    {
+#define NEO_TYPEKIND(NAME, L)                                                 \
+  case TYPE_##NAME:                                                           \
+    {                                                                         \
+      printf ("%s", #L);                                                      \
+      break;                                                                  \
+    }
+#include "type_kind.def"
+#undef NEO_TYPEKIND
+    }
+}
+
+static void
+TypeChecker_display_type (const TypeChecker *self, TypeId type_id)
+{
+  printf ("Type: ");
+  Type_display (TypeManager_get_type (&self->type_mgr_, type_id));
+  puts ("");
+}
+
 int
 main ()
 {
@@ -165,10 +191,18 @@ main ()
           DiagnosticManager diag_mgr = DiagnosticManager_new (&file);
           ASTNodeManager ast_mgr = ASTNodeManager_new ();
           Parser parser = Parser_new (&tokens, &diag_mgr, &ast_mgr);
-          printf ("ASTNodeId = %u\n", Parser_parse (&parser));
+          ASTNodeId node_id = Parser_parse (&parser);
+          printf ("ASTNodeId = %u\n", node_id);
           Vec_Token_drop (&tokens);
           puts ("AST Nodes:");
           ASTNodeManager_display (&ast_mgr);
+          if (node_id)
+            {
+              TypeChecker type_checker = TypeChecker_new (&ast_mgr, &diag_mgr);
+              TypeChecker_display_type (
+                  &type_checker, TypeChecker_typeof (&type_checker, node_id));
+              TypeChecker_drop (&type_checker);
+            }
           ASTNodeManager_drop (&ast_mgr);
           DiagnosticManager_drop (&diag_mgr);
           /* Clear input buffer and print prompt: */

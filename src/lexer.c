@@ -10,6 +10,8 @@
 #include "span.h"
 #include "token.h"
 
+#define NEO_COMMENT_TOKEN (TOKEN_DOUBLE_SLASH)
+
 static bool
 is_newline (char c)
 {
@@ -59,7 +61,8 @@ is_terminal (char c)
 }
 
 static size_t
-Lexer_seeing_token_lit (const Lexer *self, enum TokenKind kind)
+Lexer_seeing_token_lit_at (const Lexer *self, const char *cursor,
+                           enum TokenKind kind)
 {
   switch (kind)
     {
@@ -69,9 +72,9 @@ Lexer_seeing_token_lit (const Lexer *self, enum TokenKind kind)
       const char token[] = L;                                                 \
       size_t token_len = sizeof (token) - 1;                                  \
       assert (token_len > 0);                                                 \
-      const char *token_end = self->cursor_ + token_len;                      \
+      const char *token_end = cursor + token_len;                             \
       if (token_end > Span_cend (&self->span_)                                \
-          || memcmp (self->cursor_, token, token_len))                        \
+          || memcmp (cursor, token, token_len))                               \
         {                                                                     \
           return 0;                                                           \
         }                                                                     \
@@ -88,6 +91,12 @@ Lexer_seeing_token_lit (const Lexer *self, enum TokenKind kind)
     default:
       return 0;
     }
+}
+
+static size_t
+Lexer_seeing_token_lit (const Lexer *self, enum TokenKind kind)
+{
+  return Lexer_seeing_token_lit_at (self, self->cursor_, kind);
 }
 
 static size_t
@@ -124,17 +133,21 @@ Lexer_skip_whitespace_or_comments (Lexer *self)
         {
           Lexer_skip (self, 1);
         }
-      else if (*self->cursor_ == '#')
-        {
-          Lexer_skip (self, 1);
-          while (!is_newline (*self->cursor_))
-            {
-              Lexer_skip (self, 1);
-            }
-        }
       else
         {
-          break;
+          size_t skip_count = Lexer_seeing_token_lit (self, NEO_COMMENT_TOKEN);
+          if (skip_count)
+            {
+              Lexer_skip (self, skip_count);
+              while (!is_newline (*self->cursor_))
+                {
+                  Lexer_skip (self, 1);
+                }
+            }
+          else
+            {
+              break;
+            }
         }
     }
 }
@@ -145,7 +158,8 @@ Lexer_next_whitespace_or_comments (Lexer *self)
   const char *cursor = self->cursor_;
   while (cursor < Span_cend (&self->span_))
     {
-      if (is_whitespace (*cursor) || *cursor == '#')
+      if (is_whitespace (*cursor)
+          || Lexer_seeing_token_lit_at (self, cursor, NEO_COMMENT_TOKEN))
         {
           break;
         }

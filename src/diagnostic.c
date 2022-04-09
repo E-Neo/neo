@@ -199,6 +199,10 @@ DiagnosticManager_fmt_span_info (const DiagnosticManager *self,
   Position end_pos = SourceFile_lookup_position (
       file, Span_len (span) ? Span_cend (span) - 1 : Span_cend (span));
   size_t begin_pos_line = Position_get_line (&begin_pos);
+  if (!begin_pos_line)
+    {
+      return output;
+    }
   size_t begin_pos_column = Position_get_column (&begin_pos);
   size_t end_pos_line = Position_get_line (&end_pos);
   assert (begin_pos_line == end_pos_line);
@@ -409,6 +413,19 @@ DiagnosticManager_diagnose_unexpected_token (DiagnosticManager *self,
 {
   Diagnostic diag = Diagnostic_new (DIAGNOSTIC_UNEXPECTED_TOKEN, span);
   String message = String_from_cstring ("unexpected token: ");
+  String span_output = Span_fmt (&span);
+  String_push_string (&message, &span_output);
+  String_drop (&span_output);
+  Diagnostic_set_message (&diag, message);
+  DiagnosticId id = DiagnosticManager_push (self, diag);
+  DiagnosticManager_display (self, id);
+}
+
+void
+DiagnosticManager_diagnose_invalid_type (DiagnosticManager *self, Span span)
+{
+  Diagnostic diag = Diagnostic_new (DIAGNOSTIC_INVALID_TYPE, span);
+  String message = String_from_cstring ("invalid type: ");
   String span_output = Span_fmt (&span);
   String_push_string (&message, &span_output);
   String_drop (&span_output);
