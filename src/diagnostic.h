@@ -77,5 +77,7 @@ void DiagnosticManager_diagnose_unexpected_token (DiagnosticManager *self,
                                                   Span span);
 void DiagnosticManager_diagnose_invalid_type (DiagnosticManager *self,
                                               Span span);
+void DiagnosticManager_diagnose_if_expr_not_bool (DiagnosticManager *self,
+                                                  Span span, String type);
 
 #endif

@@ -148,6 +148,11 @@ Type_display (const Type *self)
     }
 #include "type_kind.def"
 #undef NEO_TYPEKIND
+    default:
+      {
+        printf ("Advanced type");
+        break;
+      }
     }
 }
 

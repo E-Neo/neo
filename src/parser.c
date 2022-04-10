@@ -420,6 +420,17 @@ NEO_TEST (test_parse_true_01)
   ParserTest_drop (&parser_test);
 }
 
+NEO_TEST (test_parse_block_00)
+{
+  ParserTest parser_test;
+  ParserTest_init (&parser_test, "{ true; if true {} false}");
+  Parser_parse (ParserTest_borrow_parser (&parser_test));
+  ASSERT_U64_EQ (DiagnosticManager_num_total (
+                     ParserTest_get_diagnostic_manager (&parser_test)),
+                 0);
+  ParserTest_drop (&parser_test);
+}
+
 NEO_TEST (test_parse_if_00)
 {
   ParserTest parser_test;
@@ -469,6 +480,7 @@ NEO_TEST (test_parse_let_identifier_00)
 {
   ParserTest parser_test;
   ParserTest_init (&parser_test, "let x = true");
+  Parser_parse (ParserTest_borrow_parser (&parser_test));
   ASSERT_U64_EQ (DiagnosticManager_num_total (
                      ParserTest_get_diagnostic_manager (&parser_test)),
                  0);
@@ -479,6 +491,7 @@ NEO_TEST (test_parse_let_identifier_01)
 {
   ParserTest parser_test;
   ParserTest_init (&parser_test, "let x = if true { true } else { false }");
+  Parser_parse (ParserTest_borrow_parser (&parser_test));
   ASSERT_U64_EQ (DiagnosticManager_num_total (
                      ParserTest_get_diagnostic_manager (&parser_test)),
                  0);
@@ -486,6 +499,7 @@ NEO_TEST (test_parse_let_identifier_01)
 }
 
 NEO_TESTS (parser_tests, test_parse_true_00, test_parse_true_01,
-           test_parse_if_00, test_parse_if_01, test_parse_if_02,
-           test_parse_let_identifier_00, test_parse_let_identifier_01)
+           test_parse_block_00, test_parse_if_00, test_parse_if_01,
+           test_parse_if_02, test_parse_let_identifier_00,
+           test_parse_let_identifier_01)
 #endif

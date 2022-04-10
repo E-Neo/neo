@@ -9,5 +9,8 @@ NEO_PUSH_TESTS(lexer_tests)
 #include "parser.h"
 NEO_PUSH_TESTS(parser_tests)
 
+#include "type.h"
+NEO_PUSH_TESTS(type_tests)
+
 #include "type_checker.h"
 NEO_PUSH_TESTS(type_checker_tests)

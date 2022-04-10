@@ -49,6 +49,13 @@ SpanInfo_drop (SpanInfo *self)
   String_drop (&self->label_);
 }
 
+static void
+SpanInfo_set_label (SpanInfo *self, String label)
+{
+  String_drop (&self->label_);
+  self->label_ = label;
+}
+
 static Diagnostic
 Diagnostic_new (enum DiagnosticName name, Span span)
 {
@@ -89,6 +96,14 @@ Diagnostic_set_message (Diagnostic *self, String message)
 {
   String_drop (&self->message_);
   self->message_ = message;
+}
+
+static void
+Diagnostic_set_span_info_label (Diagnostic *self, size_t span_info_id,
+                                String label)
+{
+  assert (span_info_id < Vec_SpanInfo_len (&self->span_infos_));
+  SpanInfo_set_label (Vec_SpanInfo_begin (&self->span_infos_), label);
 }
 
 DiagnosticManager
@@ -242,6 +257,11 @@ DiagnosticManager_fmt_span_info (const DiagnosticManager *self,
   String_push_repeat (&output, ' ', begin_pos_column + 1);
   String_push_cstring_repeat (&output, caret_to_cstring (self->colored_),
                               Span_len (span) ? Span_len (span) : 1);
+  if (String_len (&span_info->label_))
+    {
+      String_push (&output, ' ');
+      String_push_string (&output, &span_info->label_);
+    }
   String_push (&output, '\n');
   return output;
 }
@@ -430,6 +450,26 @@ DiagnosticManager_diagnose_invalid_type (DiagnosticManager *self, Span span)
   String_push_string (&message, &span_output);
   String_drop (&span_output);
   Diagnostic_set_message (&diag, message);
+  DiagnosticId id = DiagnosticManager_push (self, diag);
+  DiagnosticManager_display (self, id);
+}
+
+void
+DiagnosticManager_diagnose_if_expr_not_bool (DiagnosticManager *self,
+                                             Span span, String type)
+{
+  Diagnostic diag = Diagnostic_new (DIAGNOSTIC_INVALID_TYPE, span);
+  String message
+      = String_from_cstring ("condition is not a subtype of Bool: ");
+  String span_output = Span_fmt (&span);
+  String_push_string (&message, &span_output);
+  String_drop (&span_output);
+  Diagnostic_set_message (&diag, message);
+  String label = String_from_cstring ("is of type `");
+  String_push_string (&label, &type);
+  String_push (&label, '`');
+  String_drop (&type);
+  Diagnostic_set_span_info_label (&diag, 0, label);
   DiagnosticId id = DiagnosticManager_push (self, diag);
   DiagnosticManager_display (self, id);
 }
