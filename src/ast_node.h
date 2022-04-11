@@ -24,22 +24,19 @@ enum ASTKind
 
 NEO_DECL_ARRAY (ASTKind, enum ASTKind)
 
-typedef struct ASTBlock
-{
-  Vec_ASTNodeId exprs_;
-} ASTBlock;
-
 typedef struct ASTIfThenElse
 {
   ASTNodeId if_expr_;
-  ASTNodeId then_block_;
-  ASTNodeId else_block_;
+  ASTNodeId then_expr_;
+  ASTNodeId else_expr_;
 } ASTIfThenElse;
 
 typedef struct ASTLet
 {
-  ASTNodeId pattern_;
+  ASTNodeId var_;
+  ASTNodeId type_;
   ASTNodeId expr_;
+  ASTNodeId body_;
 } ASTLet;
 
 typedef struct ASTNode
@@ -48,7 +45,6 @@ typedef struct ASTNode
   Span span_;
   union
   {
-    ASTBlock block_;
     ASTIfThenElse if_then_else_;
     ASTLet let_;
   };
@@ -68,19 +64,16 @@ const ASTNode *ASTNodeManager_get_node (const ASTNodeManager *self,
                                         ASTNodeId id);
 const Span *ASTNodeManager_get_span (const ASTNodeManager *self, ASTNodeId id);
 ASTNodeId ASTNodeManager_push_invalid (ASTNodeManager *self);
-ASTNodeId ASTNodeManager_push_void (ASTNodeManager *self, Span span);
-ASTNodeId ASTNodeManager_push_identifier_pattern (ASTNodeManager *self,
-                                                  Span span);
 ASTNodeId ASTNodeManager_push_lit (ASTNodeManager *self, Span span,
                                    enum ASTKind kind);
-ASTNodeId ASTNodeManager_push_block (ASTNodeManager *self, Span span,
-                                     Vec_ASTNodeId exprs);
 ASTNodeId ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
                                             ASTNodeId if_expr,
-                                            ASTNodeId then_block,
-                                            ASTNodeId else_block);
-ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
-                                   ASTNodeId pattern, ASTNodeId expr);
+                                            ASTNodeId then_expr,
+                                            ASTNodeId else_expr);
 ASTNodeId ASTNodeManager_push_var (ASTNodeManager *self, Span span);
+ASTNodeId ASTNodeManager_push_type (ASTNodeManager *self, Span span);
+ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
+                                   ASTNodeId var, ASTNodeId type,
+                                   ASTNodeId expr, ASTNodeId body);
 
 #endif

@@ -9,8 +9,6 @@
 #include "span.h"
 #include "string.h"
 #include "token.h"
-#include "type.h"
-#include "type_checker.h"
 #include "vec.h"
 
 #define INTEGER_BUFFER_SIZE (64)
@@ -114,8 +112,8 @@ ASTNode_display (const ASTNodeManager *ast_mgr, const ASTNode *node)
     case AST_IF_THEN_ELSE:
       {
         printf (",\"if_expr\":%u,\"then_expr\":%u,\"else_expr\":%u",
-                node->if_then_else_.if_expr_, node->if_then_else_.then_block_,
-                node->if_then_else_.else_block_);
+                node->if_then_else_.if_expr_, node->if_then_else_.then_expr_,
+                node->if_then_else_.else_expr_);
       }
     default:
       break;
@@ -133,35 +131,6 @@ ASTNodeManager_display (const ASTNodeManager *ast_mgr)
       ASTNode_display (ast_mgr, node);
       puts ("");
     }
-}
-
-static void
-Type_display (const Type *self)
-{
-  switch (self->kind_)
-    {
-#define NEO_TYPEKIND(NAME, L)                                                 \
-  case TYPE_##NAME:                                                           \
-    {                                                                         \
-      printf ("%s", #L);                                                      \
-      break;                                                                  \
-    }
-#include "type_kind.def"
-#undef NEO_TYPEKIND
-    default:
-      {
-        printf ("Advanced type");
-        break;
-      }
-    }
-}
-
-static void
-TypeChecker_display_type (const TypeChecker *self, TypeId type_id)
-{
-  printf ("Type: ");
-  Type_display (TypeManager_get_type (&self->type_mgr_, type_id));
-  puts ("");
 }
 
 int
@@ -201,13 +170,6 @@ main ()
           Vec_Token_drop (&tokens);
           puts ("AST Nodes:");
           ASTNodeManager_display (&ast_mgr);
-          if (node_id)
-            {
-              TypeChecker type_checker = TypeChecker_new (&ast_mgr, &diag_mgr);
-              TypeChecker_display_type (
-                  &type_checker, TypeChecker_typeof (&type_checker, node_id));
-              TypeChecker_drop (&type_checker);
-            }
           ASTNodeManager_drop (&ast_mgr);
           DiagnosticManager_drop (&diag_mgr);
           /* Clear input buffer and print prompt: */

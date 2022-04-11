@@ -3,13 +3,10 @@
 /* INVALID must be the zeroth.  */
 NEO_ASTKIND(INVALID, invalid)
 
-NEO_ASTKIND(VOID, void)
-NEO_ASTKIND(PATTERN, pattern)
-  NEO_ASTKIND(IDENTIFIER_PATTERN, identifier_pattern)
 NEO_ASTKIND(EXPR, expr)
   NEO_ASTKIND(LIT_TRUE, literal_true)
   NEO_ASTKIND(LIT_FALSE, literal_false)
-  NEO_ASTKIND(BLOCK, block)
   NEO_ASTKIND(IF_THEN_ELSE, if_then_else)
   NEO_ASTKIND(LET, let)
   NEO_ASTKIND(VAR, var)
+NEO_ASTKIND(TYPE, type)

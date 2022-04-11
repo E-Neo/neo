@@ -22,20 +22,6 @@ ASTNodeManager_new ()
 void
 ASTNodeManager_drop (ASTNodeManager *self)
 {
-  for (ASTNode *node = Vec_ASTNode_begin (&self->nodes_);
-       node < Vec_ASTNode_end (&self->nodes_); node++)
-    {
-      switch (node->kind_)
-        {
-        case AST_BLOCK:
-          {
-            Vec_ASTNodeId_drop (&node->block_.exprs_);
-            break;
-          }
-        default:
-          break;
-        }
-    }
   Vec_ASTNode_drop (&self->nodes_);
 }
 
@@ -82,24 +68,6 @@ ASTNodeManager_push_invalid (ASTNodeManager *self)
 }
 
 ASTNodeId
-ASTNodeManager_push_void (ASTNodeManager *self, Span span)
-{
-  ASTNodeId id = ASTNodeManager_get_next_id (self);
-  Vec_ASTNode_push (&self->nodes_,
-                    (ASTNode){ .kind_ = AST_VOID, .span_ = span });
-  return id;
-}
-
-ASTNodeId
-ASTNodeManager_push_identifier_pattern (ASTNodeManager *self, Span span)
-{
-  ASTNodeId id = ASTNodeManager_get_next_id (self);
-  Vec_ASTNode_push (&self->nodes_, (ASTNode){ .kind_ = AST_IDENTIFIER_PATTERN,
-                                              .span_ = span });
-  return id;
-}
-
-ASTNodeId
 ASTNodeManager_push_lit (ASTNodeManager *self, Span span, enum ASTKind kind)
 {
   ASTNodeId id = ASTNodeManager_get_next_id (self);
@@ -111,43 +79,17 @@ ASTNodeManager_push_lit (ASTNodeManager *self, Span span, enum ASTKind kind)
 }
 
 ASTNodeId
-ASTNodeManager_push_block (ASTNodeManager *self, Span span,
-                           Vec_ASTNodeId exprs)
-{
-  ASTNodeId id = ASTNodeManager_get_next_id (self);
-  Vec_ASTNode_push (&self->nodes_,
-                    (ASTNode){ .kind_ = AST_BLOCK,
-                               .span_ = span,
-                               .block_ = (ASTBlock){ .exprs_ = exprs } });
-  return id;
-}
-
-ASTNodeId
 ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
-                                  ASTNodeId if_expr, ASTNodeId then_block,
-                                  ASTNodeId else_block)
+                                  ASTNodeId if_expr, ASTNodeId then_expr,
+                                  ASTNodeId else_expr)
 {
   ASTNodeId id = ASTNodeManager_get_next_id (self);
-  Vec_ASTNode_push (&self->nodes_,
-                    (ASTNode){ .kind_ = AST_IF_THEN_ELSE,
-                               .span_ = span,
-                               .if_then_else_ = (ASTIfThenElse){
-                                   .if_expr_ = if_expr,
-                                   .then_block_ = then_block,
-                                   .else_block_ = else_block } });
-  return id;
-}
-
-ASTNodeId
-ASTNodeManager_push_let (ASTNodeManager *self, Span span, ASTNodeId pattern,
-                         ASTNodeId expr)
-{
-  ASTNodeId id = ASTNodeManager_get_next_id (self);
-  Vec_ASTNode_push (
-      &self->nodes_,
-      (ASTNode){ .kind_ = AST_LET,
-                 .span_ = span,
-                 .let_ = (ASTLet){ .pattern_ = pattern, .expr_ = expr } });
+  Vec_ASTNode_push (&self->nodes_, (ASTNode){ .kind_ = AST_IF_THEN_ELSE,
+                                              .span_ = span,
+                                              .if_then_else_ = (ASTIfThenElse){
+                                                  .if_expr_ = if_expr,
+                                                  .then_expr_ = then_expr,
+                                                  .else_expr_ = else_expr } });
   return id;
 }
 
@@ -157,5 +99,29 @@ ASTNodeManager_push_var (ASTNodeManager *self, Span span)
   ASTNodeId id = ASTNodeManager_get_next_id (self);
   Vec_ASTNode_push (&self->nodes_,
                     (ASTNode){ .kind_ = AST_VAR, .span_ = span });
+  return id;
+}
+
+ASTNodeId
+ASTNodeManager_push_type (ASTNodeManager *self, Span span)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (&self->nodes_,
+                    (ASTNode){ .kind_ = AST_TYPE, .span_ = span });
+  return id;
+}
+
+ASTNodeId
+ASTNodeManager_push_let (ASTNodeManager *self, Span span, ASTNodeId var,
+                         ASTNodeId type, ASTNodeId expr, ASTNodeId body)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (&self->nodes_,
+                    (ASTNode){ .kind_ = AST_LET,
+                               .span_ = span,
+                               .let_ = (ASTLet){ .var_ = var,
+                                                 .type_ = type,
+                                                 .expr_ = expr,
+                                                 .body_ = body } });
   return id;
 }
