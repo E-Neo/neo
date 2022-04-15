@@ -20,6 +20,7 @@ Span Span_from_cstring (const char *str);
 const char *Span_cbegin (const Span *self);
 const char *Span_cend (const Span *self);
 size_t Span_len (const Span *self);
+int Span_cmp (const Span *self, const Span *other);
 int Span_cmp_cstring (const Span *self, const char *cstr);
 
 typedef struct Position

@@ -99,6 +99,12 @@ Diagnostic_set_message (Diagnostic *self, String message)
 }
 
 static void
+Diagnostic_push_span_info (Diagnostic *self, SpanInfo span_info)
+{
+  Vec_SpanInfo_push (&self->span_infos_, span_info);
+}
+
+static void
 Diagnostic_set_span_info_label (Diagnostic *self, size_t span_info_id,
                                 String label)
 {
@@ -470,6 +476,29 @@ DiagnosticManager_diagnose_if_expr_not_bool (DiagnosticManager *self,
   String_push (&label, '`');
   String_drop (&type);
   Diagnostic_set_span_info_label (&diag, 0, label);
+  DiagnosticId id = DiagnosticManager_push (self, diag);
+  DiagnosticManager_display (self, id);
+}
+
+void
+DiagnosticManager_diagnose_expr_types_not_equal (DiagnosticManager *self,
+                                                 Span span1, String type1,
+                                                 Span span2, String type2)
+{
+  Diagnostic diag = Diagnostic_new (DIAGNOSTIC_INVALID_TYPE, span1);
+  String message
+      = String_from_cstring ("types of then and else are not equal");
+  Diagnostic_set_message (&diag, message);
+  String then_label = String_from_cstring ("is of type `");
+  String_push_string (&then_label, &type1);
+  String_push (&then_label, '`');
+  String_drop (&type1);
+  Diagnostic_set_span_info_label (&diag, 0, then_label);
+  String else_label = String_from_cstring ("is of type `");
+  String_push_string (&else_label, &type2);
+  String_push (&else_label, '`');
+  String_drop (&type2);
+  Diagnostic_push_span_info (&diag, SpanInfo_new (span2, else_label));
   DiagnosticId id = DiagnosticManager_push (self, diag);
   DiagnosticManager_display (self, id);
 }

@@ -47,6 +47,38 @@ Span_len (const Span *self)
 }
 
 int
+Span_cmp (const Span *self, const Span *other)
+{
+  const char *self_ptr = Span_cbegin (self);
+  const char *other_ptr = Span_cbegin (other);
+  while (self_ptr < Span_cend (self) && other_ptr < Span_cend (other))
+    {
+      if (*self_ptr < *other_ptr)
+        {
+          return -1;
+        }
+      else if (*self_ptr > *other_ptr)
+        {
+          return 1;
+        }
+      self_ptr++;
+      other_ptr++;
+    }
+  if (self_ptr < Span_cend (self))
+    {
+      return 1;
+    }
+  else if (other_ptr < Span_cend (other))
+    {
+      return -1;
+    }
+  else
+    {
+      return 0;
+    }
+}
+
+int
 Span_cmp_cstring (const Span *self, const char *cstr)
 {
   const char *span_begin = Span_cbegin (self);

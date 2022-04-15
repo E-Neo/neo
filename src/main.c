@@ -9,6 +9,8 @@
 #include "span.h"
 #include "string.h"
 #include "token.h"
+#include "type.h"
+#include "type_checker.h"
 #include "vec.h"
 
 #define INTEGER_BUFFER_SIZE (64)
@@ -133,6 +135,22 @@ ASTNodeManager_display (const ASTNodeManager *ast_mgr)
     }
 }
 
+static void
+TypeManager_display_type (const TypeManager *self, TypeId id)
+{
+  switch (TypeManager_get_type (self, id)->kind_)
+    {
+#define NEO_TYPEKIND(N, L)                                                    \
+  case TYPE_##N:                                                              \
+    {                                                                         \
+      printf (L);                                                             \
+      break;                                                                  \
+    }
+#include "type_kind.def"
+#undef NEO_TYPEKIND
+    }
+}
+
 int
 main ()
 {
@@ -170,6 +188,17 @@ main ()
           Vec_Token_drop (&tokens);
           puts ("AST Nodes:");
           ASTNodeManager_display (&ast_mgr);
+          TypeManager type_mgr = TypeManager_new ();
+          TypeChecker type_checker
+              = TypeChecker_new (&ast_mgr, &diag_mgr, &type_mgr);
+          ASTNodeIdToTypeIdMap node_type_map
+              = TypeChecker_check (&type_checker, node_id);
+          printf ("Type: ");
+          TypeManager_display_type (
+              &type_mgr, ASTNodeIdToTypeIdMap_get (&node_type_map, node_id));
+          puts ("");
+          ASTNodeIdToTypeIdMap_drop (&node_type_map);
+          TypeManager_drop (&type_mgr);
           ASTNodeManager_drop (&ast_mgr);
           DiagnosticManager_drop (&diag_mgr);
           /* Clear input buffer and print prompt: */

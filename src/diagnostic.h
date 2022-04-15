@@ -79,5 +79,9 @@ void DiagnosticManager_diagnose_invalid_type (DiagnosticManager *self,
                                               Span span);
 void DiagnosticManager_diagnose_if_expr_not_bool (DiagnosticManager *self,
                                                   Span span, String type);
+void DiagnosticManager_diagnose_expr_types_not_equal (DiagnosticManager *self,
+                                                      Span span1, String type1,
+                                                      Span span2,
+                                                      String type2);
 
 #endif

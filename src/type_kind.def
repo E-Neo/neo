@@ -1,0 +1,5 @@
+/* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
+
+NEO_TYPEKIND(UNKNOWN, "Unknown")
+NEO_TYPEKIND(INVALID, "Invalid")
+NEO_TYPEKIND(BOOL, "Bool")
