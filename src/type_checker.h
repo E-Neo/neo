@@ -30,4 +30,9 @@ TypeChecker TypeChecker_new (const ASTNodeManager *ast_mgr,
                              TypeManager *type_mgr);
 ASTNodeIdToTypeIdMap TypeChecker_check (TypeChecker *self, ASTNodeId node_id);
 
+#ifdef TESTS
+#include "test.h"
+Tests type_checker_tests ();
+#endif
+
 #endif

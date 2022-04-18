@@ -244,7 +244,6 @@ TypeChecker_typeof (TypeChecker *self, ASTNodeId node_id,
       }
     default:
       {
-        (void)env;
         return TypeChecker_set_map (self, node_id,
                                     TypeManager_get_invalid (self->type_mgr_));
       }
@@ -263,3 +262,122 @@ TypeChecker_check (TypeChecker *self, ASTNodeId node_id)
   Vec_TypeEnvEntry_drop (&env);
   return self->map_;
 }
+
+#ifdef TESTS
+#include "test.h"
+
+#include "lexer.h"
+#include "parser.h"
+
+typedef struct TypeCheckerTest
+{
+  SourceFile file_;
+  ASTNodeManager ast_mgr_;
+  DiagnosticManager diag_mgr_;
+  ASTNodeId node_id_;
+  TypeManager type_mgr_;
+  TypeChecker type_checker_;
+} TypeCheckerTest;
+
+static void
+TypeCheckerTest_init (TypeCheckerTest *self, const char *content)
+{
+  self->file_ = SourceFile_new (String_from_cstring ("test"),
+                                String_from_cstring (content));
+  Span content_span = Span_from_string (SourceFile_get_content (&self->file_));
+  Lexer lexer = Lexer_new (&content_span);
+  Vec_Token tokens = Vec_Token_new ();
+  Token token;
+  do
+    {
+      token = Lexer_next (&lexer);
+      Vec_Token_push (&tokens, token);
+    }
+  while (!Token_is_eof (&token));
+  self->ast_mgr_ = ASTNodeManager_new ();
+  self->diag_mgr_ = DiagnosticManager_new (&self->file_);
+  Parser parser = Parser_new (&tokens, &self->diag_mgr_, &self->ast_mgr_);
+  self->node_id_ = Parser_parse (&parser);
+  Vec_Token_drop (&tokens);
+  self->type_mgr_ = TypeManager_new ();
+  self->type_checker_
+      = TypeChecker_new (&self->ast_mgr_, &self->diag_mgr_, &self->type_mgr_);
+}
+
+static void
+TypeCheckerTest_drop (TypeCheckerTest *self)
+{
+  SourceFile_drop (&self->file_);
+  ASTNodeManager_drop (&self->ast_mgr_);
+  DiagnosticManager_drop (&self->diag_mgr_);
+  TypeManager_drop (&self->type_mgr_);
+}
+
+static ASTNodeId
+TypeCheckerTest_get_node_id (const TypeCheckerTest *self)
+{
+  return self->node_id_;
+}
+
+static const TypeManager *
+TypeCheckerTest_get_type_manager (const TypeCheckerTest *self)
+{
+  return &self->type_mgr_;
+}
+
+static TypeChecker *
+TypeCheckerTest_borrow_type_checker (TypeCheckerTest *self)
+{
+  return &self->type_checker_;
+}
+
+NEO_TEST (test_check_true_00)
+{
+  TypeCheckerTest tester;
+  TypeCheckerTest_init (&tester, "true");
+  TypeChecker *checker = TypeCheckerTest_borrow_type_checker (&tester);
+  ASTNodeIdToTypeIdMap node_type_map
+      = TypeChecker_check (checker, TypeCheckerTest_get_node_id (&tester));
+  ASSERT_U64_EQ (
+      ASTNodeIdToTypeIdMap_get (&node_type_map,
+                                TypeCheckerTest_get_node_id (&tester)),
+      TypeManager_get_bool (TypeCheckerTest_get_type_manager (&tester)));
+  ASTNodeIdToTypeIdMap_drop (&node_type_map);
+  TypeCheckerTest_drop (&tester);
+}
+
+NEO_TEST (test_check_if_00)
+{
+  TypeCheckerTest tester;
+  TypeCheckerTest_init (&tester, "if true then true else false");
+  TypeChecker *checker = TypeCheckerTest_borrow_type_checker (&tester);
+  ASTNodeIdToTypeIdMap node_type_map
+      = TypeChecker_check (checker, TypeCheckerTest_get_node_id (&tester));
+  ASSERT_U64_EQ (
+      ASTNodeIdToTypeIdMap_get (&node_type_map,
+                                TypeCheckerTest_get_node_id (&tester)),
+      TypeManager_get_bool (TypeCheckerTest_get_type_manager (&tester)));
+  ASTNodeIdToTypeIdMap_drop (&node_type_map);
+  TypeCheckerTest_drop (&tester);
+}
+
+NEO_TEST (test_check_let_00)
+{
+  TypeCheckerTest tester;
+  TypeCheckerTest_init (&tester, "let x: Bool = true in\n"
+                                 "let y: Bool = false in\n"
+                                 "if true then x else y");
+  TypeChecker *checker = TypeCheckerTest_borrow_type_checker (&tester);
+  ASTNodeIdToTypeIdMap node_type_map
+      = TypeChecker_check (checker, TypeCheckerTest_get_node_id (&tester));
+  ASSERT_U64_EQ (
+      ASTNodeIdToTypeIdMap_get (&node_type_map,
+                                TypeCheckerTest_get_node_id (&tester)),
+      TypeManager_get_bool (TypeCheckerTest_get_type_manager (&tester)));
+  ASTNodeIdToTypeIdMap_drop (&node_type_map);
+  TypeCheckerTest_drop (&tester);
+}
+
+NEO_TESTS (type_checker_tests, test_check_true_00, test_check_if_00,
+           test_check_let_00)
+#endif
