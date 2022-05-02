@@ -83,5 +83,7 @@ void DiagnosticManager_diagnose_expr_types_not_equal (DiagnosticManager *self,
                                                       Span span1, String type1,
                                                       Span span2,
                                                       String type2);
+void DiagnosticManager_diagnose_var_not_bound (DiagnosticManager *self,
+                                               Span span);
 
 #endif

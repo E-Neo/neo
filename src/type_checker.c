@@ -153,12 +153,6 @@ TypeChecker_typeof_let (TypeChecker *self, ASTNodeId node_id,
       return TypeChecker_set_map (self, node_id,
                                   TypeManager_get_invalid (self->type_mgr_));
     }
-  Vec_TypeEnvEntry_push (
-      env,
-      (TypeEnvEntry){
-          .name_
-          = ASTNodeManager_get_node (self->ast_mgr_, node->let_.var_)->span_,
-          .type_id_ = var_type_id });
   TypeId expr_type_id = TypeChecker_typeof (self, node->let_.expr_, env);
   if (TypeManager_is_invalid (self->type_mgr_, expr_type_id))
     {
@@ -178,6 +172,12 @@ TypeChecker_typeof_let (TypeChecker *self, ASTNodeId node_id,
       return TypeChecker_set_map (self, node_id,
                                   TypeManager_get_invalid (self->type_mgr_));
     }
+  Vec_TypeEnvEntry_push (
+      env,
+      (TypeEnvEntry){
+          .name_
+          = ASTNodeManager_get_node (self->ast_mgr_, node->let_.var_)->span_,
+          .type_id_ = var_type_id });
   TypeId body_type_id = TypeChecker_typeof (self, node->let_.body_, env);
   if (TypeManager_is_invalid (self->type_mgr_, body_type_id))
     {
@@ -203,7 +203,7 @@ TypeChecker_typeof_var (TypeChecker *self, ASTNodeId node_id,
           return TypeChecker_set_map (self, node_id, ptr->type_id_);
         }
     }
-  DiagnosticManager_diagnose_invalid_type (self->diag_mgr_, node->span_);
+  DiagnosticManager_diagnose_var_not_bound (self->diag_mgr_, node->span_);
   return TypeChecker_set_map (self, node_id,
                               TypeManager_get_invalid (self->type_mgr_));
 }

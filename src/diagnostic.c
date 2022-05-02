@@ -502,3 +502,16 @@ DiagnosticManager_diagnose_expr_types_not_equal (DiagnosticManager *self,
   DiagnosticId id = DiagnosticManager_push (self, diag);
   DiagnosticManager_display (self, id);
 }
+
+void
+DiagnosticManager_diagnose_var_not_bound (DiagnosticManager *self, Span span)
+{
+  Diagnostic diag = Diagnostic_new (DIAGNOSTIC_INVALID_TYPE, span);
+  String message = String_from_cstring ("the variable is not bound: ");
+  String span_output = Span_fmt (&span);
+  String_push_string (&message, &span_output);
+  String_drop (&span_output);
+  Diagnostic_set_message (&diag, message);
+  DiagnosticId id = DiagnosticManager_push (self, diag);
+  DiagnosticManager_display (self, id);
+}
