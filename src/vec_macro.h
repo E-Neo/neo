@@ -40,18 +40,10 @@
 #define NEO_IMPL_VEC(N, T)                                                    \
   Vec_##N Vec_##N##_with_capacity (size_t capacity)                           \
   {                                                                           \
-    if (capacity == 0)                                                        \
-      {                                                                       \
-        return (Vec_##N){ .begin_ = NULL, .end_ = NULL, .end_cap_ = NULL };   \
-      }                                                                       \
-    T *begin = (T *)malloc (sizeof (T) * capacity);                           \
-    if (begin == NULL)                                                        \
-      {                                                                       \
-        abort ();                                                             \
-      }                                                                       \
-    return (Vec_##N){ .begin_ = begin,                                        \
-                      .end_ = begin,                                          \
-                      .end_cap_ = begin + capacity };                         \
+    Vec_##N res                                                               \
+        = (Vec_##N){ .begin_ = NULL, .end_ = NULL, .end_cap_ = NULL };        \
+    Vec_##N##_reserve (&res, capacity);                                       \
+    return res;                                                               \
   }                                                                           \
                                                                               \
   Vec_##N Vec_##N##_new () { return Vec_##N##_with_capacity (0); }            \
@@ -157,6 +149,7 @@
     size_t old_len = Vec_##N##_len (self);                                    \
     if (new_len <= old_len)                                                   \
       {                                                                       \
+        self->end_ = self->begin_ + new_len;                                  \
         return;                                                               \
       }                                                                       \
     Vec_##N##_reserve (self, new_len - old_len);                              \

@@ -3,6 +3,9 @@
 #include "span.h"
 NEO_PUSH_TESTS(span_tests)
 
+#include "big_int.h"
+NEO_PUSH_TESTS(big_int_tests)
+
 #include "lexer.h"
 NEO_PUSH_TESTS(lexer_tests)
 

@@ -75,18 +75,18 @@ void TestManager_run (TestManager *self);
 #define ASSERT_I64_EQ(X, Y)                                                   \
   do                                                                          \
     {                                                                         \
-      int64_t left = (X), right = (Y);                                        \
-      if (left != right)                                                      \
+      int64_t neo_test_left_ = (X), neo_test_right_ = (Y);                    \
+      if (neo_test_left_ != neo_test_right_)                                  \
         {                                                                     \
           test_fn_wrapper_->status_ = TEST_FAILED;                            \
           String_push_cstring (&test_fn_wrapper_->message_,                   \
                                "\e[31mFAILED\e[0m\n"                          \
                                "    assert failed: `(left == right)`\n"       \
                                "      left: `");                              \
-          String_push_u64 (&test_fn_wrapper_->message_, left);                \
+          String_push_i64 (&test_fn_wrapper_->message_, neo_test_left_);      \
           String_push_cstring (&test_fn_wrapper_->message_, "`,\n");          \
           String_push_cstring (&test_fn_wrapper_->message_, "     right: `"); \
-          String_push_i64 (&test_fn_wrapper_->message_, right);               \
+          String_push_i64 (&test_fn_wrapper_->message_, neo_test_right_);     \
           String_push_cstring (&test_fn_wrapper_->message_, "`, ");           \
           String_push_cstring (&test_fn_wrapper_->message_,                   \
                                test_fn_wrapper_->file_);                      \
@@ -104,18 +104,18 @@ void TestManager_run (TestManager *self);
 #define ASSERT_U64_EQ(X, Y)                                                   \
   do                                                                          \
     {                                                                         \
-      uint64_t left = (X), right = (Y);                                       \
-      if (left != right)                                                      \
+      uint64_t neo_test_left_ = (X), neo_test_right_ = (Y);                   \
+      if (neo_test_left_ != neo_test_right_)                                  \
         {                                                                     \
           test_fn_wrapper_->status_ = TEST_FAILED;                            \
           String_push_cstring (&test_fn_wrapper_->message_,                   \
                                "\e[31mFAILED\e[0m\n"                          \
                                "    assert failed: `(left == right)`\n"       \
                                "      left: `");                              \
-          String_push_u64 (&test_fn_wrapper_->message_, left);                \
+          String_push_u64 (&test_fn_wrapper_->message_, neo_test_left_);      \
           String_push_cstring (&test_fn_wrapper_->message_, "`,\n");          \
           String_push_cstring (&test_fn_wrapper_->message_, "     right: `"); \
-          String_push_u64 (&test_fn_wrapper_->message_, right);               \
+          String_push_u64 (&test_fn_wrapper_->message_, neo_test_right_);     \
           String_push_cstring (&test_fn_wrapper_->message_, "`, ");           \
           String_push_cstring (&test_fn_wrapper_->message_,                   \
                                test_fn_wrapper_->file_);                      \

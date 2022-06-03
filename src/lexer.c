@@ -60,6 +60,8 @@ is_terminal (char c)
   return !(is_digit (c) || is_letter (c) || is_underscore (c));
 }
 
+/* The following seeing_xxx functions return the size of the seeing token.  */
+
 static size_t
 Lexer_seeing_token_lit_at (const Lexer *self, const char *cursor,
                            enum TokenKind kind)
@@ -112,6 +114,17 @@ Lexer_seeing_name (const Lexer *self)
   while (cursor < Span_cend (&self->span_)
          && (is_digit (*cursor) || is_letter (*cursor)
              || is_underscore (*cursor)))
+    {
+      cursor++;
+    }
+  return cursor - self->cursor_;
+}
+
+static size_t
+Lexer_seeing_nonnegative_integer (const Lexer *self)
+{
+  const char *cursor = self->cursor_;
+  while (cursor < Span_cend (&self->span_) && is_digit (*cursor))
     {
       cursor++;
     }
@@ -195,6 +208,13 @@ Lexer_next (Lexer *self)
       token_begin = self->cursor_;
       Lexer_skip (self, skip_count);
       return (Token){ .kind_ = TOKEN_NAME,
+                      .span_ = Span_new (token_begin, skip_count) };
+    }
+  if ((skip_count = Lexer_seeing_nonnegative_integer (self)) != 0)
+    {
+      token_begin = self->cursor_;
+      Lexer_skip (self, skip_count);
+      return (Token){ .kind_ = TOKEN_INTEGER,
                       .span_ = Span_new (token_begin, skip_count) };
     }
   if (self->cursor_ < Span_cend (&self->span_))
