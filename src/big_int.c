@@ -219,21 +219,23 @@ raw_digits_add_u32_in_place (uint32_t *acc, uint32_t right)
 
 /* Multiply accumulate operation: acc += left * right */
 static void
-raw_digits_mac_u32 (uint32_t *acc, const Vec_u32 *left, uint32_t right)
+raw_digits_mac_u32 (uint32_t *acc, const uint32_t *left, size_t left_len,
+                    uint32_t right)
 {
   if (right == 0)
     {
       return;
     }
   uint32_t carry = 0;
-  for (const uint32_t *left_digit = Vec_u32_cbegin (left);
-       left_digit < Vec_u32_cend (left); left_digit++)
+  const uint32_t *left_cend = left + left_len;
+  for (const uint32_t *left_digit = left; left_digit < left_cend; left_digit++)
     {
       uint64_t prod = carrying_mul (*left_digit, right, carry);
       raw_digits_add_u32_in_place (acc, prod);
       acc++;
       carry = prod >> U32_BITS;
     }
+  raw_digits_add_u32_in_place (acc, carry);
 }
 
 static Vec_u32
@@ -245,9 +247,11 @@ digits_mul (const Vec_u32 *left, const Vec_u32 *right)
    * (B^m - 1)(B^n - 1) = B^{m+n} - (B^m + B^n) + 1 <= B^{m+n} - 1
    * Therefore, m+n digits are enough for the product.  */
   Vec_u32_resize (&prod, Vec_u32_len (left) + Vec_u32_len (right), 0);
+  const uint32_t *left_cbegin = Vec_u32_cbegin (left);
+  size_t left_len = Vec_u32_len (left);
   for (size_t idx = 0; idx < Vec_u32_len (right); idx++)
     {
-      raw_digits_mac_u32 (Vec_u32_begin (&prod) + idx, left,
+      raw_digits_mac_u32 (Vec_u32_begin (&prod) + idx, left_cbegin, left_len,
                           Vec_u32_cbegin (right)[idx]);
     }
   /* Remove the trailing zeros.  */
@@ -299,6 +303,29 @@ cmp_binary_op (BigInt (*op) (const BigInt *, const BigInt *), const char *left,
   return cmp;
 }
 
+NEO_TEST (test_raw_digits_add_u32_in_place_00)
+{
+  uint32_t acc[] = { UINT32_MAX, 1 };
+  raw_digits_add_u32_in_place (acc, 1);
+  ASSERT_U64_EQ (acc[0], 0);
+  ASSERT_U64_EQ (acc[1], 2);
+  raw_digits_add_u32_in_place (acc, UINT32_MAX);
+  raw_digits_add_u32_in_place (acc, UINT32_MAX);
+  ASSERT_U64_EQ (acc[0], UINT32_MAX - 1);
+  ASSERT_U64_EQ (acc[1], 3);
+}
+
+NEO_TEST (test_raw_digits_mac_00)
+{
+  uint32_t acc[] = { 0, 0, 0, 0 };
+  uint32_t left[] = { UINT32_MAX, UINT32_MAX };
+  raw_digits_mac_u32 (acc, left, sizeof (left) / sizeof (uint32_t),
+                      UINT32_MAX);
+  ASSERT_U64_EQ (acc[0], 1);
+  ASSERT_U64_EQ (acc[1], UINT32_MAX);
+  ASSERT_U64_EQ (acc[2], UINT32_MAX - 1);
+}
+
 NEO_TEST (test_mul_00)
 {
   ASSERT_I64_EQ (cmp_binary_op (BigInt_mul, "11", "22", "242"), 0);
@@ -320,8 +347,13 @@ NEO_TEST (test_mul_00)
                                 "-92633671389852956338856788006950328463349564"
                                 "3820386881829485763935602646353014"),
                  0);
+  ASSERT_I64_EQ (cmp_binary_op (BigInt_mul, "18446744073709551615",
+                                "18446744073709551615",
+                                "340282366920938463426481119284349108225"),
+                 0);
 }
 
-NEO_TESTS (big_int_tests, test_mul_00)
+NEO_TESTS (big_int_tests, test_raw_digits_add_u32_in_place_00,
+           test_raw_digits_mac_00, test_mul_00)
 
 #endif
