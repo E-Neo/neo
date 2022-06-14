@@ -13,10 +13,37 @@ NEO_IMPL_VEC (ASTNode, ASTNode)
 
 NEO_IMPL_ARRAY (ASTKind, enum ASTKind)
 
+ASTNodeId
+get_null_ast_node_id ()
+{
+  return 0;
+}
+
+ASTNodeId
+get_invalid_ast_node_id ()
+{
+  return 1;
+}
+
+bool
+is_null_ast_node_id (ASTNodeId id)
+{
+  return id == 0;
+}
+
+bool
+is_invalid_ast_node_id (ASTNodeId id)
+{
+  return id == 1;
+}
+
 ASTNodeManager
 ASTNodeManager_new ()
 {
-  return (ASTNodeManager){ .nodes_ = Vec_ASTNode_new () };
+  Vec_ASTNode nodes = Vec_ASTNode_new ();
+  Vec_ASTNode_push (&nodes, (ASTNode){ .kind_ = AST_INVALID });
+  Vec_ASTNode_push (&nodes, (ASTNode){ .kind_ = AST_NULL });
+  return (ASTNodeManager){ .nodes_ = nodes };
 }
 
 void
@@ -57,14 +84,6 @@ static ASTNodeId
 ASTNodeManager_get_next_id (const ASTNodeManager *self)
 {
   return Vec_ASTNode_len (&self->nodes_);
-}
-
-ASTNodeId
-ASTNodeManager_push_invalid (ASTNodeManager *self)
-{
-  ASTNodeId id = ASTNodeManager_get_next_id (self);
-  Vec_ASTNode_push (&self->nodes_, (ASTNode){ .kind_ = AST_INVALID });
-  return id;
 }
 
 ASTNodeId

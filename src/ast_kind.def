@@ -3,6 +3,8 @@
 /* INVALID must be the zeroth.  */
 NEO_ASTKIND(INVALID, invalid)
 
+NEO_ASTKIND(NULL, null)
+
 NEO_ASTKIND(EXPR, expr)
   NEO_ASTKIND(LIT_TRUE, literal_true)
   NEO_ASTKIND(LIT_FALSE, literal_false)

@@ -15,6 +15,11 @@ typedef struct ASTNode ASTNode;
 NEO_DECL_VEC (ASTNodeId, ASTNodeId);
 NEO_DECL_VEC (ASTNode, ASTNode)
 
+ASTNodeId get_null_ast_node_id ();
+ASTNodeId get_invalid_ast_node_id ();
+bool is_null_ast_node_id (ASTNodeId id);
+bool is_invalid_ast_node_id (ASTNodeId id);
+
 enum ASTKind
 {
 #define NEO_ASTKIND(NAME, UNUSED) AST_##NAME,
@@ -63,7 +68,6 @@ ASTNodeId ASTNodeManager_get_id (const ASTNodeManager *self,
 const ASTNode *ASTNodeManager_get_node (const ASTNodeManager *self,
                                         ASTNodeId id);
 const Span *ASTNodeManager_get_span (const ASTNodeManager *self, ASTNodeId id);
-ASTNodeId ASTNodeManager_push_invalid (ASTNodeManager *self);
 ASTNodeId ASTNodeManager_push_lit (ASTNodeManager *self, Span span,
                                    enum ASTKind kind);
 ASTNodeId ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
