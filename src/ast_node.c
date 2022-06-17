@@ -41,14 +41,29 @@ ASTNodeManager
 ASTNodeManager_new ()
 {
   Vec_ASTNode nodes = Vec_ASTNode_new ();
-  Vec_ASTNode_push (&nodes, (ASTNode){ .kind_ = AST_INVALID });
   Vec_ASTNode_push (&nodes, (ASTNode){ .kind_ = AST_NULL });
+  Vec_ASTNode_push (&nodes, (ASTNode){ .kind_ = AST_INVALID });
   return (ASTNodeManager){ .nodes_ = nodes };
 }
 
 void
 ASTNodeManager_drop (ASTNodeManager *self)
 {
+  for (ASTNode *ptr = Vec_ASTNode_begin (&self->nodes_);
+       ptr < Vec_ASTNode_end (&self->nodes_); ptr++)
+    {
+      switch (ptr->kind_)
+        {
+        case AST_LAMBDA:
+          {
+            Vec_ASTNodeId_drop (&ptr->lambda_.vars_);
+            Vec_ASTNodeId_drop (&ptr->lambda_.types_);
+            break;
+          }
+        default:
+          break;
+        }
+    }
   Vec_ASTNode_drop (&self->nodes_);
 }
 
@@ -132,7 +147,7 @@ ASTNodeManager_push_type (ASTNodeManager *self, Span span)
 
 ASTNodeId
 ASTNodeManager_push_let (ASTNodeManager *self, Span span, ASTNodeId var,
-                         ASTNodeId type, ASTNodeId expr, ASTNodeId body)
+                         ASTNodeId type, ASTNodeId init, ASTNodeId body)
 {
   ASTNodeId id = ASTNodeManager_get_next_id (self);
   Vec_ASTNode_push (&self->nodes_,
@@ -140,7 +155,22 @@ ASTNodeManager_push_let (ASTNodeManager *self, Span span, ASTNodeId var,
                                .span_ = span,
                                .let_ = (ASTLet){ .var_ = var,
                                                  .type_ = type,
-                                                 .expr_ = expr,
+                                                 .init_ = init,
                                                  .body_ = body } });
+  return id;
+}
+
+ASTNodeId
+ASTNodeManager_push_lambda (ASTNodeManager *self, Span span,
+                            Vec_ASTNodeId vars, Vec_ASTNodeId types,
+                            ASTNodeId body)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (&self->nodes_,
+                    (ASTNode){ .kind_ = AST_LAMBDA,
+                               .span_ = span,
+                               .lambda_ = (ASTLambda){ .vars_ = vars,
+                                                       .types_ = types,
+                                                       .body_ = body } });
   return id;
 }

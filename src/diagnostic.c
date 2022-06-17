@@ -448,6 +448,20 @@ DiagnosticManager_diagnose_unexpected_token (DiagnosticManager *self,
 }
 
 void
+DiagnosticManager_diagnose_unclosed_dilimiter (DiagnosticManager *self,
+                                               Span span)
+{
+  Diagnostic diag = Diagnostic_new (DIAGNOSTIC_UNEXPECTED_TOKEN, span);
+  String message = String_from_cstring ("unclosed delimiter: ");
+  String span_output = Span_fmt (&span);
+  String_push_string (&message, &span_output);
+  String_drop (&span_output);
+  Diagnostic_set_message (&diag, message);
+  DiagnosticId id = DiagnosticManager_push (self, diag);
+  DiagnosticManager_display (self, id);
+}
+
+void
 DiagnosticManager_diagnose_invalid_type (DiagnosticManager *self, Span span)
 {
   Diagnostic diag = Diagnostic_new (DIAGNOSTIC_INVALID_TYPE, span);

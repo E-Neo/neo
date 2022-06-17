@@ -2,6 +2,7 @@
 
 #include "parser.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -42,9 +43,19 @@ Parser_skip (Parser *self, size_t count)
 }
 
 static bool
+Parser_seeing_after (Parser *self, size_t skip, enum TokenKind kind)
+{
+  if (self->cursor_ + skip >= Vec_Token_cend (self->tokens_))
+    {
+      return false;
+    }
+  return (self->cursor_ + skip)->kind_ == kind;
+}
+
+static bool
 Parser_seeing (Parser *self, enum TokenKind kind)
 {
-  return self->cursor_->kind_ == kind;
+  return Parser_seeing_after (self, 0, kind);
 }
 
 static bool
@@ -70,31 +81,38 @@ Parser_expect_and_skip (Parser *self, enum TokenKind kind)
   return false;
 }
 
+static const char *
+Parser_cursor_cbegin (const Parser *self)
+{
+  return Span_cbegin (&self->cursor_->span_);
+}
+
+static Span
+Parser_span_from_last_node (const Parser *self, const char *cbegin,
+                            ASTNodeId id)
+{
+  return Span_new (
+      cbegin, Span_cend (&ASTNodeManager_get_node (self->ast_mgr_, id)->span_)
+                  - cbegin);
+}
+
 static ASTNodeId Parser_parse_expr (Parser *self);
 
 static ASTNodeId
 Parser_parse_if_then_else (Parser *self)
 {
-  const char *span_begin = Span_cbegin (&self->cursor_->span_);
-  if (!Parser_expect_and_skip (self, TOKEN_IF))
-    {
-      return get_invalid_ast_node_id ();
-    }
+  assert (Parser_seeing (self, TOKEN_IF));
+  const char *cbegin = Parser_cursor_cbegin (self);
+  Parser_skip (self, 1);
   ASTNodeId if_expr = Parser_parse_expr (self);
-  if (is_invalid_ast_node_id (if_expr))
-    {
-      return get_invalid_ast_node_id ();
-    }
-  if (!Parser_expect_and_skip (self, TOKEN_THEN))
+  if (is_invalid_ast_node_id (if_expr)
+      || !Parser_expect_and_skip (self, TOKEN_THEN))
     {
       return get_invalid_ast_node_id ();
     }
   ASTNodeId then_expr = Parser_parse_expr (self);
-  if (is_invalid_ast_node_id (then_expr))
-    {
-      return get_invalid_ast_node_id ();
-    }
-  if (!Parser_expect_and_skip (self, TOKEN_ELSE))
+  if (is_invalid_ast_node_id (then_expr)
+      || !Parser_expect_and_skip (self, TOKEN_ELSE))
     {
       return get_invalid_ast_node_id ();
     }
@@ -104,12 +122,7 @@ Parser_parse_if_then_else (Parser *self)
       return get_invalid_ast_node_id ();
     }
   return ASTNodeManager_push_if_then_else (
-      self->ast_mgr_,
-      Span_new (
-          span_begin,
-          Span_cend (
-              &ASTNodeManager_get_node (self->ast_mgr_, else_expr)->span_)
-              - span_begin),
+      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, else_expr),
       if_expr, then_expr, else_expr);
 }
 
@@ -140,9 +153,200 @@ Parser_parse_type (Parser *self)
 }
 
 static ASTNodeId
+Parser_parse_lambda_single_param_with_type (Parser *self)
+{
+  assert (Parser_seeing (self, TOKEN_NAME));
+  assert (Parser_seeing_after (self, 1, TOKEN_COLON));
+  const char *cbegin = Parser_cursor_cbegin (self);
+  ASTNodeId var = Parser_parse_var (self);
+  assert (ASTNodeManager_get_node (self->ast_mgr_, var)->kind_ == AST_VAR);
+  Parser_skip (self, 1); /* Skip the colon.  */
+  ASTNodeId type = Parser_parse_type (self);
+  if (is_invalid_ast_node_id (type)
+      || !Parser_expect_and_skip (self, TOKEN_PLUS_GT))
+    {
+      return get_invalid_ast_node_id ();
+    }
+  ASTNodeId body = Parser_parse_expr (self);
+  if (is_invalid_ast_node_id (body))
+    {
+      return get_invalid_ast_node_id ();
+    }
+  Vec_ASTNodeId vars = Vec_ASTNodeId_with_capacity (1);
+  Vec_ASTNodeId_push (&vars, var);
+  Vec_ASTNodeId types = Vec_ASTNodeId_with_capacity (1);
+  Vec_ASTNodeId_push (&types, type);
+  return ASTNodeManager_push_lambda (
+      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, body), vars,
+      types, body);
+}
+
+static ASTNodeId
+Parser_parse_lambda_single_param_without_type (Parser *self)
+{
+  assert (Parser_seeing (self, TOKEN_NAME));
+  assert (Parser_seeing_after (self, 1, TOKEN_PLUS_GT));
+  const char *cbegin = Parser_cursor_cbegin (self);
+  ASTNodeId var = Parser_parse_var (self);
+  assert (ASTNodeManager_get_node (self->ast_mgr_, var)->kind_ == AST_VAR);
+  Parser_skip (self, 1); /* Skip the mapsto symbol.  */
+  ASTNodeId body = Parser_parse_expr (self);
+  if (is_invalid_ast_node_id (body))
+    {
+      return get_invalid_ast_node_id ();
+    }
+  Vec_ASTNodeId vars = Vec_ASTNodeId_with_capacity (1);
+  Vec_ASTNodeId_push (&vars, var);
+  Vec_ASTNodeId types = Vec_ASTNodeId_with_capacity (1);
+  Vec_ASTNodeId_push (&types, get_null_ast_node_id ());
+  return ASTNodeManager_push_lambda (
+      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, body), vars,
+      types, body);
+}
+
+static ASTNodeId
+drop_vars_and_types (Vec_ASTNodeId *vars, Vec_ASTNodeId *types)
+{
+  Vec_ASTNodeId_drop (vars);
+  Vec_ASTNodeId_drop (types);
+  return get_invalid_ast_node_id ();
+}
+
+static ASTNodeId
+Parser_parse_lambda_paren_params (Parser *self)
+{
+  assert (Parser_seeing (self, TOKEN_LPAREN));
+  const char *cbegin = Parser_cursor_cbegin (self);
+  Parser_skip (self, 1);
+  Vec_ASTNodeId vars = Vec_ASTNodeId_new ();
+  Vec_ASTNodeId types = Vec_ASTNodeId_new ();
+  /* The caller guarantees the parentheses are matched.  */
+  while (!Parser_seeing (self, TOKEN_RPAREN))
+    {
+      ASTNodeId var = Parser_parse_var (self);
+      if (is_invalid_ast_node_id (var))
+        {
+          return drop_vars_and_types (&vars, &types);
+        }
+      ASTNodeId type = get_null_ast_node_id ();
+      if (Parser_seeing (self, TOKEN_COLON))
+        {
+          Parser_skip (self, 1);
+          type = Parser_parse_type (self);
+          if (is_invalid_ast_node_id (type))
+            {
+              return drop_vars_and_types (&vars, &types);
+            }
+        }
+      Vec_ASTNodeId_push (&vars, var);
+      Vec_ASTNodeId_push (&types, type);
+      if (Parser_seeing (self, TOKEN_COMMA)
+          && Parser_seeing_after (self, 1, TOKEN_RPAREN))
+        {
+          DiagnosticManager_diagnose_unexpected_token (self->diag_mgr_,
+                                                       self->cursor_->span_);
+          return drop_vars_and_types (&vars, &types);
+        }
+      else if (Parser_seeing (self, TOKEN_RPAREN))
+        {
+          break;
+        }
+      else
+        {
+          Parser_expect_and_skip (self, TOKEN_COMMA);
+        }
+    }
+  assert (Parser_seeing (self, TOKEN_RPAREN));
+  Parser_skip (self, 1);
+  assert (Parser_seeing (self, TOKEN_PLUS_GT));
+  Parser_skip (self, 1);
+  ASTNodeId body = Parser_parse_expr (self);
+  if (is_invalid_ast_node_id (body))
+    {
+      return drop_vars_and_types (&vars, &types);
+    }
+  return ASTNodeManager_push_lambda (
+      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, body), vars,
+      types, body);
+}
+
+static ASTNodeId
+Parser_parse_name (Parser *self)
+{
+  assert (Parser_seeing (self, TOKEN_NAME));
+  if (Parser_seeing_after (self, 1, TOKEN_COLON))
+    {
+      return Parser_parse_lambda_single_param_with_type (self);
+    }
+  else if (Parser_seeing_after (self, 1, TOKEN_PLUS_GT))
+    {
+      return Parser_parse_lambda_single_param_without_type (self);
+    }
+  else
+    {
+      return Parser_parse_var (self);
+    }
+}
+
+static const Token *
+find_matched_rparen (const Token *lparen)
+{
+  assert (lparen->kind_ == TOKEN_LPAREN);
+  const Token *token = lparen + 1;
+  while (true)
+    {
+      switch (token->kind_)
+        {
+        case TOKEN_RPAREN:
+          {
+            return token;
+          }
+        case TOKEN_LPAREN:
+          {
+            token = find_matched_rparen (token);
+            if (!token)
+              {
+                return NULL;
+              }
+            token++;
+            break;
+          }
+        case TOKEN_EOF:
+          {
+            return NULL;
+          }
+        default:
+          token++;
+          break;
+        }
+    }
+}
+
+static ASTNodeId
+Parser_parse_lparen (Parser *self)
+{
+  assert (Parser_seeing (self, TOKEN_LPAREN));
+  const Token *rparen = find_matched_rparen (self->cursor_);
+  if (!rparen)
+    {
+      DiagnosticManager_diagnose_unclosed_dilimiter (self->diag_mgr_,
+                                                     self->cursor_->span_);
+      return get_invalid_ast_node_id ();
+    }
+  const Token *rparen_next = rparen + 1;
+  if (rparen_next->kind_ == TOKEN_PLUS_GT)
+    {
+      return Parser_parse_lambda_paren_params (self);
+    }
+  DiagnosticManager_diagnose_expected_token (
+      self->diag_mgr_, rparen_next->span_, TOKEN_PLUS_GT);
+  return get_invalid_ast_node_id ();
+}
+
+static ASTNodeId
 Parser_parse_let (Parser *self)
 {
-  const char *span_cbegin = Span_cbegin (&self->cursor_->span_);
+  const char *cbegin = Parser_cursor_cbegin (self);
   if (!Parser_expect_and_skip (self, TOKEN_LET))
     {
       return get_invalid_ast_node_id ();
@@ -166,12 +370,9 @@ Parser_parse_let (Parser *self)
     {
       return get_invalid_ast_node_id ();
     }
-  ASTNodeId expr = Parser_parse_expr (self);
-  if (is_invalid_ast_node_id (expr))
-    {
-      return get_invalid_ast_node_id ();
-    }
-  if (!Parser_expect_and_skip (self, TOKEN_IN))
+  ASTNodeId init = Parser_parse_expr (self);
+  if (is_invalid_ast_node_id (init)
+      || !Parser_expect_and_skip (self, TOKEN_IN))
     {
       return get_invalid_ast_node_id ();
     }
@@ -181,11 +382,8 @@ Parser_parse_let (Parser *self)
       return get_invalid_ast_node_id ();
     }
   return ASTNodeManager_push_let (
-      self->ast_mgr_,
-      Span_new (span_cbegin,
-                Span_cend (ASTNodeManager_get_span (self->ast_mgr_, body))
-                    - span_cbegin),
-      var, type, expr, body);
+      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, body), var,
+      type, init, body);
 }
 
 static ASTNodeId
@@ -223,7 +421,11 @@ Parser_parse_expr (Parser *self)
       }
     case TOKEN_NAME:
       {
-        return Parser_parse_var (self);
+        return Parser_parse_name (self);
+      }
+    case TOKEN_LPAREN:
+      {
+        return Parser_parse_lparen (self);
       }
     default:
       {
@@ -301,79 +503,56 @@ ParserTest_get_diagnostic_manager (const ParserTest *self)
   return &self->diag_mgr_;
 }
 
-NEO_TEST (test_parse_true_00)
+static size_t
+parse_num_diags (const char *content)
 {
   ParserTest parser_test;
-  ParserTest_init (&parser_test, "true");
+  ParserTest_init (&parser_test, content);
   Parser_parse (ParserTest_borrow_parser (&parser_test));
-  ASSERT_U64_EQ (DiagnosticManager_num_total (
-                     ParserTest_get_diagnostic_manager (&parser_test)),
-                 0);
+  size_t res = DiagnosticManager_num_total (
+      ParserTest_get_diagnostic_manager (&parser_test));
   ParserTest_drop (&parser_test);
+  return res;
 }
 
-NEO_TEST (test_parse_true_01)
+NEO_TEST (test_parse_true_00)
 {
-  ParserTest parser_test;
-  ParserTest_init (&parser_test, "true\n");
-  Parser_parse (ParserTest_borrow_parser (&parser_test));
-  ASSERT_U64_EQ (DiagnosticManager_num_total (
-                     ParserTest_get_diagnostic_manager (&parser_test)),
-                 0);
-  ParserTest_drop (&parser_test);
+  ASSERT_U64_EQ (parse_num_diags ("true"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("true\n"), 0);
 }
 
 NEO_TEST (test_parse_if_00)
 {
-  ParserTest parser_test;
-  ParserTest_init (&parser_test, "if true then\n"
-                                 "    true\n"
-                                 "else\n"
-                                 "    false\n");
-  Parser_parse (ParserTest_borrow_parser (&parser_test));
-  ASSERT_U64_EQ (DiagnosticManager_num_total (
-                     ParserTest_get_diagnostic_manager (&parser_test)),
+  ASSERT_U64_EQ (parse_num_diags ("if true then\n"
+                                  "    true\n"
+                                  "else\n"
+                                  "    false\n"),
                  0);
-  ParserTest_drop (&parser_test);
 }
 
 NEO_TEST (test_parse_let_00)
 {
-  ParserTest parser_test;
-  ParserTest_init (&parser_test, "let x: Bool = true in x");
-  Parser_parse (ParserTest_borrow_parser (&parser_test));
-  ASSERT_U64_EQ (DiagnosticManager_num_total (
-                     ParserTest_get_diagnostic_manager (&parser_test)),
+  ASSERT_U64_EQ (parse_num_diags ("let x: Bool = true in x"), 0);
+  ASSERT_U64_EQ (
+      parse_num_diags ("let x: Bool = if true then true else false in x"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("let x = true in\n"
+                                  "let y = false in\n"
+                                  "if true then x else y"),
                  0);
-  ParserTest_drop (&parser_test);
+  ASSERT_U64_EQ (
+      parse_num_diags ("let f = (x, y, z) +> if x then y else z in f"), 0);
 }
 
-NEO_TEST (test_parse_let_01)
+NEO_TEST (test_parse_lambda_00)
 {
-  ParserTest parser_test;
-  ParserTest_init (&parser_test,
-                   "let x: Bool = if true then true else false in x");
-  Parser_parse (ParserTest_borrow_parser (&parser_test));
-  ASSERT_U64_EQ (DiagnosticManager_num_total (
-                     ParserTest_get_diagnostic_manager (&parser_test)),
-                 0);
-  ParserTest_drop (&parser_test);
+  ASSERT_U64_EQ (parse_num_diags ("x +> x"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("x: Bool +> x"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("()+>true"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("(x)+>true"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("(x: Bool)+>true"), 0);
+  ASSERT_U64_EQ (parse_num_diags ("(x: Bool, y)+>true"), 0);
 }
 
-NEO_TEST (test_parse_let_02)
-{
-  ParserTest parser_test;
-  ParserTest_init (&parser_test, "let x = true in\n"
-                                 "let y = false in\n"
-                                 "if true then x else y");
-  Parser_parse (ParserTest_borrow_parser (&parser_test));
-  ASSERT_U64_EQ (DiagnosticManager_num_total (
-                     ParserTest_get_diagnostic_manager (&parser_test)),
-                 0);
-  ParserTest_drop (&parser_test);
-}
-
-NEO_TESTS (parser_tests, test_parse_true_00, test_parse_true_01,
-           test_parse_if_00, test_parse_let_00, test_parse_let_01,
-           test_parse_let_02)
+NEO_TESTS (parser_tests, test_parse_true_00, test_parse_if_00,
+           test_parse_let_00, test_parse_lambda_00)
 #endif

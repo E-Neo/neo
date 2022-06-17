@@ -40,9 +40,16 @@ typedef struct ASTLet
 {
   ASTNodeId var_;
   ASTNodeId type_;
-  ASTNodeId expr_;
+  ASTNodeId init_;
   ASTNodeId body_;
 } ASTLet;
+
+typedef struct ASTLambda
+{
+  Vec_ASTNodeId vars_;
+  Vec_ASTNodeId types_;
+  ASTNodeId body_;
+} ASTLambda;
 
 typedef struct ASTNode
 {
@@ -52,6 +59,7 @@ typedef struct ASTNode
   {
     ASTIfThenElse if_then_else_;
     ASTLet let_;
+    ASTLambda lambda_;
   };
 } ASTNode;
 
@@ -78,6 +86,9 @@ ASTNodeId ASTNodeManager_push_var (ASTNodeManager *self, Span span);
 ASTNodeId ASTNodeManager_push_type (ASTNodeManager *self, Span span);
 ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
                                    ASTNodeId var, ASTNodeId type,
-                                   ASTNodeId expr, ASTNodeId body);
+                                   ASTNodeId init, ASTNodeId body);
+ASTNodeId ASTNodeManager_push_lambda (ASTNodeManager *self, Span span,
+                                      Vec_ASTNodeId vars, Vec_ASTNodeId types,
+                                      ASTNodeId body);
 
 #endif

@@ -1,9 +1,7 @@
 /* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
 
-/* INVALID must be the zeroth.  */
-NEO_ASTKIND(INVALID, invalid)
-
 NEO_ASTKIND(NULL, null)
+NEO_ASTKIND(INVALID, invalid)
 
 NEO_ASTKIND(EXPR, expr)
   NEO_ASTKIND(LIT_TRUE, literal_true)
@@ -12,4 +10,5 @@ NEO_ASTKIND(EXPR, expr)
   NEO_ASTKIND(IF_THEN_ELSE, if_then_else)
   NEO_ASTKIND(LET, let)
   NEO_ASTKIND(VAR, var)
+  NEO_ASTKIND(LAMBDA, lambda)
 NEO_ASTKIND(TYPE, type)

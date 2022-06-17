@@ -153,7 +153,7 @@ TypeChecker_typeof_let (TypeChecker *self, ASTNodeId node_id,
       return TypeChecker_set_map (self, node_id,
                                   TypeManager_get_invalid (self->type_mgr_));
     }
-  TypeId expr_type_id = TypeChecker_typeof (self, node->let_.expr_, env);
+  TypeId expr_type_id = TypeChecker_typeof (self, node->let_.init_, env);
   if (TypeManager_is_invalid (self->type_mgr_, expr_type_id))
     {
       Vec_TypeEnvEntry_pop (env);
@@ -166,7 +166,7 @@ TypeChecker_typeof_let (TypeChecker *self, ASTNodeId node_id,
           self->diag_mgr_,
           ASTNodeManager_get_node (self->ast_mgr_, node->let_.var_)->span_,
           TypeManager_to_string (self->type_mgr_, var_type_id),
-          ASTNodeManager_get_node (self->ast_mgr_, node->let_.expr_)->span_,
+          ASTNodeManager_get_node (self->ast_mgr_, node->let_.init_)->span_,
           TypeManager_to_string (self->type_mgr_, expr_type_id));
       Vec_TypeEnvEntry_pop (env);
       return TypeChecker_set_map (self, node_id,
