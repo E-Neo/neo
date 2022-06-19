@@ -344,6 +344,16 @@ Parser_parse_lparen (Parser *self)
 }
 
 static ASTNodeId
+drop_vas_types_inits (Vec_ASTNodeId *vars, Vec_ASTNodeId *types,
+                      Vec_ASTNodeId *inits)
+{
+  Vec_ASTNodeId_drop (vars);
+  Vec_ASTNodeId_drop (types);
+  Vec_ASTNodeId_drop (inits);
+  return get_invalid_ast_node_id ();
+}
+
+static ASTNodeId
 Parser_parse_let (Parser *self)
 {
   const char *cbegin = Parser_cursor_cbegin (self);
@@ -351,39 +361,61 @@ Parser_parse_let (Parser *self)
     {
       return get_invalid_ast_node_id ();
     }
-  ASTNodeId var = Parser_parse_var (self);
-  if (is_invalid_ast_node_id (var))
+  Vec_ASTNodeId vars = Vec_ASTNodeId_new ();
+  Vec_ASTNodeId types = Vec_ASTNodeId_new ();
+  Vec_ASTNodeId inits = Vec_ASTNodeId_new ();
+  do
     {
-      return get_invalid_ast_node_id ();
-    }
-  ASTNodeId type = get_null_ast_node_id ();
-  if (Parser_seeing (self, TOKEN_COLON))
-    {
-      Parser_skip (self, 1);
-      type = Parser_parse_type (self);
-      if (is_invalid_ast_node_id (type))
+      ASTNodeId var = Parser_parse_var (self);
+      if (is_invalid_ast_node_id (var))
         {
-          return get_invalid_ast_node_id ();
+          return drop_vas_types_inits (&vars, &types, &inits);
+        }
+      ASTNodeId type = get_null_ast_node_id ();
+      if (Parser_seeing (self, TOKEN_COLON))
+        {
+          Parser_skip (self, 1);
+          type = Parser_parse_type (self);
+          if (is_invalid_ast_node_id (type))
+            {
+              return drop_vas_types_inits (&vars, &types, &inits);
+            }
+        }
+      if (!Parser_expect_and_skip (self, TOKEN_EQ))
+        {
+          return drop_vas_types_inits (&vars, &types, &inits);
+        }
+      ASTNodeId init = Parser_parse_expr (self);
+      if (is_invalid_ast_node_id (init))
+        {
+          return drop_vas_types_inits (&vars, &types, &inits);
+        }
+      if (Parser_seeing (self, TOKEN_COMMA)
+          && Parser_seeing_after (self, 1, TOKEN_IN))
+        {
+          DiagnosticManager_diagnose_unexpected_token (self->diag_mgr_,
+                                                       self->cursor_->span_);
+          return drop_vas_types_inits (&vars, &types, &inits);
+        }
+      else if (Parser_seeing (self, TOKEN_IN))
+        {
+          break;
+        }
+      else
+        {
+          Parser_expect_and_skip (self, TOKEN_COMMA);
         }
     }
-  if (!Parser_expect_and_skip (self, TOKEN_EQ))
-    {
-      return get_invalid_ast_node_id ();
-    }
-  ASTNodeId init = Parser_parse_expr (self);
-  if (is_invalid_ast_node_id (init)
-      || !Parser_expect_and_skip (self, TOKEN_IN))
-    {
-      return get_invalid_ast_node_id ();
-    }
+  while (!Parser_seeing (self, TOKEN_IN));
+  Parser_skip (self, 1);
   ASTNodeId body = Parser_parse_expr (self);
   if (is_invalid_ast_node_id (body))
     {
-      return get_invalid_ast_node_id ();
+      return drop_vas_types_inits (&vars, &types, &inits);
     }
   return ASTNodeManager_push_let (
-      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, body), var,
-      type, init, body);
+      self->ast_mgr_, Parser_span_from_last_node (self, cbegin, body), vars,
+      types, inits, body);
 }
 
 static ASTNodeId
@@ -543,6 +575,13 @@ NEO_TEST (test_parse_let_00)
       parse_num_diags ("let f = (x, y, z) +> if x then y else z in f"), 0);
 }
 
+NEO_TEST (test_parse_let_01)
+{
+  ASSERT_U64_EQ (
+      parse_num_diags ("let x = false, y = true in if false then x else y"),
+      0);
+}
+
 NEO_TEST (test_parse_lambda_00)
 {
   ASSERT_U64_EQ (parse_num_diags ("x +> x"), 0);
@@ -554,5 +593,5 @@ NEO_TEST (test_parse_lambda_00)
 }
 
 NEO_TESTS (parser_tests, test_parse_true_00, test_parse_if_00,
-           test_parse_let_00, test_parse_lambda_00)
+           test_parse_let_00, test_parse_let_01, test_parse_lambda_00)
 #endif

@@ -146,16 +146,17 @@ ASTNodeManager_push_type (ASTNodeManager *self, Span span)
 }
 
 ASTNodeId
-ASTNodeManager_push_let (ASTNodeManager *self, Span span, ASTNodeId var,
-                         ASTNodeId type, ASTNodeId init, ASTNodeId body)
+ASTNodeManager_push_let (ASTNodeManager *self, Span span, Vec_ASTNodeId vars,
+                         Vec_ASTNodeId types, Vec_ASTNodeId inits,
+                         ASTNodeId body)
 {
   ASTNodeId id = ASTNodeManager_get_next_id (self);
   Vec_ASTNode_push (&self->nodes_,
                     (ASTNode){ .kind_ = AST_LET,
                                .span_ = span,
-                               .let_ = (ASTLet){ .var_ = var,
-                                                 .type_ = type,
-                                                 .init_ = init,
+                               .let_ = (ASTLet){ .vars_ = vars,
+                                                 .types_ = types,
+                                                 .inits_ = inits,
                                                  .body_ = body } });
   return id;
 }

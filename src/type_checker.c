@@ -142,54 +142,6 @@ TypeChecker_typeof_type (TypeChecker *self, ASTNodeId node_id,
 }
 
 static TypeId
-TypeChecker_typeof_let (TypeChecker *self, ASTNodeId node_id,
-                        Vec_TypeEnvEntry *env)
-{
-  const ASTNode *node = ASTNodeManager_get_node (self->ast_mgr_, node_id);
-  assert (node->kind_ == AST_LET);
-  TypeId var_type_id = TypeChecker_typeof (self, node->let_.type_, env);
-  if (TypeManager_is_invalid (self->type_mgr_, var_type_id))
-    {
-      return TypeChecker_set_map (self, node_id,
-                                  TypeManager_get_invalid (self->type_mgr_));
-    }
-  TypeId expr_type_id = TypeChecker_typeof (self, node->let_.init_, env);
-  if (TypeManager_is_invalid (self->type_mgr_, expr_type_id))
-    {
-      Vec_TypeEnvEntry_pop (env);
-      return TypeChecker_set_map (self, node_id,
-                                  TypeManager_get_invalid (self->type_mgr_));
-    }
-  if (!TypeManager_are_equal (self->type_mgr_, var_type_id, expr_type_id))
-    {
-      DiagnosticManager_diagnose_expr_types_not_equal (
-          self->diag_mgr_,
-          ASTNodeManager_get_node (self->ast_mgr_, node->let_.var_)->span_,
-          TypeManager_to_string (self->type_mgr_, var_type_id),
-          ASTNodeManager_get_node (self->ast_mgr_, node->let_.init_)->span_,
-          TypeManager_to_string (self->type_mgr_, expr_type_id));
-      Vec_TypeEnvEntry_pop (env);
-      return TypeChecker_set_map (self, node_id,
-                                  TypeManager_get_invalid (self->type_mgr_));
-    }
-  Vec_TypeEnvEntry_push (
-      env,
-      (TypeEnvEntry){
-          .name_
-          = ASTNodeManager_get_node (self->ast_mgr_, node->let_.var_)->span_,
-          .type_id_ = var_type_id });
-  TypeId body_type_id = TypeChecker_typeof (self, node->let_.body_, env);
-  if (TypeManager_is_invalid (self->type_mgr_, body_type_id))
-    {
-      Vec_TypeEnvEntry_pop (env);
-      return TypeChecker_set_map (self, node_id,
-                                  TypeManager_get_invalid (self->type_mgr_));
-    }
-  Vec_TypeEnvEntry_pop (env);
-  return TypeChecker_set_map (self, node_id, body_type_id);
-}
-
-static TypeId
 TypeChecker_typeof_var (TypeChecker *self, ASTNodeId node_id,
                         Vec_TypeEnvEntry *env)
 {
@@ -233,10 +185,6 @@ TypeChecker_typeof (TypeChecker *self, ASTNodeId node_id,
     case AST_TYPE:
       {
         return TypeChecker_typeof_type (self, node_id, env);
-      }
-    case AST_LET:
-      {
-        return TypeChecker_typeof_let (self, node_id, env);
       }
     case AST_VAR:
       {
@@ -361,23 +309,5 @@ NEO_TEST (test_check_if_00)
   TypeCheckerTest_drop (&tester);
 }
 
-NEO_TEST (test_check_let_00)
-{
-  TypeCheckerTest tester;
-  TypeCheckerTest_init (&tester, "let x: Bool = true in\n"
-                                 "let y: Bool = false in\n"
-                                 "if true then x else y");
-  TypeChecker *checker = TypeCheckerTest_borrow_type_checker (&tester);
-  ASTNodeIdToTypeIdMap node_type_map
-      = TypeChecker_check (checker, TypeCheckerTest_get_node_id (&tester));
-  ASSERT_U64_EQ (
-      ASTNodeIdToTypeIdMap_get (&node_type_map,
-                                TypeCheckerTest_get_node_id (&tester)),
-      TypeManager_get_bool (TypeCheckerTest_get_type_manager (&tester)));
-  ASTNodeIdToTypeIdMap_drop (&node_type_map);
-  TypeCheckerTest_drop (&tester);
-}
-
-NEO_TESTS (type_checker_tests, test_check_true_00, test_check_if_00,
-           test_check_let_00)
+NEO_TESTS (type_checker_tests, test_check_true_00, test_check_if_00)
 #endif

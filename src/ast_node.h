@@ -38,9 +38,9 @@ typedef struct ASTIfThenElse
 
 typedef struct ASTLet
 {
-  ASTNodeId var_;
-  ASTNodeId type_;
-  ASTNodeId init_;
+  Vec_ASTNodeId vars_;
+  Vec_ASTNodeId types_;
+  Vec_ASTNodeId inits_;
   ASTNodeId body_;
 } ASTLet;
 
@@ -85,8 +85,8 @@ ASTNodeId ASTNodeManager_push_if_then_else (ASTNodeManager *self, Span span,
 ASTNodeId ASTNodeManager_push_var (ASTNodeManager *self, Span span);
 ASTNodeId ASTNodeManager_push_type (ASTNodeManager *self, Span span);
 ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
-                                   ASTNodeId var, ASTNodeId type,
-                                   ASTNodeId init, ASTNodeId body);
+                                   Vec_ASTNodeId vars, Vec_ASTNodeId types,
+                                   Vec_ASTNodeId inits, ASTNodeId body);
 ASTNodeId ASTNodeManager_push_lambda (ASTNodeManager *self, Span span,
                                       Vec_ASTNodeId vars, Vec_ASTNodeId types,
                                       ASTNodeId body);
