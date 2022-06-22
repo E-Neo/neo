@@ -54,6 +54,13 @@ ASTNodeManager_drop (ASTNodeManager *self)
     {
       switch (ptr->kind_)
         {
+        case AST_LET:
+          {
+            Vec_ASTNodeId_drop (&ptr->let_.vars_);
+            Vec_ASTNodeId_drop (&ptr->let_.types_);
+            Vec_ASTNodeId_drop (&ptr->let_.inits_);
+            break;
+          }
         case AST_LAMBDA:
           {
             Vec_ASTNodeId_drop (&ptr->lambda_.vars_);
