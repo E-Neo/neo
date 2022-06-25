@@ -7,6 +7,7 @@
 
 #include "array_macro.h"
 #include "span.h"
+#include "token.h"
 #include "vec_macro.h"
 
 typedef uint32_t ASTNodeId;
@@ -51,6 +52,17 @@ typedef struct ASTLambda
   ASTNodeId body_;
 } ASTLambda;
 
+typedef struct ASTUnary
+{
+  ASTNodeId expr_;
+} ASTUnary;
+
+typedef struct ASTBinary
+{
+  ASTNodeId left_;
+  ASTNodeId right_;
+} ASTBinary;
+
 typedef struct ASTNode
 {
   enum ASTKind kind_;
@@ -60,6 +72,8 @@ typedef struct ASTNode
     ASTIfThenElse if_then_else_;
     ASTLet let_;
     ASTLambda lambda_;
+    ASTUnary unary_;
+    ASTBinary binary_;
   };
 } ASTNode;
 
@@ -90,5 +104,10 @@ ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
 ASTNodeId ASTNodeManager_push_lambda (ASTNodeManager *self, Span span,
                                       Vec_ASTNodeId vars, Vec_ASTNodeId types,
                                       ASTNodeId body);
+ASTNodeId ASTNodeManager_push_unary (ASTNodeManager *self, Span span,
+                                     enum TokenKind op, ASTNodeId expr);
+ASTNodeId ASTNodeManager_push_binary (ASTNodeManager *self, Span span,
+                                      enum TokenKind op, ASTNodeId left,
+                                      ASTNodeId right);
 
 #endif

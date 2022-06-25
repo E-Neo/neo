@@ -419,7 +419,7 @@ Parser_parse_let (Parser *self)
 }
 
 static ASTNodeId
-Parser_parse_expr (Parser *self)
+Parser_parse_expr_before_operator (Parser *self)
 {
   switch (self->cursor_->kind_)
     {
@@ -433,14 +433,21 @@ Parser_parse_expr (Parser *self)
       {
         ASTNodeId id = ASTNodeManager_push_lit (
             self->ast_mgr_, self->cursor_->span_, AST_LIT_FALSE);
-        self->cursor_++;
+        Parser_skip (self, 1);
         return id;
       }
     case TOKEN_TRUE:
       {
         ASTNodeId id = ASTNodeManager_push_lit (
             self->ast_mgr_, self->cursor_->span_, AST_LIT_TRUE);
-        self->cursor_++;
+        Parser_skip (self, 1);
+        return id;
+      }
+    case TOKEN_INTEGER:
+      {
+        ASTNodeId id = ASTNodeManager_push_lit (
+            self->ast_mgr_, self->cursor_->span_, AST_LIT_INTEGER);
+        Parser_skip (self, 1);
         return id;
       }
     case TOKEN_IF:
@@ -466,6 +473,104 @@ Parser_parse_expr (Parser *self)
         return get_invalid_ast_node_id ();
       }
     }
+}
+
+static int
+op_precedence (enum TokenKind op)
+{
+  switch (op)
+    {
+    case TOKEN_PLUS:
+    case TOKEN_HYPHEN:
+      return 6;
+    case TOKEN_ASTERISK:
+    case TOKEN_SLASH:
+      return 7;
+    default:
+      return 0;
+    }
+}
+
+static Span
+Parser_span_between_node (const Parser *self, ASTNodeId first, ASTNodeId last)
+{
+  const char *cbegin
+      = Span_cbegin (&ASTNodeManager_get_node (self->ast_mgr_, first)->span_);
+  return Span_new (
+      cbegin,
+      Span_cend (&ASTNodeManager_get_node (self->ast_mgr_, last)->span_)
+          - cbegin);
+}
+
+static ASTNodeId
+drop_shunting_yard_stacks (Vec_ASTNodeId *expr_stack, Vec_TokenKind *op_stack)
+{
+  Vec_ASTNodeId_drop (expr_stack);
+  Vec_TokenKind_drop (op_stack);
+  return get_invalid_ast_node_id ();
+}
+
+static ASTNodeId
+Parser_parse_expr (Parser *self)
+{
+  ASTNodeId expr = Parser_parse_expr_before_operator (self);
+  if (is_invalid_ast_node_id (expr))
+    {
+      return get_invalid_ast_node_id ();
+    }
+  if (!(Parser_seeing (self, TOKEN_PLUS) || Parser_seeing (self, TOKEN_HYPHEN)
+        || Parser_seeing (self, TOKEN_ASTERISK)
+        || Parser_seeing (self, TOKEN_SLASH)))
+    {
+      return expr;
+    }
+  /* Shunting yard algorithm.  */
+  Vec_ASTNodeId expr_stack = Vec_ASTNodeId_new ();
+  Vec_ASTNodeId_push (&expr_stack, expr);
+  Vec_TokenKind op_stack = Vec_TokenKind_new ();
+  while (Parser_seeing (self, TOKEN_PLUS) || Parser_seeing (self, TOKEN_HYPHEN)
+         || Parser_seeing (self, TOKEN_ASTERISK)
+         || Parser_seeing (self, TOKEN_SLASH))
+    {
+      enum TokenKind op = self->cursor_->kind_;
+      Parser_skip (self, 1);
+      while (!Vec_TokenKind_is_empty (&op_stack)
+             && op_precedence (op)
+                    < op_precedence (*(Vec_TokenKind_cend (&op_stack) - 1)))
+        {
+          enum TokenKind op_old = Vec_TokenKind_pop (&op_stack);
+          ASTNodeId right = Vec_ASTNodeId_pop (&expr_stack);
+          ASTNodeId left = Vec_ASTNodeId_pop (&expr_stack);
+          Vec_ASTNodeId_push (&expr_stack,
+                              ASTNodeManager_push_binary (
+                                  self->ast_mgr_,
+                                  Parser_span_between_node (self, left, right),
+                                  op_old, left, right));
+        }
+      Vec_TokenKind_push (&op_stack, op);
+      expr = Parser_parse_expr_before_operator (self);
+      if (is_invalid_ast_node_id (expr))
+        {
+          return drop_shunting_yard_stacks (&expr_stack, &op_stack);
+        }
+      Vec_ASTNodeId_push (&expr_stack, expr);
+    }
+  while (!Vec_TokenKind_is_empty (&op_stack))
+    {
+      enum TokenKind op = Vec_TokenKind_pop (&op_stack);
+      ASTNodeId right = Vec_ASTNodeId_pop (&expr_stack);
+      ASTNodeId left = Vec_ASTNodeId_pop (&expr_stack);
+      Vec_ASTNodeId_push (&expr_stack,
+                          ASTNodeManager_push_binary (
+                              self->ast_mgr_,
+                              Parser_span_between_node (self, left, right), op,
+                              left, right));
+    }
+  assert (Vec_ASTNodeId_len (&expr_stack) == 1);
+  expr = Vec_ASTNodeId_pop (&expr_stack);
+  Vec_ASTNodeId_drop (&expr_stack);
+  Vec_TokenKind_drop (&op_stack);
+  return expr;
 }
 
 ASTNodeId

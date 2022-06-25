@@ -3,9 +3,11 @@
 #include "ast_node.h"
 
 #include <assert.h>
+#include <stdbool.h>
 
 #include "array_macro.h"
 #include "span.h"
+#include "token.h"
 #include "vec_macro.h"
 
 NEO_IMPL_VEC (ASTNodeId, ASTNodeId)
@@ -180,5 +182,51 @@ ASTNodeManager_push_lambda (ASTNodeManager *self, Span span,
                                .lambda_ = (ASTLambda){ .vars_ = vars,
                                                        .types_ = types,
                                                        .body_ = body } });
+  return id;
+}
+
+static enum ASTKind
+op_to_ast (enum TokenKind op)
+{
+  switch (op)
+    {
+    case TOKEN_PLUS:
+      return AST_ADD;
+    case TOKEN_HYPHEN:
+      return AST_SUB;
+    case TOKEN_ASTERISK:
+      return AST_MUL;
+    case TOKEN_SLASH:
+      return AST_DIV;
+    default:
+      {
+        assert (false);
+        return AST_INVALID;
+      }
+    }
+}
+
+ASTNodeId
+ASTNodeManager_push_unary (ASTNodeManager *self, Span span, enum TokenKind op,
+                           ASTNodeId expr)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (&self->nodes_,
+                    (ASTNode){ .kind_ = op_to_ast (op),
+                               .span_ = span,
+                               .unary_ = (ASTUnary){ .expr_ = expr } });
+  return id;
+}
+
+ASTNodeId
+ASTNodeManager_push_binary (ASTNodeManager *self, Span span, enum TokenKind op,
+                            ASTNodeId left, ASTNodeId right)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (
+      &self->nodes_,
+      (ASTNode){ .kind_ = op_to_ast (op),
+                 .span_ = span,
+                 .binary_ = (ASTBinary){ .left_ = left, .right_ = right } });
   return id;
 }

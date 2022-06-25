@@ -20,6 +20,7 @@ enum TokenKind
 };
 
 NEO_DECL_ARRAY (TokenKind, enum TokenKind)
+NEO_DECL_VEC (TokenKind, enum TokenKind)
 
 typedef struct Token
 {

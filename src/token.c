@@ -6,6 +6,7 @@
 #include "vec_macro.h"
 
 NEO_IMPL_ARRAY (TokenKind, enum TokenKind)
+NEO_IMPL_VEC (TokenKind, enum TokenKind)
 
 NEO_IMPL_VEC (Token, Token)
 

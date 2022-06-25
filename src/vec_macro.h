@@ -3,6 +3,7 @@
 #ifndef NEO_VEC_MACRO_H
 #define NEO_VEC_MACRO_H
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -140,6 +141,7 @@
                                                                               \
   T Vec_##N##_pop (Vec_##N *self)                                             \
   {                                                                           \
+    assert (!Vec_##N##_is_empty (self));                                      \
     self->end_--;                                                             \
     return *self->end_;                                                       \
   }                                                                           \
