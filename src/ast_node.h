@@ -52,6 +52,17 @@ typedef struct ASTLambda
   ASTNodeId body_;
 } ASTLambda;
 
+typedef struct ASTTuple
+{
+  Vec_ASTNodeId args_;
+} ASTTuple;
+
+typedef struct ASTCall
+{
+  ASTNodeId base_;
+  ASTNodeId tuple_;
+} ASTCall;
+
 typedef struct ASTUnary
 {
   ASTNodeId expr_;
@@ -72,6 +83,8 @@ typedef struct ASTNode
     ASTIfThenElse if_then_else_;
     ASTLet let_;
     ASTLambda lambda_;
+    ASTTuple tuple_;
+    ASTCall call_;
     ASTUnary unary_;
     ASTBinary binary_;
   };
@@ -104,6 +117,10 @@ ASTNodeId ASTNodeManager_push_let (ASTNodeManager *self, Span span,
 ASTNodeId ASTNodeManager_push_lambda (ASTNodeManager *self, Span span,
                                       Vec_ASTNodeId vars, Vec_ASTNodeId types,
                                       ASTNodeId body);
+ASTNodeId ASTNodeManager_push_tuple (ASTNodeManager *self, Span span,
+                                     Vec_ASTNodeId args);
+ASTNodeId ASTNodeManager_push_call (ASTNodeManager *self, Span span,
+                                    ASTNodeId base, ASTNodeId tuple);
 ASTNodeId ASTNodeManager_push_unary (ASTNodeManager *self, Span span,
                                      enum TokenKind op, ASTNodeId expr);
 ASTNodeId ASTNodeManager_push_binary (ASTNodeManager *self, Span span,

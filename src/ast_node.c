@@ -69,6 +69,11 @@ ASTNodeManager_drop (ASTNodeManager *self)
             Vec_ASTNodeId_drop (&ptr->lambda_.types_);
             break;
           }
+        case AST_TUPLE:
+          {
+            Vec_ASTNodeId_drop (&ptr->tuple_.args_);
+            break;
+          }
         default:
           break;
         }
@@ -204,6 +209,30 @@ op_to_ast (enum TokenKind op)
         return AST_INVALID;
       }
     }
+}
+
+ASTNodeId
+ASTNodeManager_push_tuple (ASTNodeManager *self, Span span, Vec_ASTNodeId args)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (&self->nodes_,
+                    (ASTNode){ .kind_ = AST_TUPLE,
+                               .span_ = span,
+                               .tuple_ = (ASTTuple){ .args_ = args } });
+  return id;
+}
+
+ASTNodeId
+ASTNodeManager_push_call (ASTNodeManager *self, Span span, ASTNodeId base,
+                          ASTNodeId tuple)
+{
+  ASTNodeId id = ASTNodeManager_get_next_id (self);
+  Vec_ASTNode_push (
+      &self->nodes_,
+      (ASTNode){ .kind_ = AST_CALL,
+                 .span_ = span,
+                 .call_ = (ASTCall){ .base_ = base, .tuple_ = tuple } });
+  return id;
 }
 
 ASTNodeId
