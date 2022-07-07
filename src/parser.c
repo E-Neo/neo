@@ -42,18 +42,30 @@ Parser_skip (Parser *self, size_t count)
   self->cursor_ += count;
 }
 
-static bool
-Parser_seeing_after (Parser *self, size_t skip, enum TokenKind kind)
+static enum TokenKind
+Parser_cursor_kind_after (const Parser *self, size_t skip)
 {
   if (self->cursor_ + skip >= Vec_Token_cend (self->tokens_))
     {
-      return false;
+      return TOKEN_EOF;
     }
-  return (self->cursor_ + skip)->kind_ == kind;
+  return (self->cursor_ + skip)->kind_;
+}
+
+static enum TokenKind
+Parser_cursor_kind (const Parser *self)
+{
+  return Parser_cursor_kind_after (self, 0);
 }
 
 static bool
-Parser_seeing (Parser *self, enum TokenKind kind)
+Parser_seeing_after (const Parser *self, size_t skip, enum TokenKind kind)
+{
+  return Parser_cursor_kind_after (self, skip) == kind;
+}
+
+static bool
+Parser_seeing (const Parser *self, enum TokenKind kind)
 {
   return Parser_seeing_after (self, 0, kind);
 }
@@ -456,7 +468,7 @@ Parser_parse_let (Parser *self)
   while (!Parser_seeing (self, TOKEN_IN))
     {
       if (!Parser_expect_and_skip (self, TOKEN_COMMA)
-          || Parser_parse_push_var_type_init (self, &vars, &types, &inits))
+          || !Parser_parse_push_var_type_init (self, &vars, &types, &inits))
         {
           return invalid_and_drop_ids_3 (&vars, &types, &inits);
         }
@@ -475,7 +487,7 @@ Parser_parse_let (Parser *self)
 static ASTNodeId
 Parser_parse_expr_before_tuple (Parser *self)
 {
-  switch (self->cursor_->kind_)
+  switch (Parser_cursor_kind (self))
     {
     case TOKEN_INVALID:
       {
@@ -562,11 +574,39 @@ Parser_parse_expr_before_operator (Parser *self)
       tuple);
 }
 
+static bool
+is_binary_op (enum TokenKind op)
+{
+  switch (op)
+    {
+    case TOKEN_PLUS:
+    case TOKEN_HYPHEN:
+    case TOKEN_ASTERISK:
+    case TOKEN_SLASH:
+    case TOKEN_EQ_EQ:
+    case TOKEN_SLASH_EQ:
+    case TOKEN_LT_EQ:
+    case TOKEN_GT_EQ:
+    case TOKEN_LT:
+    case TOKEN_GT:
+      return true;
+    default:
+      return false;
+    }
+}
+
 static int
 op_precedence (enum TokenKind op)
 {
   switch (op)
     {
+    case TOKEN_EQ_EQ:
+    case TOKEN_SLASH_EQ:
+    case TOKEN_LT_EQ:
+    case TOKEN_GT_EQ:
+    case TOKEN_LT:
+    case TOKEN_GT:
+      return 4;
     case TOKEN_PLUS:
     case TOKEN_HYPHEN:
       return 6;
@@ -594,25 +634,17 @@ Parser_parse_expr (Parser *self)
     {
       return get_invalid_ast_node_id ();
     }
-  if (!(Parser_seeing (self, TOKEN_PLUS) || Parser_seeing (self, TOKEN_HYPHEN)
-        || Parser_seeing (self, TOKEN_ASTERISK)
-        || Parser_seeing (self, TOKEN_SLASH)))
-    {
-      return expr;
-    }
   /* Shunting yard algorithm.  */
   Vec_ASTNodeId expr_stack = Vec_ASTNodeId_new ();
   Vec_ASTNodeId_push (&expr_stack, expr);
   Vec_TokenKind op_stack = Vec_TokenKind_new ();
-  while (Parser_seeing (self, TOKEN_PLUS) || Parser_seeing (self, TOKEN_HYPHEN)
-         || Parser_seeing (self, TOKEN_ASTERISK)
-         || Parser_seeing (self, TOKEN_SLASH))
+  while (is_binary_op (Parser_cursor_kind (self)))
     {
-      enum TokenKind op = self->cursor_->kind_;
+      enum TokenKind op = Parser_cursor_kind (self);
       Parser_skip (self, 1);
       while (!Vec_TokenKind_is_empty (&op_stack)
              && op_precedence (op)
-                    < op_precedence (*(Vec_TokenKind_cend (&op_stack) - 1)))
+                    <= op_precedence (*(Vec_TokenKind_cend (&op_stack) - 1)))
         {
           enum TokenKind op_old = Vec_TokenKind_pop (&op_stack);
           ASTNodeId right = Vec_ASTNodeId_pop (&expr_stack);

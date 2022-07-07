@@ -203,6 +203,18 @@ op_to_ast (enum TokenKind op)
       return AST_MUL;
     case TOKEN_SLASH:
       return AST_DIV;
+    case TOKEN_EQ_EQ:
+      return AST_EQ;
+    case TOKEN_SLASH_EQ:
+      return AST_NEQ;
+    case TOKEN_LT_EQ:
+      return AST_LE;
+    case TOKEN_GT_EQ:
+      return AST_GE;
+    case TOKEN_LT:
+      return AST_LT;
+    case TOKEN_GT:
+      return AST_GT;
     default:
       {
         assert (false);

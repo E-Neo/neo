@@ -94,6 +94,25 @@ SourceFile_display_token (const SourceFile *self, const Token *token)
 }
 
 static void
+Vec_ASTNodeId_display (const Vec_ASTNodeId *self)
+{
+  printf ("[");
+  const ASTNodeId *cend = Vec_ASTNodeId_cend (self);
+  const ASTNodeId *ptr = Vec_ASTNodeId_cbegin (self);
+  if (ptr < cend)
+    {
+      printf ("%u", *ptr);
+      ptr++;
+    }
+  while (ptr < cend)
+    {
+      printf (",%u", *ptr);
+      ptr++;
+    }
+  printf ("]");
+}
+
+static void
 ASTNode_display (const ASTNodeManager *ast_mgr, const ASTNode *node)
 {
   switch (node->kind_)
@@ -116,6 +135,60 @@ ASTNode_display (const ASTNodeManager *ast_mgr, const ASTNode *node)
         printf (",\"if_expr\":%u,\"then_expr\":%u,\"else_expr\":%u",
                 node->if_then_else_.if_expr_, node->if_then_else_.then_expr_,
                 node->if_then_else_.else_expr_);
+        break;
+      }
+    case AST_LET:
+      {
+        printf (",\"vars\":");
+        Vec_ASTNodeId_display (&node->let_.vars_);
+        printf (",\"types\":");
+        Vec_ASTNodeId_display (&node->let_.types_);
+        printf (",\"inits\":");
+        Vec_ASTNodeId_display (&node->let_.inits_);
+        printf (",\"body\":%u", node->let_.body_);
+        break;
+      }
+    case AST_LAMBDA:
+      {
+        printf (",\"vars\":");
+        Vec_ASTNodeId_display (&node->lambda_.vars_);
+        printf (",\"types\":");
+        Vec_ASTNodeId_display (&node->lambda_.types_);
+        printf (",\"body\":%u", node->lambda_.body_);
+        break;
+      }
+    case AST_TUPLE:
+      {
+        printf (",\"args\":");
+        Vec_ASTNodeId_display (&node->tuple_.args_);
+        break;
+      }
+    case AST_CALL:
+      {
+        printf (",\"base\":%u", node->call_.base_);
+        printf (",\"tuple\":%u", node->call_.tuple_);
+        break;
+      }
+    case AST_NEGATIVE:
+    case AST_POSITIVE:
+      {
+        printf (",\"expr\":%u", node->unary_.expr_);
+        break;
+      }
+    case AST_ADD:
+    case AST_SUB:
+    case AST_MUL:
+    case AST_DIV:
+    case AST_EQ:
+    case AST_NEQ:
+    case AST_LE:
+    case AST_GE:
+    case AST_LT:
+    case AST_GT:
+      {
+        printf (",\"left\":%u", node->binary_.left_);
+        printf (",\"right\":%u", node->binary_.right_);
+        break;
       }
     default:
       break;
