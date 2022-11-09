@@ -1,26 +1,27 @@
 CC = gcc -std=c11
-CFLAGS = -Wall -Wextra
+CFLAGS = -Wall -Wextra -Wl,--gc-sections
 
 MKDIR = mkdir -p
 RM = rm -rf
 
 SRC = src
+SRC_C=$(shell find $(SRC) -type f -name '*.c')
 OUTPUT = output
 
 MAIN = $(OUTPUT)/main
-TEST_MAIN = $(OUTPUT)/test_main
+MAIN_TEST = $(OUTPUT)/main_test
 
-release: $(filter-out $(SRC)/test_main.c, $(wildcard $(SRC)/*.c))
+test: $(SRC_C)
 	$(MKDIR) $(OUTPUT)
-	$(CC) $(CFLAGS) -O2 -o $(MAIN) $^
+	$(CC) $(CFLAGS) -I$(SRC) -O0 -g -o $(MAIN_TEST) $^
 
-debug: $(filter-out $(SRC)/test_main.c, $(wildcard $(SRC)/*.c))
+debug: $(SRC_C)
 	$(MKDIR) $(OUTPUT)
-	$(CC) $(CFLAGS) -g -o $(MAIN) $^
+	$(CC) $(CFLAGS) -I$(SRC) -O0 -g -o $(MAIN) $^
 
-test: $(filter-out $(SRC)/main.c, $(wildcard $(SRC)/*.c))
+release: $(SRC_C)
 	$(MKDIR) $(OUTPUT)
-	$(CC) $(CFLAGS) -DTESTS -g -o $(TEST_MAIN) $^
+	$(CC) $(CFLAGS) -I$(SRC) -O2 -o $(MAIN) $^
 
 clean:
 	$(RM) $(OUTPUT)

@@ -1,4 +1,0 @@
-/* Copyright (C) 2022 Yanxuan Cui <e-neo@qq.com>, all rights reserved.  */
-
-#include <stddef.h>
-NEO_RESULT(size_t, size_t, size_t, size_t)
