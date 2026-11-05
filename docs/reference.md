@@ -312,7 +312,9 @@ enum Name(parameters) : Sort {
   constructor on the same line.
 - A constructor's result type is implicit: `Name` applied to the enum's
   parameters in order.
-- An explicit result type is used for indexed families (see below).
+- An explicit result type is used for indexed families (see below). It must be
+  headed by the enum being defined, applied to the declared number of
+  parameters; a constructor cannot return a different type.
 
 ### Parameters
 
@@ -420,8 +422,18 @@ enum False : Prop {
 }
 ```
 
-`False` is uninhabited. It cannot be eliminated because `match` requires at
-least one arm (see [section 8](#8-pattern-matching)).
+`False` is uninhabited. It is eliminated with a zero-arm match when the result
+type is known:
+
+```neo
+fn absurd(P: Prop, f: False): P {
+  match f {
+  }
+}
+```
+
+The expected type is required because there are no branches from which to
+infer a result type.
 
 ### No mutual or nested inductives
 
@@ -612,6 +624,8 @@ match scrutinee {
 - Each arm is on its own line. The closing `}` may follow the last arm on the
   same line.
 - Every constructor of the enum must appear exactly once (exhaustiveness).
+- An enum with no constructors is matched with zero arms; an expected result
+  type is required.
 - Duplicate arms are rejected.
 
 Example:
@@ -746,16 +760,11 @@ There are no tactics, no `theorem` keyword, and no `forall`. A theorem is a
 
 - Equality proofs (`match p { refl => ... }`) may produce any type, including
   computational data. The proof is erased at run time.
-- A proposition enum (`And`, `Or`, `Exists`, `True`, `False`) is intended for
-  proof-level computation only. The kernel forbids eliminating such a value
-  into a computational type (large elimination).
-
-> **Current implementation note.** Stage 0 does not yet apply that kernel
-> restriction to every elaborated function body. A match such as
-> `match p { trivial => 3 }` on a `True` proof is currently accepted and runs.
-> Treat this as unsupported and expect it to be rejected in a future release.
-
-`False` cannot be eliminated, because `match` refuses zero arms.
+- A proposition enum (`And`, `Or`, `Exists`, `True`) is intended for
+  proof-level computation only. The kernel enforces this: eliminating such a
+  value into a computational type is rejected (large elimination).
+- `False`, which has no constructors, is eliminated with a zero-arm match.
+  The expected result type must be known.
 
 ### Proof erasure
 
@@ -1159,6 +1168,9 @@ Common messages:
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
 | `match is not exhaustive: missing constructor ...` | Add the missing arm. |
+| `cannot infer the result type of a match on an empty enum; add an expected type` | Empty enums are eliminated with zero arms, but need a known result type. |
+| `match: cannot eliminate this proposition into a type` | Large elimination of a `Prop` enum was attempted. |
+| `constructor ... must return ...` | A constructor's explicit result type must be its declaring enum. |
 | `duplicate arm for ...` | Remove one of the arms. |
 | `nested constructor patterns are not supported; bind a variable instead` | Sub-pattern is a constructor. |
 | `a match on an equality proof must use the pattern refl` | Equality matches have one `refl`/`_` arm. |
@@ -1186,9 +1198,6 @@ design:
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
 - dependent pattern matching that refines indices per branch;
-- elimination of `False` (zero-arm matches);
-- large elimination of `Prop` into computational types (intended rule; see the
-  note in [section 9](#9-equality-and-proofs));
 - proof irrelevance in the conversion checker;
 - custom printing and user-defined entry points;
 - `def`, `let`, `<-`, mutable variables, `proc`, `theorem`, `forall`, `lambda`,
