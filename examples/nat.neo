@@ -1,0 +1,18 @@
+// Structural recursion on Nat. `add` decreases in its first argument.
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(p) => succ(add(p, b))
+  }
+}
+
+fn mul(a: Nat, b: Nat): Nat {
+  match a {
+    zero => zero
+    succ(p) => add(b, mul(p, b))
+  }
+}
+
+fn main(): Nat {
+  mul(6, 7)
+}

@@ -1,0 +1,30 @@
+// Types are first-class: `mul` is defined after the `add` it calls.
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(p) => succ(add(p, b))
+  }
+}
+
+fn mul(a: Nat, b: Nat): Nat {
+  match a {
+    zero => zero
+    succ(p) => add(b, mul(p, b))
+  }
+}
+
+enum Shape {
+  circle(Nat)
+  rect(Nat, Nat)
+}
+
+fn area(s: Shape): Nat {
+  match s {
+    circle(r) => mul(r, r)
+    rect(w, h) => mul(w, h)
+  }
+}
+
+fn main(): Nat {
+  area(rect(3, 4))
+}

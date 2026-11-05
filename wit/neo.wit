@@ -1,0 +1,11 @@
+package neo:cli@0.1.0;
+
+/// A Neo program compiled to a WASI 0.2 command component.
+world neo {
+  /// Used by generated code to print the result of `main`.
+  import wasi:cli/stdout@0.2.9;
+  import wasi:io/streams@0.2.9;
+
+  /// WASI runs this entry point.
+  export wasi:cli/run@0.2.9;
+}

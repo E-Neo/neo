@@ -1,0 +1,5 @@
+// The smallest useful program: `main` returns a printable value.
+// The interpreter prints it; `neo build` prints it from the component.
+fn main(): Nat {
+  5
+}

@@ -1,0 +1,19 @@
+// Indexed families use explicit constructor result types. Named fields act
+// as binders for later fields and for the result type.
+//
+// Note: `neo` can build this program because `main` returns `Nat`. A program
+// whose `main` returns `Vec(T, n)` can be interpreted, but the WASM backend
+// cannot print fields whose types depend on earlier fields yet.
+enum Vec(T: Type, n: Nat) {
+  vnil : Vec(T, zero)
+  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+}
+
+fn two(): Vec(Nat, 2) {
+  vcons(1, 4, vcons(0, 3, vnil))
+}
+
+fn main(): Nat {
+  // Try `two()` in the REPL to see `vcons(1, 4, vcons(0, 3, vnil))`.
+  2
+}

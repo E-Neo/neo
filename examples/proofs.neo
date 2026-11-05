@@ -1,0 +1,29 @@
+// Equality is a built-in indexed proposition. A match on a proof of
+// `x == y` with the pattern `refl` is equality elimination (`J`).
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(p) => succ(add(p, b))
+  }
+}
+
+fn sym(T: Type, x: T, y: T, p: x == y): y == x {
+  match p {
+    refl => refl
+  }
+}
+
+fn add_zero(a: Nat): add(a, zero) == a {
+  match a {
+    zero => refl
+    succ(p) => match sym(Nat, add(p, zero), p, add_zero(p)) {
+      refl => refl
+    }
+  }
+}
+
+fn main(): Nat {
+  // The proof is checked now and erased at run time.
+  proof = add_zero(3)
+  7
+}

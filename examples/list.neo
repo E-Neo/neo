@@ -1,0 +1,18 @@
+// Generic functions take type parameters explicitly.
+fn append(T: Type, xs: List(T), ys: List(T)): List(T) {
+  match xs {
+    nil => ys
+    cons(h, t) => cons(h, append(T, t, ys))
+  }
+}
+
+fn range(n: Nat): List(Nat) {
+  match n {
+    zero => nil
+    succ(p) => cons(p, range(p))
+  }
+}
+
+fn main(): List(Nat) {
+  append(Nat, range(3), range(2))
+}

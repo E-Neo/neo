@@ -1,0 +1,20 @@
+// `Bool` is an ordinary enum. There is no `if`; use `match`.
+// Note: `and` is already a prelude constructor (for `And(P, Q)`), so this
+// function is named `both`.
+fn not(b: Bool): Bool {
+  match b {
+    true => false
+    false => true
+  }
+}
+
+fn both(a: Bool, b: Bool): Bool {
+  match a {
+    true => b
+    false => false
+  }
+}
+
+fn main(): Bool {
+  both(not(false), true)
+}

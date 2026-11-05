@@ -1,0 +1,20 @@
+// Functions are values. `fn(...) => ...` builds a closure that captures
+// its free variables by value.
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(p) => succ(add(p, b))
+  }
+}
+
+fn addn(n: Nat): fn(x: Nat) -> Nat {
+  fn(x: Nat) => add(n, x)
+}
+
+fn twice(f: fn(x: Nat) -> Nat, x: Nat): Nat {
+  f(f(x))
+}
+
+fn main(): Nat {
+  twice(addn(2), 3)
+}
