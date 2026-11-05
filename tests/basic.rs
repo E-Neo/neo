@@ -20,6 +20,11 @@ fn define(src: &str) -> Globals {
     globals
 }
 
+fn elaborate_error(src: &str) -> neo::error::Error {
+    let (mut globals, ast) = program(src);
+    elaborate_program(&mut globals, &ast).unwrap_err()
+}
+
 fn call(globals: &Globals, name: &str, args: &[V]) -> neo::value::V {
     let mut v: V = Rc::new(neo::value::Val::Glob(name.to_string()));
     for a in args {
@@ -145,4 +150,67 @@ fn loop(a: Nat): Nat {
     );
     let err = elaborate_program(&mut globals, &ast).unwrap_err();
     assert!(err.message.contains("structurally decreasing") || err.message.contains("recursive"));
+}
+
+#[test]
+fn rejects_prop_large_elimination() {
+    let err = elaborate_error(
+        r#"
+fn bad(p: True): Nat {
+  match p {
+    trivial => 3
+  }
+}
+"#,
+    );
+    assert!(
+        err.message.contains("cannot eliminate this proposition"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
+fn rejects_foreign_constructor_result() {
+    let err = elaborate_error(
+        r#"
+enum E {
+  c : Nat
+}
+"#,
+    );
+    assert!(
+        err.message.contains("must return `E`"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
+fn eliminates_empty_enum_with_zero_arms() {
+    define(
+        r#"
+fn absurd(P: Prop, f: False): P {
+  match f {
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_zero_arm_match_on_inhabited_enum() {
+    let err = elaborate_error(
+        r#"
+fn bad(n: Nat): Nat {
+  match n {
+  }
+}
+"#,
+    );
+    assert!(
+        err.message.contains("not exhaustive"),
+        "unexpected error: {}",
+        err.message
+    );
 }

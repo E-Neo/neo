@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::conv::{conv, conv_ty, is_prop, replace_val};
+use crate::conv::{conv, conv_ty, replace_val};
 use crate::core::{Branch, RcTm, Tm};
 use crate::env::{Globals, Sort};
 use crate::error::{Error, Result};
@@ -399,21 +399,6 @@ fn sort_to_val(s: Sort) -> V {
 
 pub fn sort_value(s: Sort) -> V {
     sort_to_val(s)
-}
-
-pub fn check_at(globals: &Globals, ctx: &mut Ctx, tm: &RcTm, expected: &V) -> Result<()> {
-    if is_prop(globals, ctx.level(), expected) {
-        // Proof irrelevance: any well-typed proof of the expected proposition is accepted
-        // only if its inferred type is convertible. We still infer to reject ill-typed terms.
-        let inferred = infer(globals, ctx, tm)?;
-        if conv_ty(globals, ctx.level(), &inferred, expected) {
-            Ok(())
-        } else {
-            Err(Error::new("proof has the wrong proposition"))
-        }
-    } else {
-        check(globals, ctx, tm, expected)
-    }
 }
 
 pub fn normalize(globals: &Globals, tm: &RcTm) -> RcTm {

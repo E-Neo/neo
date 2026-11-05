@@ -309,6 +309,12 @@ fn eval_expression(globals: &Globals, src: &str) -> Result<String> {
     let expr = parse_expr_source(src)?;
     let mut ctx = neo::check::Ctx::new();
     let (tm, ty) = elab_infer(globals, &mut ctx, &expr)?;
+    neo::check::check(globals, &mut ctx, &tm, &ty).map_err(|e| {
+        Error::at(
+            expr.span(),
+            format!("kernel rejected this expression: {}", e.message),
+        )
+    })?;
     let value = force(globals, eval(globals, &ctx.env, &tm));
     print_value(globals, &value).ok_or_else(|| {
         Error::new(format!(

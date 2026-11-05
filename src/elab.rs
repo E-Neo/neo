@@ -31,6 +31,9 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
         Some(e) => {
             let mut ctx = Ctx::new();
             let tm = elab_type(globals, &mut ctx, e)?;
+            check::infer_sort(globals, &mut Ctx::new(), &tm).map_err(|err| {
+                Error::at(e.span(), format!("invalid enum sort: {}", err.message))
+            })?;
             let v = force(globals, eval(globals, &ctx.env, &tm));
             match &*v {
                 Val::Type(u) => Sort::Type(*u),
@@ -51,6 +54,8 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
     let mut param_tys = Vec::new();
     for p in &decl.params {
         let tm = elab_type(globals, &mut pctx, &p.ty)?;
+        check::infer_sort(globals, &mut pctx, &tm)
+            .map_err(|err| Error::at(p.span, format!("invalid enum parameter: {}", err.message)))?;
         let v = eval(globals, &pctx.env, &tm);
         param_names.push(p.name.clone());
         param_tys.push(tm);
@@ -105,6 +110,24 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
                 ind(decl.name.clone(), args)
             }
         };
+
+        if c.result.is_some() {
+            let result_v = force(globals, eval(globals, &ctx.env, &result_tm));
+            let valid = match &*result_v {
+                Val::Ind(name, args) => name == &decl.name && args.len() == np,
+                _ => false,
+            };
+            if !valid {
+                let shown = crate::pretty::show_val(globals, ctx.level(), &result_v);
+                return Err(Error::at(
+                    c.span,
+                    format!(
+                        "constructor `{}` must return `{}`, but returns `{}`",
+                        c.name, decl.name, shown
+                    ),
+                ));
+            }
+        }
 
         let mut ty = result_tm;
         for i in (0..nf).rev() {
@@ -195,6 +218,22 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
     for (name, dom) in info.domains.iter().rev() {
         body = lam(name.clone(), dom.clone(), body);
     }
+
+    let mut type_ctx = Ctx::new();
+    check::infer_sort(globals, &mut type_ctx, &info.ty).map_err(|e| {
+        Error::at(
+            decl.span,
+            format!("kernel rejected the type of `{}`: {}", decl.name, e.message),
+        )
+    })?;
+    let ty_v = eval(globals, &Vec::new(), &info.ty);
+    let mut body_ctx = Ctx::new();
+    check::check(globals, &mut body_ctx, &body, &ty_v).map_err(|e| {
+        Error::at(
+            decl.span,
+            format!("kernel rejected `{}`: {}", decl.name, e.message),
+        )
+    })?;
 
     globals.set_fn_body(&decl.name, body);
     Ok(())
@@ -693,9 +732,6 @@ fn elab_match(
     expected: Option<&V>,
     span: Span,
 ) -> Result<(RcTm, V)> {
-    if arms.is_empty() {
-        return Err(Error::at(span, "match has no arms"));
-    }
     let (scrut_tm, scrut_ty) = elab_infer(globals, ctx, scrut)?;
     let scrut_ty = force(globals, scrut_ty);
 
@@ -728,6 +764,36 @@ fn elab_match(
         Some(i) => i.clone(),
         None => return Err(Error::at(span, format!("unknown enum `{}`", enum_name))),
     };
+
+    if arms.is_empty() {
+        if !info.ctors.is_empty() {
+            return Err(Error::at(
+                span,
+                format!(
+                    "match is not exhaustive: missing constructor `{}`",
+                    info.ctors[0].name
+                ),
+            ));
+        }
+        let expected = expected.ok_or_else(|| {
+            Error::at(
+                span,
+                "cannot infer the result type of a match on an empty enum; add an expected type",
+            )
+        })?;
+        let motive = build_motive(globals, ctx, scrut, &scrut_tm, &scrut_ty, expected);
+        let motive_v = eval(globals, &ctx.env, &motive);
+        let scrut_v = eval(globals, &ctx.env, &scrut_tm);
+        let ty = vapp(globals, motive_v, scrut_v);
+        return Ok((
+            rc(Tm::Match {
+                motive,
+                scrut: scrut_tm,
+                branches: Vec::new(),
+            }),
+            ty,
+        ));
+    }
 
     // A bare identifier naming a nullary constructor is a constructor pattern,
     // not a binder.

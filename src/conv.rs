@@ -92,28 +92,6 @@ pub fn conv_ty(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
     }
 }
 
-pub fn is_prop(globals: &Globals, level: usize, ty: &V) -> bool {
-    let ty = force(globals, ty.clone());
-    match &*ty {
-        Val::Prop => true,
-        Val::Pi(_, closure) => {
-            let fresh = vvar(level);
-            let cod = eval_closure(globals, closure, fresh);
-            is_prop(globals, level + 1, &cod)
-        }
-        Val::Ind(name, _) => globals.sort_of_enum(name) == Some(crate::env::Sort::Prop),
-        Val::Eq(_, _, _) => true,
-        _ => false,
-    }
-}
-
-pub fn conv_at(globals: &Globals, level: usize, ty: &V, a: &V, b: &V) -> bool {
-    if is_prop(globals, level, ty) {
-        return true;
-    }
-    conv(globals, level, a, b)
-}
-
 fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bool {
     match (a, b) {
         (Neutral::Var(i), Neutral::Var(j)) => i == j,
@@ -135,7 +113,7 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
                 branches: bb,
             },
         ) => {
-            if ea.len() != eb.len() || ba.len() != bb.len() {
+            if ba.len() != bb.len() {
                 return false;
             }
             if !conv(globals, level, sa, sb) {
@@ -161,12 +139,33 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
         }
         (
             Neutral::J {
-                env: ea, proof: pa, ..
+                env: ea,
+                ty: ta,
+                lhs: la,
+                rhs: ra,
+                proof: pa,
+                result_ty: rta,
+                refl_case: rca,
             },
             Neutral::J {
-                env: eb, proof: pb, ..
+                env: eb,
+                ty: tb,
+                lhs: lb,
+                rhs: rb,
+                proof: pb,
+                result_ty: rtb,
+                refl_case: rcb,
             },
-        ) => ea.len() == eb.len() && conv(globals, level, pa, pb),
+        ) => {
+            let norm = 1_000_000 + ea.len().max(eb.len());
+            let open = |env, tm| crate::quote::quote_open(globals, norm, env, tm);
+            conv(globals, level, pa, pb)
+                && crate::core::same_tm(&open(ea, ta), &open(eb, tb))
+                && crate::core::same_tm(&open(ea, la), &open(eb, lb))
+                && crate::core::same_tm(&open(ea, ra), &open(eb, rb))
+                && crate::core::same_tm(&open(ea, rta), &open(eb, rtb))
+                && crate::core::same_tm(&open(ea, rca), &open(eb, rcb))
+        }
         _ => false,
     }
 }
