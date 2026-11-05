@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-wasip2
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: bytecodealliance/actions/wasmtime/setup@v1
+        with:
+          version: "49.0.4"
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy (native)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test (native)
+        run: cargo test
+
+      - name: Clippy (WASI)
+        run: cargo clippy --target wasm32-wasip2 -- -D warnings
+
+      - name: Build the compiler for WASI
+        run: cargo build --target wasm32-wasip2
+
+      - name: Compile and run with the native compiler
+        run: |
+          cargo run --quiet -- build examples/nat.neo -o nat.wasm
+          test "$(wasmtime nat.wasm)" = "42"
+
+      - name: Compile and run with the WASM compiler
+        run: |
+          wasmtime run --dir "$PWD" \
+            target/wasm32-wasip2/debug/neo.wasm \
+            build "$PWD/examples/nat.neo" -o "$PWD/nat-wasm.wasm"
+          test "$(wasmtime "$PWD/nat-wasm.wasm")" = "42"
