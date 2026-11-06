@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::conv::{conv, conv_ty, replace_val};
+use crate::conv::{conv, conv_ty};
 use crate::core::{Branch, RcTm, Tm};
 use crate::env::{Globals, Sort};
 use crate::error::{Error, Result};
@@ -186,11 +186,10 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => {
             infer_sort(globals, ctx, ty)?;
-            infer_sort(globals, ctx, result_ty)?;
             let proof_ty = infer(globals, ctx, proof)?;
             let proof_ty = force(globals, proof_ty);
             let (eq_ty, eq_lhs, eq_rhs) = match &*proof_ty {
@@ -212,10 +211,26 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
                     "equality elimination: equality indices do not match",
                 ));
             }
-            let result_v = eval(globals, &ctx.env, result_ty);
-            let branch_ty = replace_val(globals, &eq_rhs, &eq_lhs, &result_v);
+            // The motive is an ordinary type family `(x: ty) -> Sort`. The
+            // kernel computes both the branch type and the result by applying
+            // it, so no ad-hoc index replacement is trusted.
+            let motive_ty = infer(globals, ctx, motive)?;
+            let motive_ty = force(globals, motive_ty);
+            let motive_dom = match &*motive_ty {
+                Val::Pi(dom, _) => dom.clone(),
+                _ => {
+                    return Err(Error::new("equality elimination: motive is not a function"));
+                }
+            };
+            if !conv(globals, ctx.level(), &motive_dom, &ty_v) {
+                return Err(Error::new(
+                    "equality elimination: motive domain does not match the equality type",
+                ));
+            }
+            let motive_v = eval(globals, &ctx.env, motive);
+            let branch_ty = vapp(globals, motive_v.clone(), lhs_v);
             check(globals, ctx, refl_case, &branch_ty)?;
-            Ok(result_v)
+            Ok(vapp(globals, motive_v, rhs_v))
         }
     }
 }
@@ -246,22 +261,26 @@ fn infer_match(
         Val::Pi(dom, _) => dom.clone(),
         _ => return Err(Error::new("match: motive is not a function")),
     };
-    if !conv_ty(globals, ctx.level(), &motive_dom, &scrut_ty) {
+    if !conv(globals, ctx.level(), &motive_dom, &scrut_ty) {
         return Err(Error::new(
             "match: motive domain does not match scrutinee type",
         ));
     }
 
-    // Large elimination restriction.
+    // Large elimination restriction: a `Prop` enum that is not
+    // singleton-eliminable may only be eliminated into `Prop`.
     if info.sort == Sort::Prop
-        && !info.ctors.is_empty()
-        && let Val::Pi(_, cod_closure) = &*motive_ty
+        && !info.prop_eliminable
+        && let Val::Pi(dom, _) = &*motive_ty
     {
-        let fresh = vvar(ctx.level());
-        let cod = eval_closure(globals, cod_closure, fresh);
-        if let Ok(sort) = sort_of_val(globals, &cod)
-            && matches!(sort, Sort::Type(_))
-        {
+        let created = ctx.push("_motive", dom.clone());
+        let applied = crate::core::app(motive.clone(), crate::core::var(0));
+        let result = infer(globals, ctx, &applied)
+            .and_then(|ty| sort_of_val_in(globals, ctx, &ty))
+            .map(|sort| matches!(sort, Sort::Type(_)));
+        ctx.pop();
+        let _ = created;
+        if result? {
             return Err(Error::new(
                 "match: cannot eliminate this proposition into a type",
             ));
@@ -327,7 +346,7 @@ pub fn check(globals: &Globals, ctx: &mut Ctx, tm: &RcTm, expected: &V) -> Resul
             };
             infer_sort(globals, ctx, dom)?;
             let dom_tm_v = eval(globals, &ctx.env, dom);
-            if !conv_ty(globals, ctx.level(), &dom_tm_v, &dom_v) {
+            if !conv(globals, ctx.level(), &dom_tm_v, &dom_v) {
                 return Err(Error::new("lambda: domain does not match expected type"));
             }
             let fresh = ctx.push(name.clone(), dom_v);
@@ -363,10 +382,13 @@ pub fn check(globals: &Globals, ctx: &mut Ctx, tm: &RcTm, expected: &V) -> Resul
 
 pub fn infer_sort(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<Sort> {
     let ty = infer(globals, ctx, tm)?;
-    sort_of_val(globals, &ty)
+    sort_of_val_in(globals, ctx, &ty)
 }
 
-pub fn sort_of_val(globals: &Globals, v: &V) -> Result<Sort> {
+/// Compute the sort of a type value, using the context to resolve neutral
+/// variables and applications. This is essential for dependent types such as
+/// `fn(x: T) -> Prop`, where `T` is a neutral variable.
+pub fn sort_of_val_in(globals: &Globals, ctx: &Ctx, v: &V) -> Result<Sort> {
     let v = force(globals, v.clone());
     match &*v {
         Val::Type(u) => Ok(Sort::Type(*u)),
@@ -376,18 +398,180 @@ pub fn sort_of_val(globals: &Globals, v: &V) -> Result<Sort> {
             .ok_or_else(|| Error::new(format!("unknown enum `{}`", name))),
         Val::Eq(_, _, _) => Ok(Sort::Prop),
         Val::Pi(dom, closure) => {
-            let dom_sort = sort_of_val(globals, dom)?;
-            let fresh = vvar(0);
+            let dom_sort = sort_of_val_in(globals, ctx, dom)?;
+            let mut inner = ctx.clone();
+            let fresh = inner.push("_", dom.clone());
             let cod = eval_closure(globals, closure, fresh);
-            let cod_sort = sort_of_val(globals, &cod)?;
+            let cod_sort = sort_of_val_in(globals, &inner, &cod)?;
             if cod_sort == Sort::Prop {
                 Ok(Sort::Prop)
             } else {
                 Ok(Sort::Type(dom_sort.level().max(cod_sort.level())))
             }
         }
+        Val::Neutral(n) => {
+            let ty = neutral_type_in(globals, ctx, n)?;
+            sort_of_val_in(globals, ctx, &ty)
+        }
         _ => Err(Error::new("expected a type")),
     }
+}
+
+fn neutral_type_in(globals: &Globals, ctx: &Ctx, n: &Neutral) -> Result<V> {
+    match n {
+        Neutral::Var(i) => ctx
+            .locals
+            .get(*i)
+            .map(|(_, ty)| ty.clone())
+            .ok_or_else(|| Error::new(format!("unbound variable level {}", i))),
+        Neutral::App(f, a) => {
+            let f_ty = neutral_type_in(globals, ctx, f)?;
+            let f_ty = force(globals, f_ty);
+            match &*f_ty {
+                Val::Pi(_, closure) => Ok(eval_closure(globals, closure, a.clone())),
+                _ => Err(Error::new("expected a type")),
+            }
+        }
+        _ => Err(Error::new("expected a type")),
+    }
+}
+
+pub fn sort_of_val(globals: &Globals, v: &V) -> Result<Sort> {
+    sort_of_val_in(globals, &Ctx::new(), v)
+}
+
+/// Re-validate every enum declaration from the stored data. This makes the
+/// kernel authoritative for positivity, field universes, result indices, and
+/// the singleton-elimination flag, rather than trusting the elaborator.
+pub fn check_enums(globals: &Globals) -> Result<()> {
+    for info in globals.enums.values() {
+        let mut params_ctx = Ctx::new();
+        for (name, ty) in info.param_names.iter().zip(info.param_tys.iter()) {
+            infer_sort(globals, &mut params_ctx, ty).map_err(|e| {
+                Error::new(format!(
+                    "kernel rejected enum `{}`: invalid parameter: {}",
+                    info.name, e.message
+                ))
+            })?;
+            let v = eval(globals, &params_ctx.env, ty);
+            params_ctx.push(name.clone(), v);
+        }
+
+        let mut singleton_ok = Vec::new();
+        for ctor in &info.ctors {
+            let mut ctx = Ctx::new();
+            let mut cur = &ctor.ty;
+            for _ in 0..info.param_names.len() {
+                match &**cur {
+                    Tm::Pi { dom, cod, .. } => {
+                        infer_sort(globals, &mut ctx, dom).map_err(|e| {
+                            Error::new(format!(
+                                "kernel rejected constructor `{}`: bad parameter: {}",
+                                ctor.name, e.message
+                            ))
+                        })?;
+                        let v = eval(globals, &ctx.env, dom);
+                        ctx.push("_", v);
+                        cur = cod;
+                    }
+                    _ => {
+                        return Err(Error::new(format!(
+                            "kernel rejected constructor `{}`: missing parameter",
+                            ctor.name
+                        )));
+                    }
+                }
+            }
+
+            let mut all_fields_prop = true;
+            for _ in 0..ctor.num_fields {
+                match &**cur {
+                    Tm::Pi { dom, cod, .. } => {
+                        crate::positivity::check_field(globals, &info.name, dom).map_err(|e| {
+                            Error::new(format!(
+                                "kernel rejected constructor `{}`: {}",
+                                ctor.name, e.message
+                            ))
+                        })?;
+                        let field_sort = infer_sort(globals, &mut ctx, dom).map_err(|e| {
+                            Error::new(format!(
+                                "kernel rejected constructor `{}`: bad field: {}",
+                                ctor.name, e.message
+                            ))
+                        })?;
+                        if let Sort::Type(u) = info.sort
+                            && field_sort.level() > u
+                        {
+                            return Err(Error::new(format!(
+                                "kernel rejected constructor `{}`: field is larger than the enum",
+                                ctor.name
+                            )));
+                        }
+                        all_fields_prop &= field_sort == Sort::Prop;
+                        let v = eval(globals, &ctx.env, dom);
+                        ctx.push("_", v);
+                        cur = cod;
+                    }
+                    _ => {
+                        return Err(Error::new(format!(
+                            "kernel rejected constructor `{}`: missing field",
+                            ctor.name
+                        )));
+                    }
+                }
+            }
+
+            match &**cur {
+                Tm::Ind(name, args) if name == &info.name => {
+                    if args.len() != info.param_names.len() {
+                        return Err(Error::new(format!(
+                            "kernel rejected constructor `{}`: wrong number of result indices",
+                            ctor.name
+                        )));
+                    }
+                    for arg in args {
+                        crate::positivity::check_index(globals, &info.name, arg).map_err(|e| {
+                            Error::new(format!(
+                                "kernel rejected constructor `{}`: {}",
+                                ctor.name, e.message
+                            ))
+                        })?;
+                        let index_sort = infer_sort(globals, &mut ctx, arg).map_err(|e| {
+                            Error::new(format!(
+                                "kernel rejected constructor `{}`: bad index: {}",
+                                ctor.name, e.message
+                            ))
+                        })?;
+                        if let Sort::Type(u) = info.sort
+                            && index_sort.level() > u
+                        {
+                            return Err(Error::new(format!(
+                                "kernel rejected constructor `{}`: index is larger than the enum",
+                                ctor.name
+                            )));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(Error::new(format!(
+                        "kernel rejected constructor `{}`: result is not `{}`",
+                        ctor.name, info.name
+                    )));
+                }
+            }
+            singleton_ok.push(all_fields_prop);
+        }
+
+        let expected = info.sort == Sort::Prop
+            && (singleton_ok.is_empty() || (singleton_ok.len() == 1 && singleton_ok[0]));
+        if expected != info.prop_eliminable {
+            return Err(Error::new(format!(
+                "kernel rejected enum `{}`: inconsistent elimination flag",
+                info.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn sort_to_val(s: Sort) -> V {

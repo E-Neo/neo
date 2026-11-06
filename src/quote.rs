@@ -94,14 +94,14 @@ fn quote_neutral(globals: &Globals, level: usize, n: &Neutral) -> RcTm {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => Rc::new(Tm::J {
             ty: quote_open(globals, level, env, ty),
             lhs: quote_open(globals, level, env, lhs),
             rhs: quote_open(globals, level, env, rhs),
             proof: quote(globals, level, proof),
-            result_ty: quote_open(globals, level, env, result_ty),
+            motive: quote_open(globals, level, env, motive),
             refl_case: quote_open(globals, level, env, refl_case),
         }),
     }
@@ -198,14 +198,14 @@ fn close_under(globals: &Globals, level: usize, env: &Env, tm: &RcTm, extra: usi
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => Rc::new(Tm::J {
             ty: close_under(globals, level, env, ty, extra),
             lhs: close_under(globals, level, env, lhs, extra),
             rhs: close_under(globals, level, env, rhs, extra),
             proof: close_under(globals, level, env, proof, extra),
-            result_ty: close_under(globals, level, env, result_ty, extra),
+            motive: close_under(globals, level, env, motive, extra),
             refl_case: close_under(globals, level, env, refl_case, extra),
         }),
     }

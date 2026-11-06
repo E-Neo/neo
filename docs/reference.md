@@ -90,6 +90,9 @@ Details:
 - Errors in a file include the path, for example:
   `error: 3:7: examples/nat.neo: type mismatch: expected ...`.
 - An unknown first argument is treated as a file path, not as a subcommand.
+- Every function is re-checked by the kernel after elaboration. A definition
+  that passed the surface checks but fails the kernel re-check is rejected with
+  a `kernel rejected ...` error.
 
 ---
 
@@ -690,8 +693,12 @@ fn sym(T: Type, x: T, y: T, p: x == y): y == x {
 }
 ```
 
-The arm is checked with the right-hand side replaced by the left-hand side.
-This is equality elimination (`J`). See [section 9](#9-equality-and-proofs).
+The arm is checked against a motive. If the expected type is written in terms
+of the right-hand side `y`, that occurrence is abstracted to the motive
+argument; the `refl` arm is then checked at the left-hand side `x`, and the
+whole match has the expected type with `y` in place. This is motive-based
+equality elimination (`J`), not textual replacement.
+See [section 9](#9-equality-and-proofs).
 
 ---
 
@@ -763,6 +770,10 @@ There are no tactics, no `theorem` keyword, and no `forall`. A theorem is a
 - A proposition enum (`And`, `Or`, `Exists`, `True`) is intended for
   proof-level computation only. The kernel enforces this: eliminating such a
   value into a computational type is rejected (large elimination).
+- The exception is the *singleton* rule. A `Prop` enum with no constructors
+  (`False`), or with exactly one constructor whose fields are all propositions
+  (for example `x == y` with its `refl` constructor), may be eliminated into any
+  type. This is what makes equality proofs usable as ordinary values.
 - `False`, which has no constructors, is eliminated with a zero-arm match.
   The expected result type must be known.
 
@@ -791,14 +802,18 @@ proposition as interchangeable; write proofs in the form the checker expects.
 
 ## 10. Totality and termination
 
-Every `fn` must terminate. The termination checker runs on the source before
-elaboration and requires:
+Every `fn` must terminate. The definitive check runs on the elaborated core
+term inside the kernel, so surface sugar (parentheses, blocks, variable
+patterns, aliases) cannot hide a recursive occurrence. It requires:
 
-1. **One fixed decreasing argument position** shared by all recursive calls.
-2. Each recursive call's argument in that position must be a **variable**
-   bound by a pattern that destructures a parameter (or an already-smaller
-   variable).
-3. Recursive calls everywhere must agree on the same position.
+1. **The recursive name never escapes.** It may only be the head of a fully
+   applied call (`f(x, y)`); every other occurrence (`g = f`, `f` passed to
+   another function, `f` returned, captured, or stored) is rejected even when
+   the decrease condition would hold.
+2. **Every call is structurally decreasing in one fixed argument position**
+   shared by all recursive calls.
+3. The decreasing argument must be a **variable** bound by a pattern
+   destructure of a parameter (or of an already-smaller variable).
 
 Accepted:
 
@@ -835,19 +850,34 @@ fn bad3(n: Nat): Nat {
 Exact error styles:
 
 ```
-recursive call to `bad` is not structurally decreasing; no argument is a subterm of a parameter
-recursive call uses a non-variable expression built from a structurally smaller value
-recursive calls do not decrease in a single consistent argument position
+recursive call to `bad` is not structurally decreasing; no argument is a strict subterm of a parameter
+recursive calls to `loop` do not decrease in a single consistent argument position
+recursive function `boom` is used as a value; recursive calls must be fully applied
+```
+
+The “used as a value” error is what rejects indirect recursion such as:
+
+```neo
+fn apply(g: fn(Nat) -> False, x: Nat): False { g(x) }
+fn boom(n: Nat): False { apply(boom, n) }     // rejected
 ```
 
 Consequences:
 
 - Only self-recursion is possible.
+- A function can never be passed, returned, stored, or captured while it is
+  being defined, which keeps the termination argument purely syntactic.
 - Recursion on a computed value is rejected even if it is obviously total.
 - The checker is deliberately conservative; some total functions need to be
   rewritten in a structurally recursive style.
 - A `match` whose scrutinee is not a variable does not make its fields
   smaller, so recursion on those fields is rejected.
+
+The checker is part of the trusted kernel: after elaboration, the whole
+program is re-checked from the stored core terms, and only functions that pass
+both the recursion check and the type checker have unfoldable bodies. A
+definition that fails re-checking is rejected even if it was elaborated
+successfully.
 
 ---
 
@@ -879,6 +909,43 @@ Error:
 ```
 `Bad` is not strictly positive in this constructor field (nested inductives are not supported)
 ```
+
+The same applies to constructor result indices. The enum being defined may not
+occur anywhere inside them, so this is rejected as well:
+
+```neo
+enum Bad(F: Type 1) : Type 1 {
+  mk(g: F) : Bad(fn(x: Bad(F)) -> Type 0)
+}
+```
+
+```
+`Bad` occurs in a constructor result index; enum indices may not mention the enum being defined
+```
+
+```neo
+enum E(A: Type 1) : Type 0 {
+  c(x: A)                  // rejected: a `Type 1` field in a `Type 0` enum
+}
+```
+
+```
+constructor field lives in `Type 1`, but `E` is declared in `Type 0`; a field may not be larger than its enum
+```
+
+### Universe bounds on inductives
+
+For an enum declared at `Type u`, every constructor field type and index type
+must live in a sort at most `Type u`. Fields may not be larger than the enum:
+
+```neo
+enum E(A: Type 1) : Type 0 {
+  c(x: A)                  // rejected: a `Type 1` field in a `Type 0` enum
+}
+```
+
+A `Prop` enum may have large fields; it is the elimination, not the
+declaration, that is restricted (see the singleton rule above).
 
 There are no mutual inductive types, because every enum must be declared
 before it is used.
@@ -1170,6 +1237,10 @@ Common messages:
 | `match is not exhaustive: missing constructor ...` | Add the missing arm. |
 | `cannot infer the result type of a match on an empty enum; add an expected type` | Empty enums are eliminated with zero arms, but need a known result type. |
 | `match: cannot eliminate this proposition into a type` | Large elimination of a `Prop` enum was attempted. |
+| `... is larger than its enum` / `... field lives in ...` | A `Type u` enum has a constructor field or index in a larger sort. |
+| `... occurs in a constructor result index ...` | The enum appears in a constructor result index. |
+| `recursive function ... is used as a value` | The recursive name escaped; only fully applied calls are allowed. |
+| `recursive call to ... is not structurally decreasing ...` | A recursive call does not descend on a subterm of one fixed parameter. |
 | `constructor ... must return ...` | A constructor's explicit result type must be its declaring enum. |
 | `duplicate arm for ...` | Remove one of the arms. |
 | `nested constructor patterns are not supported; bind a variable instead` | Sub-pattern is a constructor. |

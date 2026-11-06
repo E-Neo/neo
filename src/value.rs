@@ -43,7 +43,7 @@ pub enum Neutral {
         lhs: RcTm,
         rhs: RcTm,
         proof: V,
-        result_ty: RcTm,
+        motive: RcTm,
         refl_case: RcTm,
     },
 }

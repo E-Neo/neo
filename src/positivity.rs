@@ -13,6 +13,19 @@ pub fn check_field(_globals: &Globals, enum_name: &str, tm: &RcTm) -> Result<()>
     Ok(())
 }
 
+/// Constructor result indices must not mention the enum being defined. This is
+/// a conservative positivity rule: an occurrence in an index could otherwise
+/// hide the enum in a negative position (for example `Bad(fn(x: Bad) -> T)`).
+pub fn check_index(_globals: &Globals, enum_name: &str, tm: &RcTm) -> Result<()> {
+    if contains(enum_name, tm) {
+        return Err(Error::new(format!(
+            "`{}` occurs in a constructor result index; enum indices may not mention the enum being defined",
+            enum_name
+        )));
+    }
+    Ok(())
+}
+
 fn contains(enum_name: &str, tm: &RcTm) -> bool {
     match &**tm {
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => false,
@@ -39,14 +52,14 @@ fn contains(enum_name: &str, tm: &RcTm) -> bool {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => {
             contains(enum_name, ty)
                 || contains(enum_name, lhs)
                 || contains(enum_name, rhs)
                 || contains(enum_name, proof)
-                || contains(enum_name, result_ty)
+                || contains(enum_name, motive)
                 || contains(enum_name, refl_case)
         }
     }
@@ -87,14 +100,14 @@ fn bad_occurrence(enum_name: &str, tm: &RcTm) -> bool {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => {
             contains(enum_name, ty)
                 || contains(enum_name, lhs)
                 || contains(enum_name, rhs)
                 || contains(enum_name, proof)
-                || contains(enum_name, result_ty)
+                || contains(enum_name, motive)
                 || contains(enum_name, refl_case)
         }
     }

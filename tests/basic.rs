@@ -156,9 +156,15 @@ fn loop(a: Nat): Nat {
 fn rejects_prop_large_elimination() {
     let err = elaborate_error(
         r#"
-fn bad(p: True): Nat {
+enum Two : Prop {
+  a
+  b
+}
+
+fn bad(p: Two): Nat {
   match p {
-    trivial => 3
+    a => 0
+    b => 1
   }
 }
 "#,

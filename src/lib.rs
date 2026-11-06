@@ -12,6 +12,6 @@ pub mod positivity;
 pub mod prelude;
 pub mod pretty;
 pub mod quote;
+pub mod recursion;
 pub mod surface;
-pub mod termination;
 pub mod value;

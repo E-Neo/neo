@@ -44,6 +44,10 @@ pub struct EnumInfo {
     pub param_tys: Vec<RcTm>,
     pub sort: Sort,
     pub ctors: Vec<CtorInfo>,
+    /// True when a `Prop`-sorted enum may be eliminated into a `Type`:
+    /// the enum is empty, or it has exactly one constructor and every field
+    /// is itself a proposition. This is the singleton-elimination rule.
+    pub prop_eliminable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +56,9 @@ pub enum GlobalDef {
         ty: RcTm,
         body: Option<RcTm>,
         num_params: usize,
+        /// A body may only be unfolded once it has passed the authoritative
+        /// recursion and kernel checks. Unchecked bodies stay opaque.
+        checked: bool,
     },
     Ctor {
         enum_name: String,
@@ -79,19 +86,30 @@ impl Globals {
                 ty,
                 body: None,
                 num_params,
+                checked: false,
             },
         );
     }
 
+    /// Commit a body that has already passed the recursion checker and the
+    /// kernel type check. Only committed bodies are unfolded by evaluation.
     pub fn set_fn_body(&mut self, name: &str, body: RcTm) {
-        if let Some(GlobalDef::Fn { body: b, .. }) = self.defs.get_mut(name) {
+        if let Some(GlobalDef::Fn {
+            body: b, checked, ..
+        }) = self.defs.get_mut(name)
+        {
             *b = Some(body);
+            *checked = true;
         }
     }
 
     pub fn get_fn_body(&self, name: &str) -> Option<&RcTm> {
         match self.defs.get(name) {
-            Some(GlobalDef::Fn { body: Some(b), .. }) => Some(b),
+            Some(GlobalDef::Fn {
+                body: Some(b),
+                checked: true,
+                ..
+            }) => Some(b),
             _ => None,
         }
     }
@@ -101,6 +119,38 @@ impl Globals {
             Some(GlobalDef::Fn { num_params, .. }) => Some(*num_params),
             _ => None,
         }
+    }
+
+    /// A view of the globals in which the listed definitions are opaque.
+    /// Used by the program checker so that checking a definition never
+    /// depends on the body currently being checked.
+    pub fn sealed(&self, names: &[&str]) -> Globals {
+        let mut sealed = self.clone();
+        for name in names {
+            if let Some(GlobalDef::Fn { body, checked, .. }) = sealed.defs.get_mut(*name) {
+                *body = None;
+                *checked = false;
+            }
+        }
+        sealed
+    }
+
+    /// Names of all functions with a committed body, in deterministic order.
+    pub fn fn_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .defs
+            .iter()
+            .filter_map(|(name, def)| match def {
+                GlobalDef::Fn {
+                    body: Some(_),
+                    checked: true,
+                    ..
+                } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        names.sort();
+        names
     }
 
     pub fn get_ty(&self, name: &str) -> Option<&RcTm> {

@@ -33,7 +33,7 @@ pub enum Tm {
         lhs: RcTm,
         rhs: RcTm,
         proof: RcTm,
-        result_ty: RcTm,
+        motive: RcTm,
         refl_case: RcTm,
     },
 }
@@ -151,15 +151,99 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => rc(Tm::J {
             ty: shift(ty, delta, cutoff),
             lhs: shift(lhs, delta, cutoff),
             rhs: shift(rhs, delta, cutoff),
             proof: shift(proof, delta, cutoff),
-            result_ty: shift(result_ty, delta, cutoff),
+            motive: shift(motive, delta, cutoff),
             refl_case: shift(refl_case, delta, cutoff),
+        }),
+    }
+}
+
+/// Substitute `replacement` for `Var(index)` in `tm`, shifting the
+/// replacement under binders as required. The result is a capture-avoiding
+/// substitution in the de Bruijn representation.
+pub fn subst(tm: &RcTm, index: usize, replacement: &RcTm) -> RcTm {
+    subst_at(tm, index, replacement, 0)
+}
+
+fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
+    match &**tm {
+        Tm::Var(i) => {
+            if *i == index + depth {
+                shift(replacement, depth as isize, 0)
+            } else {
+                tm.clone()
+            }
+        }
+        Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
+        Tm::Pi { name, dom, cod } => pi(
+            name.clone(),
+            subst_at(dom, index, replacement, depth),
+            subst_at(cod, index, replacement, depth + 1),
+        ),
+        Tm::Lam { name, dom, body } => lam(
+            name.clone(),
+            subst_at(dom, index, replacement, depth),
+            subst_at(body, index, replacement, depth + 1),
+        ),
+        Tm::App(f, a) => app(
+            subst_at(f, index, replacement, depth),
+            subst_at(a, index, replacement, depth),
+        ),
+        Tm::Ind(name, args) => ind(
+            name.clone(),
+            args.iter()
+                .map(|a| subst_at(a, index, replacement, depth))
+                .collect(),
+        ),
+        Tm::Ctor(name, i, args) => ctor(
+            name.clone(),
+            *i,
+            args.iter()
+                .map(|a| subst_at(a, index, replacement, depth))
+                .collect(),
+        ),
+        Tm::Match {
+            motive,
+            scrut,
+            branches,
+        } => rc(Tm::Match {
+            motive: subst_at(motive, index, replacement, depth),
+            scrut: subst_at(scrut, index, replacement, depth),
+            branches: branches
+                .iter()
+                .map(|b| Branch {
+                    ctor: b.ctor.clone(),
+                    binders: b.binders,
+                    body: subst_at(&b.body, index, replacement, depth + b.binders),
+                })
+                .collect(),
+        }),
+        Tm::Eq(a, b, c) => eq(
+            subst_at(a, index, replacement, depth),
+            subst_at(b, index, replacement, depth),
+            subst_at(c, index, replacement, depth),
+        ),
+        Tm::Refl(a) => rc(Tm::Refl(subst_at(a, index, replacement, depth))),
+        Tm::J {
+            ty,
+            lhs,
+            rhs,
+            proof,
+            motive,
+            refl_case,
+        } => rc(Tm::J {
+            ty: subst_at(ty, index, replacement, depth),
+            lhs: subst_at(lhs, index, replacement, depth),
+            rhs: subst_at(rhs, index, replacement, depth),
+            proof: subst_at(proof, index, replacement, depth),
+            motive: subst_at(motive, index, replacement, depth),
+            refl_case: subst_at(refl_case, index, replacement, depth),
         }),
     }
 }
@@ -227,7 +311,7 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
                 lhs: l1,
                 rhs: r1,
                 proof: p1,
-                result_ty: rt1,
+                motive: m1,
                 refl_case: rc1,
             },
             Tm::J {
@@ -235,7 +319,7 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
                 lhs: l2,
                 rhs: r2,
                 proof: p2,
-                result_ty: rt2,
+                motive: m2,
                 refl_case: rc2,
             },
         ) => {
@@ -243,7 +327,7 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
                 && same_tm(l1, l2)
                 && same_tm(r1, r2)
                 && same_tm(p1, p2)
-                && same_tm(rt1, rt2)
+                && same_tm(m1, m2)
                 && same_tm(rc1, rc2)
         }
         _ => false,

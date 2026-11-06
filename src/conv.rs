@@ -11,13 +11,13 @@ pub fn conv(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
         (Val::Type(u), Val::Type(v)) => u == v,
         (Val::Prop, Val::Prop) => true,
         (Val::Pi(da, ca), Val::Pi(db, cb)) => {
-            if !conv_ty(globals, level, da, db) {
+            if !conv(globals, level, da, db) {
                 return false;
             }
             let fresh = vvar(level);
             let ca = eval_closure(globals, ca, fresh.clone());
             let cb = eval_closure(globals, cb, fresh);
-            conv_ty(globals, level + 1, &ca, &cb)
+            conv(globals, level + 1, &ca, &cb)
         }
         (Val::Lam(ca), Val::Lam(cb)) => {
             let fresh = vvar(level);
@@ -38,6 +38,10 @@ pub fn conv(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
             conv(globals, level + 1, &a, &b)
         }
         (Val::Neutral(na), Val::Neutral(nb)) => conv_neutral(globals, level, na, nb),
+        (Val::Glob(a), Val::Glob(b)) => a == b,
+        (Val::Glob(a), Val::Neutral(n)) | (Val::Neutral(n), Val::Glob(a)) => {
+            matches!(&**n, Neutral::Global(b) if a == b)
+        }
         (Val::Ind(na, aa), Val::Ind(nb, ab)) => {
             na == nb
                 && aa.len() == ab.len()
@@ -72,7 +76,7 @@ pub fn conv_ty(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
         (Val::Type(u), Val::Type(v)) => u <= v,
         (Val::Prop, Val::Prop) => true,
         (Val::Pi(da, ca), Val::Pi(db, cb)) => {
-            if !conv_ty(globals, level, da, db) {
+            if !conv(globals, level, da, db) {
                 return false;
             }
             let fresh = vvar(level);
@@ -144,7 +148,7 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
                 lhs: la,
                 rhs: ra,
                 proof: pa,
-                result_ty: rta,
+                motive: rta,
                 refl_case: rca,
             },
             Neutral::J {
@@ -153,7 +157,7 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
                 lhs: lb,
                 rhs: rb,
                 proof: pb,
-                result_ty: rtb,
+                motive: rtb,
                 refl_case: rcb,
             },
         ) => {
@@ -206,7 +210,7 @@ pub fn replace_val(globals: &Globals, target: &V, replacement: &V, v: &V) -> V {
                 lhs,
                 rhs,
                 proof,
-                result_ty,
+                motive,
                 refl_case,
             } => {
                 let env: Env = env
@@ -222,7 +226,7 @@ pub fn replace_val(globals: &Globals, target: &V, replacement: &V, v: &V) -> V {
                         ty,
                         lhs,
                         rhs,
-                        result_ty,
+                        motive,
                         refl_case,
                     },
                 )
@@ -280,6 +284,7 @@ fn same_val(globals: &Globals, a: &V, b: &V) -> bool {
         }
         (Val::Refl(x), Val::Refl(y)) => same_val(globals, x, y),
         (Val::Neutral(x), Val::Neutral(y)) => same_neutral(globals, x, y),
+        (Val::Glob(a), Val::Glob(b)) => a == b,
         _ => false,
     }
 }

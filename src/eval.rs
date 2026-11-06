@@ -91,7 +91,7 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => {
             let proof_v = eval(globals, env, proof);
@@ -104,7 +104,7 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
                     lhs: lhs.clone(),
                     rhs: rhs.clone(),
                     proof: forced,
-                    result_ty: result_ty.clone(),
+                    motive: motive.clone(),
                     refl_case: refl_case.clone(),
                 }),
             }
@@ -211,7 +211,7 @@ pub struct JArgs<'a> {
     pub ty: &'a RcTm,
     pub lhs: &'a RcTm,
     pub rhs: &'a RcTm,
-    pub result_ty: &'a RcTm,
+    pub motive: &'a RcTm,
     pub refl_case: &'a RcTm,
 }
 
@@ -226,7 +226,7 @@ pub fn reduce_j(globals: &Globals, env: &Env, proof: &V, args: &JArgs<'_>) -> V 
             lhs: args.lhs.clone(),
             rhs: args.rhs.clone(),
             proof: forced,
-            result_ty: args.result_ty.clone(),
+            motive: args.motive.clone(),
             refl_case: args.refl_case.clone(),
         }),
     }

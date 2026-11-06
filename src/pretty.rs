@@ -109,7 +109,7 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
             lhs,
             rhs,
             proof,
-            result_ty,
+            motive,
             refl_case,
         } => format!(
             "J({}, {}, {}, {}, {}, {})",
@@ -117,7 +117,7 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
             term_at(globals, names, lhs),
             term_at(globals, names, rhs),
             term_at(globals, names, proof),
-            term_at(globals, names, result_ty),
+            term_at(globals, names, motive),
             term_at(globals, names, refl_case)
         ),
     }

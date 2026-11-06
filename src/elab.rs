@@ -16,10 +16,26 @@ pub fn elaborate_program(globals: &mut Globals, program: &Program) -> Result<()>
             Decl::Fn(f) => elab_fn(globals, f)?,
         }
     }
+    crate::recursion::check_program(globals)?;
     Ok(())
 }
 
+fn show_sort(sort: Sort) -> String {
+    match sort {
+        Sort::Prop => "Prop".to_string(),
+        Sort::Type(u) => format!("Type {}", u),
+    }
+}
+
 fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
+    let result = elab_enum_inner(globals, decl);
+    if result.is_err() {
+        globals.enums.remove(&decl.name);
+    }
+    result
+}
+
+fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
     if globals.enums.contains_key(&decl.name) || globals.defs.contains_key(&decl.name) {
         return Err(Error::at(
             decl.span,
@@ -73,15 +89,23 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
             param_tys: param_tys.clone(),
             sort,
             ctors: Vec::new(),
+            prop_eliminable: false,
         },
     );
 
-    let mut ctor_infos = Vec::new();
+    let mut ctor_infos: Vec<CtorInfo> = Vec::new();
+    let mut ctor_singleton_ok = Vec::new();
     for (idx, c) in decl.ctors.iter().enumerate() {
-        if globals.defs.contains_key(&c.name) {
+        if globals.defs.contains_key(&c.name) || globals.enums.contains_key(&c.name) {
             return Err(Error::at(
                 c.span,
                 format!("`{}` is already defined", c.name),
+            ));
+        }
+        if ctor_infos.iter().any(|info| info.name == c.name) {
+            return Err(Error::at(
+                c.span,
+                format!("constructor `{}` is defined twice", c.name),
             ));
         }
         let nf = c.fields.len();
@@ -93,9 +117,27 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
 
         let mut field_names = Vec::new();
         let mut field_tms = Vec::new();
+        let mut all_fields_prop = true;
         for (j, f) in c.fields.iter().enumerate() {
             let tm = elab_type(globals, &mut ctx, &f.ty)?;
             crate::positivity::check_field(globals, &decl.name, &tm)?;
+            let field_sort = check::infer_sort(globals, &mut ctx, &tm).map_err(|e| {
+                Error::at(f.span, format!("invalid constructor field: {}", e.message))
+            })?;
+            if let Sort::Type(u) = sort
+                && field_sort.level() > u
+            {
+                return Err(Error::at(
+                    f.span,
+                    format!(
+                        "constructor field lives in `{}`, but `{}` is declared in `Type {}`; a field may not be larger than its enum",
+                        show_sort(field_sort),
+                        decl.name,
+                        u
+                    ),
+                ));
+            }
+            all_fields_prop &= field_sort == Sort::Prop;
             let v = eval(globals, &ctx.env, &tm);
             let fname = f.name.clone().unwrap_or_else(|| format!("_f{}", j));
             field_names.push(fname.clone());
@@ -127,6 +169,30 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
                     ),
                 ));
             }
+            // Conservative positivity and universe checks for the indices.
+            if let Val::Ind(_, args) = &*result_v {
+                for arg in args {
+                    let tm = quote(globals, ctx.level(), arg);
+                    crate::positivity::check_index(globals, &decl.name, &tm)
+                        .map_err(|e| Error::at(c.span, e.message))?;
+                    let index_sort = check::infer_sort(globals, &mut ctx, &tm).map_err(|e| {
+                        Error::at(c.span, format!("invalid constructor index: {}", e.message))
+                    })?;
+                    if let Sort::Type(u) = sort
+                        && index_sort.level() > u
+                    {
+                        return Err(Error::at(
+                            c.span,
+                            format!(
+                                "constructor index lives in `{}`, but `{}` is declared in `Type {}`; an index may not be larger than its enum",
+                                show_sort(index_sort),
+                                decl.name,
+                                u
+                            ),
+                        ));
+                    }
+                }
+            }
         }
 
         let mut ty = result_tm;
@@ -154,9 +220,17 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
             num_fields: nf,
             ty,
         });
+        ctor_singleton_ok.push(all_fields_prop);
     }
 
-    globals.enums.get_mut(&decl.name).unwrap().ctors = ctor_infos.clone();
+    // Singleton elimination: a `Prop` enum can be eliminated into a `Type`
+    // only when it has no constructors, or exactly one constructor whose
+    // fields are all propositions.
+    let prop_eliminable = sort == Sort::Prop
+        && (ctor_singleton_ok.is_empty() || (ctor_singleton_ok.len() == 1 && ctor_singleton_ok[0]));
+    let enum_info = globals.enums.get_mut(&decl.name).unwrap();
+    enum_info.ctors = ctor_infos.clone();
+    enum_info.prop_eliminable = prop_eliminable;
     for info in ctor_infos {
         globals.defs.insert(
             info.name.clone(),
@@ -205,8 +279,15 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
     let info = build_fn_type(globals, decl)?;
     globals.add_fn_placeholder(&decl.name, info.ty.clone(), info.domains.len());
 
-    crate::termination::check_fn(globals, decl)?;
+    let result = elab_fn_body(globals, decl, &info);
+    if result.is_err() {
+        // Do not leave a bodyless placeholder behind after a failed definition.
+        globals.defs.remove(&decl.name);
+    }
+    result
+}
 
+fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, info: &FnTypeInfo) -> Result<()> {
     let mut ctx = Ctx::new();
     for (name, dom) in &info.domains {
         let dom_v = eval(globals, &ctx.env, dom);
@@ -235,13 +316,22 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
         )
     })?;
 
+    // The authoritative termination check runs on the elaborated core term,
+    // while the definition's own body is still opaque.
+    crate::recursion::check_def(globals, &decl.name, &body).map_err(|e| {
+        Error::at(
+            decl.span,
+            format!("kernel rejected `{}`: {}", decl.name, e.message),
+        )
+    })?;
+
     globals.set_fn_body(&decl.name, body);
     Ok(())
 }
 
 fn elab_type(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<RcTm> {
     let (tm, ty) = elab_infer(globals, ctx, expr)?;
-    check::sort_of_val(globals, &ty)
+    check::sort_of_val_in(globals, ctx, &ty)
         .map_err(|e| Error::at(expr.span(), format!("expected a type: {}", e.message)))?;
     Ok(tm)
 }
@@ -595,7 +685,7 @@ fn elab_ctor_check(
         }
     };
     let (field_tms, result) = elab_ctor_fields(globals, ctx, &ci, &param_vals, args, span)?;
-    if !conv_ty(globals, ctx.level(), &result, &expected_f) {
+    if !conv(globals, ctx.level(), &result, &expected_f) {
         return Err(Error::at(
             span,
             format!("constructor `{}` does not produce the expected type", name),
@@ -677,7 +767,7 @@ fn elab_lam_check(
         };
         let dom_tm = elab_type(globals, ctx, &b.ty)?;
         let annotated = eval(globals, &ctx.env, &dom_tm);
-        if !conv_ty(globals, ctx.level(), &annotated, &dom_v) {
+        if !conv(globals, ctx.level(), &annotated, &dom_v) {
             return Err(Error::at(
                 b.span,
                 "lambda binder type does not match the expected function type",
@@ -1073,23 +1163,35 @@ fn elab_eq_match(
             ));
         }
     }
-    let (result_v, result_tm) = match expected {
-        Some(exp) => (exp.clone(), quote(globals, ctx.level(), exp)),
+    let ty_tm = quote(globals, ctx.level(), &eq_ty);
+    let motive = match expected {
+        Some(exp) => abstract_rhs(globals, ctx, &ty_tm, &eq_rhs, exp),
         None => {
             let (_, body_ty) = elab_infer(globals, ctx, &arms[0].body)?;
-            let tm = quote(globals, ctx.level(), &body_ty);
-            (body_ty, tm)
+            let body_tm = quote(globals, ctx.level(), &body_ty);
+            lam("_", ty_tm.clone(), body_tm)
         }
     };
-    let refl_expected = replace_val(globals, &eq_rhs, &eq_lhs, &result_v);
+    let motive_v = eval(globals, &ctx.env, &motive);
+    let refl_expected = vapp(globals, motive_v.clone(), eq_lhs.clone());
     let refl_case = elab_check(globals, ctx, &arms[0].body, &refl_expected)?;
+    let result = vapp(globals, motive_v, eq_rhs.clone());
     let tm = rc(Tm::J {
-        ty: quote(globals, ctx.level(), &eq_ty),
+        ty: ty_tm,
         lhs: quote(globals, ctx.level(), &eq_lhs),
         rhs: quote(globals, ctx.level(), &eq_rhs),
         proof,
-        result_ty: result_tm,
+        motive,
         refl_case,
     });
-    Ok((tm, result_v))
+    Ok((tm, result))
+}
+
+/// Build the motive for equality elimination: `fun (_: ty) => result`, with
+/// occurrences of the right-hand side abstracted to the fresh variable.
+fn abstract_rhs(globals: &Globals, ctx: &Ctx, ty_tm: &RcTm, rhs: &V, result: &V) -> RcTm {
+    let fresh = vvar(ctx.level());
+    let replaced = replace_val(globals, rhs, &fresh, result);
+    let body = quote(globals, ctx.level() + 1, &replaced);
+    lam("_", ty_tm.clone(), body)
 }
