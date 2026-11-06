@@ -220,3 +220,66 @@ fn bad(n: Nat): Nat {
         err.message
     );
 }
+
+#[test]
+fn equality_motive_under_binder() {
+    define(
+        r#"
+fn h(x: Nat, p: x == zero): fn(y: Nat) -> zero == x {
+  match p {
+    refl => fn(y: Nat) => refl
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn equality_motive_compound_rhs_under_binder() {
+    define(
+        r#"
+fn h(x: Nat, p: succ(x) == succ(zero)): fn(y: Nat) -> succ(zero) == succ(x) {
+  match p {
+    refl => fn(y: Nat) => refl
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn transport_and_congruence() {
+    define(
+        r#"
+fn cast(A: Type, B: Type, p: A == B, a: A): B {
+  match p {
+    refl => a
+  }
+}
+
+fn cong(T: Type, U: Type, f: fn(T) -> U, x: T, y: T, p: x == y): f(x) == f(y) {
+  match p {
+    refl => refl
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_unsound_equality_motive() {
+    let err = elaborate_error(
+        r#"
+fn bad(x: Nat, p: x == zero): zero == succ(x) {
+  match p {
+    refl => refl
+  }
+}
+"#,
+    );
+    assert!(
+        err.message.contains("refl"),
+        "unexpected error: {}",
+        err.message
+    );
+}

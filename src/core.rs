@@ -248,6 +248,87 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
     }
 }
 
+/// Replace every occurrence of `target` in `tm` with `replacement`, shifting
+/// under binders so that no free variable is captured. `target`, `replacement`,
+/// and `tm` are terms in the same de Bruijn context.
+pub fn abstract_term(target: &RcTm, replacement: &RcTm, tm: &RcTm) -> RcTm {
+    abstract_at(target, replacement, tm, 0)
+}
+
+fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> RcTm {
+    let target_here = shift(target, depth as isize, 0);
+    if same_tm(tm, &target_here) {
+        return shift(replacement, depth as isize, 0);
+    }
+    match &**tm {
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
+        Tm::Pi { name, dom, cod } => pi(
+            name.clone(),
+            abstract_at(target, replacement, dom, depth),
+            abstract_at(target, replacement, cod, depth + 1),
+        ),
+        Tm::Lam { name, dom, body } => lam(
+            name.clone(),
+            abstract_at(target, replacement, dom, depth),
+            abstract_at(target, replacement, body, depth + 1),
+        ),
+        Tm::App(f, a) => app(
+            abstract_at(target, replacement, f, depth),
+            abstract_at(target, replacement, a, depth),
+        ),
+        Tm::Ind(name, args) => ind(
+            name.clone(),
+            args.iter()
+                .map(|a| abstract_at(target, replacement, a, depth))
+                .collect(),
+        ),
+        Tm::Ctor(name, index, args) => ctor(
+            name.clone(),
+            *index,
+            args.iter()
+                .map(|a| abstract_at(target, replacement, a, depth))
+                .collect(),
+        ),
+        Tm::Match {
+            motive,
+            scrut,
+            branches,
+        } => rc(Tm::Match {
+            motive: abstract_at(target, replacement, motive, depth),
+            scrut: abstract_at(target, replacement, scrut, depth),
+            branches: branches
+                .iter()
+                .map(|b| Branch {
+                    ctor: b.ctor.clone(),
+                    binders: b.binders,
+                    body: abstract_at(target, replacement, &b.body, depth + b.binders),
+                })
+                .collect(),
+        }),
+        Tm::Eq(a, b, c) => eq(
+            abstract_at(target, replacement, a, depth),
+            abstract_at(target, replacement, b, depth),
+            abstract_at(target, replacement, c, depth),
+        ),
+        Tm::Refl(a) => rc(Tm::Refl(abstract_at(target, replacement, a, depth))),
+        Tm::J {
+            ty,
+            lhs,
+            rhs,
+            proof,
+            motive,
+            refl_case,
+        } => rc(Tm::J {
+            ty: abstract_at(target, replacement, ty, depth),
+            lhs: abstract_at(target, replacement, lhs, depth),
+            rhs: abstract_at(target, replacement, rhs, depth),
+            proof: abstract_at(target, replacement, proof, depth),
+            motive: abstract_at(target, replacement, motive, depth),
+            refl_case: abstract_at(target, replacement, refl_case, depth),
+        }),
+    }
+}
+
 /// Structural equality of terms up to binder names. This is a sound
 /// approximation of conversion used for neutral eliminators.
 pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
@@ -331,5 +412,45 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
                 && same_tm(rc1, rc2)
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn konst(s: &str) -> RcTm {
+        rc(Tm::Const(s.to_string()))
+    }
+
+    #[test]
+    fn abstract_term_avoids_capture() {
+        // Bind `x` and use the outer `Var(1)`; the occurrence under the
+        // binder shifts to `Var(2)` and the replacement shifts to `Var(1)`.
+        let target = var(1);
+        let replacement = var(0);
+        let tm = lam("x", rc(Tm::Type(0)), app(var(0), var(2)));
+        let got = abstract_term(&target, &replacement, &tm);
+        let expected = lam("x", rc(Tm::Type(0)), app(var(0), var(1)));
+        assert!(same_tm(&got, &expected));
+    }
+
+    #[test]
+    fn abstract_term_replaces_under_binders() {
+        let target = konst("t");
+        let replacement = var(0);
+        // `fn(x: Type 0) -> t` with `t` replaced by the outer `Var(0)`.
+        let tm = pi("x", rc(Tm::Type(0)), target.clone());
+        let got = abstract_term(&target, &replacement, &tm);
+        let expected = pi("x", rc(Tm::Type(0)), var(1));
+        assert!(same_tm(&got, &expected));
+    }
+
+    #[test]
+    fn abstract_term_leaves_other_variables_alone() {
+        let target = konst("c");
+        let replacement = konst("c");
+        let tm = lam("x", rc(Tm::Type(0)), app(var(0), konst("t")));
+        assert!(same_tm(&abstract_term(&target, &replacement, &tm), &tm));
     }
 }

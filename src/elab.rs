@@ -1,6 +1,6 @@
 use crate::check::{self, Ctx};
-use crate::conv::{conv, conv_ty, replace_val};
-use crate::core::{Branch, RcTm, Tm, app, const_, eq, ind, lam, pi, rc, var};
+use crate::conv::{conv, conv_ty};
+use crate::core::{Branch, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, rc, shift, var};
 use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
 use crate::error::{Error, Result, Span};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
@@ -871,7 +871,7 @@ fn elab_match(
                 "cannot infer the result type of a match on an empty enum; add an expected type",
             )
         })?;
-        let motive = build_motive(globals, ctx, scrut, &scrut_tm, &scrut_ty, expected);
+        let motive = build_motive(globals, ctx, &scrut_tm, &scrut_ty, expected);
         let motive_v = eval(globals, &ctx.env, &motive);
         let scrut_v = eval(globals, &ctx.env, &scrut_tm);
         let ty = vapp(globals, motive_v, scrut_v);
@@ -982,7 +982,7 @@ fn elab_match(
     // Build the motive.
     let (motive, _result_ty) = match expected {
         Some(exp) => {
-            let m = build_motive(globals, ctx, scrut, &scrut_tm, &scrut_ty, exp);
+            let m = build_motive(globals, ctx, &scrut_tm, &scrut_ty, exp);
             (m, exp.clone())
         }
         None => {
@@ -1101,29 +1101,12 @@ fn push_ctor_binders(
     Ok(pushed)
 }
 
-fn build_motive(
-    globals: &Globals,
-    ctx: &Ctx,
-    scrut: &Expr,
-    scrut_tm: &RcTm,
-    scrut_ty: &V,
-    expected: &V,
-) -> RcTm {
-    let dom = quote(globals, ctx.level(), scrut_ty);
-    let can_abstract = match scrut {
-        Expr::Var(name, _) => ctx.lookup_index(name).is_some(),
-        _ => false,
-    };
-    if can_abstract {
-        let scrut_v = eval(globals, &ctx.env, scrut_tm);
-        let fresh = vvar(ctx.level());
-        let replaced = replace_val(globals, &scrut_v, &fresh, expected);
-        let body = quote(globals, ctx.level() + 1, &replaced);
-        lam("_", dom, body)
-    } else {
-        let body = quote(globals, ctx.level() + 1, expected);
-        lam("_", dom, body)
-    }
+fn build_motive(globals: &Globals, ctx: &Ctx, scrut_tm: &RcTm, scrut_ty: &V, expected: &V) -> RcTm {
+    let level = ctx.level();
+    let dom = quote(globals, level, scrut_ty);
+    let target = shift(scrut_tm, 1, 0);
+    let body = abstract_term(&target, &var(0), &quote(globals, level + 1, expected));
+    lam("_", dom, body)
 }
 
 struct EqMatchData {
@@ -1190,8 +1173,8 @@ fn elab_eq_match(
 /// Build the motive for equality elimination: `fun (_: ty) => result`, with
 /// occurrences of the right-hand side abstracted to the fresh variable.
 fn abstract_rhs(globals: &Globals, ctx: &Ctx, ty_tm: &RcTm, rhs: &V, result: &V) -> RcTm {
-    let fresh = vvar(ctx.level());
-    let replaced = replace_val(globals, rhs, &fresh, result);
-    let body = quote(globals, ctx.level() + 1, &replaced);
+    let level = ctx.level();
+    let target = quote(globals, level + 1, rhs);
+    let body = abstract_term(&target, &var(0), &quote(globals, level + 1, result));
     lam("_", ty_tm.clone(), body)
 }

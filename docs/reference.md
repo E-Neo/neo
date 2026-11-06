@@ -700,6 +700,22 @@ whole match has the expected type with `y` in place. This is motive-based
 equality elimination (`J`), not textual replacement.
 See [section 9](#9-equality-and-proofs).
 
+Abstraction is capture-avoiding, so it works under binders. For example, an
+expected type that mentions `x` inside a function type is abstracted too:
+
+```neo
+fn h(x: Nat, p: x == zero): fn(y: Nat) -> zero == x {
+  match p {
+    refl => fn(y: Nat) => refl
+  }
+}
+```
+
+A `match` whose scrutinee is a compound expression is abstracted the same
+way: the motive replaces every occurrence of that expression. Abstraction is
+syntactic, so an occurrence that is merely convertible to the scrutinee is
+not found; that case needs an explicit helper.
+
 ---
 
 ## 9. Equality and proofs
