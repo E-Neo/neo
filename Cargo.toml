@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-wasm-encoder = "0.258.0"
-wit-component = "0.258.0"
-wit-parser = "0.258.0"
+wasm-encoder = "0.263.0"
+wit-component = "0.263.0"
+wit-parser = "0.263.0"

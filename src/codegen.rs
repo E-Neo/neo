@@ -5,8 +5,8 @@ use std::path::Path;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType,
     ExportKind, ExportSection, Function, FunctionSection, GlobalSection, GlobalType, ImportSection,
-    Instruction as I, MemArg, MemorySection, MemoryType, Module, RefType, TableSection, TableType,
-    TypeSection, ValType,
+    Instruction as I, MemArg, MemArgTarget, MemorySection, MemoryType, Module, RefType,
+    TableSection, TableType, TypeSection, ValType,
 };
 use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
 use wit_parser::{Resolve, UnresolvedPackageGroup, WorldId};
@@ -71,7 +71,8 @@ fn mem(offset: u32) -> MemArg {
     MemArg {
         offset: offset as u64,
         align: 2,
-        memory_index: 0,
+        target: MemArgTarget::Memory(0),
+        ordering: None,
     }
 }
 
@@ -79,7 +80,8 @@ fn mem8(offset: u32) -> MemArg {
     MemArg {
         offset: offset as u64,
         align: 0,
-        memory_index: 0,
+        target: MemArgTarget::Memory(0),
+        ordering: None,
     }
 }
 
@@ -1190,7 +1192,7 @@ pub fn build_component(globals: &Globals, output: &Path) -> Result<()> {
 
     let (resolve, world) = resolve_wit()?;
     let mut bytes = core;
-    embed_component_metadata(&mut bytes, &resolve, world, StringEncoding::UTF8)
+    embed_component_metadata(&mut bytes, &resolve, world, StringEncoding::UTF8, true)
         .map_err(|e| Error::new(format!("failed to embed component metadata: {}", e)))?;
 
     let component = ComponentEncoder::default()
