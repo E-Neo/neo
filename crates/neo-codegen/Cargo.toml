@@ -1,0 +1,12 @@
+[package]
+name = "neo-codegen"
+description = "Neo WASI 0.2 component backend"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+neo-common.workspace = true
+neo-kernel.workspace = true
+wasm-encoder.workspace = true
+wit-component.workspace = true
+wit-parser.workspace = true

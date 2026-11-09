@@ -1,0 +1,8 @@
+[package]
+name = "neo-kernel"
+description = "Trusted proof kernel for Neo: core terms, evaluation, conversion, and checking"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+neo-common.workspace = true

@@ -1,3 +1,5 @@
+//! Diagnostic types shared by every Neo crate.
+
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

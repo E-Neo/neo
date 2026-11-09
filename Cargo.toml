@@ -1,9 +1,41 @@
 [package]
 name = "neo"
+description = "A dependently typed language with a small trusted proof kernel targeting WASI 0.2"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "neo"
+
+[[bin]]
+name = "neo"
+path = "src/main.rs"
+
+[dependencies]
+neo-common.workspace = true
+neo-kernel.workspace = true
+neo-frontend.workspace = true
+neo-codegen.workspace = true
+
+[workspace]
+resolver = "3"
+members = [
+  ".",
+  "crates/neo-common",
+  "crates/neo-kernel",
+  "crates/neo-frontend",
+  "crates/neo-codegen",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+neo-common = { path = "crates/neo-common" }
+neo-kernel = { path = "crates/neo-kernel" }
+neo-frontend = { path = "crates/neo-frontend" }
+neo-codegen = { path = "crates/neo-codegen" }
 wasm-encoder = "0.263.0"
 wit-component = "0.263.0"
 wit-parser = "0.263.0"

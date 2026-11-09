@@ -1,6 +1,6 @@
 use crate::elab::elaborate_program;
 use crate::env::Globals;
-use crate::error::Result;
+use neo_common::error::Result;
 
 /// The Stage 0 prelude: the inductive types every program starts with.
 pub const PRELUDE: &str = r#"

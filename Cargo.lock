@@ -81,9 +81,40 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "neo"
 version = "0.1.0"
 dependencies = [
+ "neo-codegen",
+ "neo-common",
+ "neo-frontend",
+ "neo-kernel",
+]
+
+[[package]]
+name = "neo-codegen"
+version = "0.1.0"
+dependencies = [
+ "neo-common",
+ "neo-kernel",
  "wasm-encoder",
  "wit-component",
  "wit-parser",
+]
+
+[[package]]
+name = "neo-common"
+version = "0.1.0"
+
+[[package]]
+name = "neo-frontend"
+version = "0.1.0"
+dependencies = [
+ "neo-common",
+ "neo-kernel",
+]
+
+[[package]]
+name = "neo-kernel"
+version = "0.1.0"
+dependencies = [
+ "neo-common",
 ]
 
 [[package]]

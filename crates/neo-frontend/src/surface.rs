@@ -1,4 +1,4 @@
-use crate::error::Span;
+use neo_common::error::Span;
 
 #[derive(Clone, Debug)]
 pub struct Program {

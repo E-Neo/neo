@@ -13,9 +13,9 @@ use wit_parser::{Resolve, UnresolvedPackageGroup, WorldId};
 
 use crate::core::{RcTm, Tm};
 use crate::env::Globals;
-use crate::error::{Error, Result};
 use crate::eval::{apply_pi, eval, eval_closure, force};
 use crate::value::{V, Val, vvar};
+use neo_common::error::{Error, Result};
 
 /// The tag stored in the first word of a closure block. Constructor indices are
 /// small, so this cannot collide with an enum tag.

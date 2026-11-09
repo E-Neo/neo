@@ -1,6 +1,6 @@
-use crate::error::{Error, Result};
 use crate::lexer::{Tok, Token};
 use crate::surface::*;
+use neo_common::error::{Error, Result};
 
 pub struct Parser {
     tokens: Vec<Token>,

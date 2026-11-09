@@ -1,8 +1,8 @@
 use crate::check::{self, Ctx};
 use crate::core::{Branch, RcTm, Tm, app, ctor, eq, ind, lam, pi, rc};
 use crate::env::Globals;
-use crate::error::{Error, Result};
 use crate::eval::eval;
+use neo_common::error::{Error, Result};
 
 /// The relation of a variable to one function parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

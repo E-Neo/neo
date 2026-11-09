@@ -1,4 +1,4 @@
-use crate::error::{Error, Result, Span};
+use neo_common::error::{Error, Result, Span};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tok {

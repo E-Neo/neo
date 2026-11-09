@@ -3,10 +3,10 @@ use std::rc::Rc;
 use crate::conv::{conv, conv_ty};
 use crate::core::{Branch, RcTm, Tm};
 use crate::env::{CtorInfo, Globals, Sort};
-use crate::error::{Error, Result};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
 use crate::value::*;
+use neo_common::error::{Error, Result};
 
 #[derive(Clone, Debug)]
 pub struct Ctx {

@@ -1,0 +1,9 @@
+[package]
+name = "neo-frontend"
+description = "Neo lexer, parser, surface syntax, and elaborator"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+neo-common.workspace = true
+neo-kernel.workspace = true

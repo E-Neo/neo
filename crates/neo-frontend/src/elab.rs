@@ -2,11 +2,11 @@ use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
 use crate::core::{Branch, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, rc, shift, var};
 use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
-use crate::error::{Error, Result, Span};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
 use crate::surface::*;
 use crate::value::*;
+use neo_common::error::{Error, Result, Span};
 
 /// Elaborate and register every declaration in the program.
 pub fn elaborate_program(globals: &mut Globals, program: &Program) -> Result<()> {

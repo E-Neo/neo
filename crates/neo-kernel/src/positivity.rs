@@ -1,6 +1,6 @@
 use crate::core::{RcTm, Tm};
 use crate::env::Globals;
-use crate::error::{Error, Result};
+use neo_common::error::{Error, Result};
 
 /// Strict positivity check for one constructor field type.
 pub fn check_field(_globals: &Globals, enum_name: &str, tm: &RcTm) -> Result<()> {

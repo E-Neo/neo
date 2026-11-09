@@ -87,26 +87,49 @@ More examples live in [`examples/`](examples):
   termination, positivity, CLI, grammar, and limitations.
 - [Core specification](docs/core-spec.md) — the trusted kernel calculus,
   typing and conversion rules, index refinement, and the trust boundary.
-- [`wit/README.md`](wit/README.md) — provenance of the vendored WASI WIT files.
+- [`crates/neo-codegen/wit/README.md`](crates/neo-codegen/wit/README.md) —
+  provenance of the vendored WASI WIT files.
 
 ## Repository layout
 
 ```
-src/        interpreter, elaborator, trusted kernel, and WASM backend
-tests/      kernel tests, codegen integration tests, example checks
-examples/   runnable .neo programs used by the documentation
-docs/       language reference and trusted-core specification
-wit/        root WIT world and vendored WASI 0.2.9 WIT dependencies
+crates/neo-common/    spans and diagnostics, shared by every crate
+crates/neo-kernel/    the trusted proof kernel
+crates/neo-frontend/  lexer, parser, surface syntax, elaborator, prelude
+crates/neo-codegen/   WASI 0.2 component backend and its WIT files
+src/                  the `neo` facade library and the `neo` CLI
+tests/                kernel tests, codegen integration tests, example checks
+examples/             runnable .neo programs used by the documentation
+docs/                 language reference and trusted-core specification
 ```
+
+Dependencies point one way:
+
+```
+neo-common <- neo-kernel <- neo-frontend
+                  ^            ^
+                  |            |
+               neo-codegen ----+
+                  ^
+                  |
+                 neo (facade + CLI)
+```
+
+`neo-kernel` never depends on the frontend, the code generator, or the syntax
+crates. `neo-frontend` and `neo-codegen` never depend on each other.
 
 ## How it works
 
 The implementation is split into:
 
-- a pure, total **logic core** with de Bruijn indices and normalization by
-  evaluation;
-- an **elaborator** that checks surface syntax and produces core terms;
-- an untrusted **runtime core** that evaluates programs and generates WASM.
+- `neo-kernel`, the trusted proof kernel: a pure, total **logic core** with
+  de Bruijn indices, normalization by evaluation, conversion, typing and
+  checking, positivity, and termination;
+- `neo-frontend`, the untrusted lexer, parser, surface syntax, and elaborator;
+- `neo-codegen`, the untrusted **runtime core** that erases proofs and
+  generates a WASI 0.2 component;
+- `neo-common`, the shared spans and diagnostics;
+- `neo`, the facade library and the `neo` command-line program.
 
 Types and equality proofs are erased during code generation; proposition-enum
 values remain ordinary values. Values are represented as heap blocks; closures

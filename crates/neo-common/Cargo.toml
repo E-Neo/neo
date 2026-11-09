@@ -1,0 +1,7 @@
+[package]
+name = "neo-common"
+description = "Diagnostics shared by the Neo compiler crates"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
