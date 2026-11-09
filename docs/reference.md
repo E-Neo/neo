@@ -408,13 +408,41 @@ Here `m` is an ordinary runtime field that records the length of the tail,
 and the constructor's result type connects it to `succ(m)`. Because `Vec` has
 parameters, `vcons(...)` must be used where the expected type is known.
 
-Indexed families are currently limited:
+Indexed families support **branch-field refinement**. Matching refines field
+indices that are forced by the scrutinee, and constructors whose result indices
+cannot match become impossible branches:
 
-- `match` checks every constructor and does **not** refine indices per branch.
-  Functions such as `head(Vec(T, succ(n)))` still need a `vnil` arm, which is
-  impossible to implement.
+```neo
+enum Vec(T: Type, n: Nat) {
+  vnil : Vec(T, zero)
+  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+}
+
+fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
+  match v {
+    vcons(m, x, xs) => xs
+  }
+}
+```
+
+The scrutinee `Vec(Nat, succ(n))` cannot be built by `vnil`, so the `vnil` arm
+may be omitted. In the `vcons` branch, the equation `succ(m) == succ(n)`
+refines `m` to `n`, so `xs` has type `Vec(Nat, n)`. An arm written for an
+impossible constructor is accepted but never checked, and the generated code
+omits it.
+
+Indexed families are still limited:
+
+- Refinement solves only *constructor fields* against constructor-headed
+  indices. A scrutinee whose index is an ordinary parameter, such as
+  `Vec(T, n)` where `n` is a function parameter, cannot be matched: that would
+  require refining the surrounding context (`n := zero` in the `vnil` branch).
+  Write the index in constructor-headed form, or avoid matching on it.
 - A value whose type has a field like `Vec(T, m)` that remains dependent on an
   earlier field cannot be the result of `main`, because it is not printable.
+
+See [`docs/core-spec.md`](core-spec.md) for the exact refinement rule, and
+`examples/indexed_match.neo` for a runnable example.
 
 ### Empty enums
 
@@ -626,9 +654,12 @@ match scrutinee {
 - The scrutinee must be an enum value or an equality proof.
 - Each arm is on its own line. The closing `}` may follow the last arm on the
   same line.
-- Every constructor of the enum must appear exactly once (exhaustiveness).
-- An enum with no constructors is matched with zero arms; an expected result
-  type is required.
+- Every **reachable** constructor of the enum must appear exactly once
+  (exhaustiveness). Constructors whose result indices cannot match the
+  scrutinee type are impossible: their arms may be omitted, and arms written
+  for them are ignored. See [indexed families](#indexed-families).
+- An enum with no constructors, or a scrutinee type whose constructors are all
+  impossible, is matched with zero arms; an expected result type is required.
 - Duplicate arms are rejected.
 
 Example:
@@ -674,11 +705,16 @@ fn force(n: Nat): Nat {
 ### Dependent results
 
 If the expected result type is known and the scrutinee is a variable, the
-result type is abstracted over that variable, so it may mention it. This is
-enough for some dependent eliminators, but there is **no index refinement**:
-matching a `Bool` does not make the type checker rewrite other variables in
-the context, and indexed families still require every constructor arm (see
-[section 6](#6-enums)).
+result type is abstracted over that variable, so it may mention it. Branch
+fields are refined from the scrutinee's indices (see
+[indexed families](#indexed-families)): solving `succ(m) = succ(n)` gives the
+branch field `m` the value `n`, and field types that mention `m` are rewritten
+accordingly.
+
+There is **no general context refinement**. Matching does not rewrite other
+local variables or ordinary parameter indices. A match on `Vec(T, n)` with a
+bare parameter index is therefore rejected; use a constructor-headed index such
+as `Vec(T, succ(n))` or `Vec(T, zero)`.
 
 ### Matching on equality proofs
 
@@ -1284,7 +1320,9 @@ design:
 - built-in arithmetic or other infix operators;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
-- dependent pattern matching that refines indices per branch;
+- dependent pattern matching that refines context variables. Branch-field
+  refinement is supported (see [section 6](#6-enums)), but a bare parameter
+  index such as `Vec(T, n)` cannot be matched;
 - proof irrelevance in the conversion checker;
 - custom printing and user-defined entry points;
 - `def`, `let`, `<-`, mutable variables, `proc`, `theorem`, `forall`, `lambda`,
@@ -1471,6 +1509,26 @@ fn main(): Nat {
 The REPL can display `two()` as `vcons(1, 4, vcons(0, 3, vnil))`. The program
 builds because `main` returns `Nat`; a `main` returning `Vec` itself is not
 printable.
+
+`examples/indexed_match.neo` shows branch-field refinement:
+
+```neo
+fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+  match v {
+    vcons(m, x, xs) => x
+  }
+}
+
+fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
+  match v {
+    vcons(m, x, xs) => xs
+  }
+}
+```
+
+The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
+The `m` field is refined to `n`, which gives `xs` the type `Vec(Nat, n)`. With
+`main` returning `head(1, vcons(1, 4, vcons(0, 3, vnil)))`, the output is `4`.
 
 ---
 

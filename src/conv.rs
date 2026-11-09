@@ -128,7 +128,7 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
                 return false;
             }
             for (x, y) in ba.iter().zip(bb.iter()) {
-                if x.ctor != y.ctor || x.binders != y.binders {
+                if x.ctor != y.ctor || x.binders != y.binders || x.impossible != y.impossible {
                     return false;
                 }
                 let na = crate::quote::quote_open_binders(globals, norm, ea, x.binders, &x.body);

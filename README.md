@@ -79,11 +79,14 @@ More examples live in [`examples/`](examples):
 | `enums.neo` | user enums and patterns | `12` |
 | `proofs.neo` | equality proofs, proof erasure | `7` |
 | `indexed_vec.neo` | indexed families | `2` |
+| `indexed_match.neo` | branch-field index refinement | `4` |
 
 ## Documentation
 
 - [Language reference](docs/reference.md) — syntax, types, matching, proofs,
   termination, positivity, CLI, grammar, and limitations.
+- [Core specification](docs/core-spec.md) — the trusted kernel calculus,
+  typing and conversion rules, index refinement, and the trust boundary.
 - [`wit/README.md`](wit/README.md) — provenance of the vendored WASI WIT files.
 
 ## Repository layout
@@ -92,7 +95,7 @@ More examples live in [`examples/`](examples):
 src/        interpreter, elaborator, trusted kernel, and WASM backend
 tests/      kernel tests, codegen integration tests, example checks
 examples/   runnable .neo programs used by the documentation
-docs/       language reference
+docs/       language reference and trusted-core specification
 wit/        root WIT world and vendored WASI 0.2.9 WIT dependencies
 ```
 

@@ -283,3 +283,57 @@ fn bad(x: Nat, p: x == zero): zero == succ(x) {
         err.message
     );
 }
+
+#[test]
+fn refines_indexed_branch_fields() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
+  match v {
+    vcons(m, x, xs) => xs
+  }
+}
+
+fn demo(): Nat {
+  match tail(0, vcons(0, 5, vnil)) {
+    vnil => 9
+  }
+}
+"#,
+    );
+    let result = call(&globals, "demo", &[]);
+    assert_eq!(as_nat(&globals, &result), 9);
+}
+
+#[test]
+fn omits_impossible_indexed_branch() {
+    define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn only_nil(v: Vec(Nat, zero)): Nat {
+  match v {
+    vnil => 1
+  }
+}
+
+enum Fin(n: Nat) {
+  fzero(m: Nat) : Fin(succ(m))
+  fsucc(m: Nat, x: Fin(m)) : Fin(succ(m))
+}
+
+fn absurd(f: Fin(zero)): Nat {
+  match f {
+  }
+}
+"#,
+    );
+}

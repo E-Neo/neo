@@ -855,34 +855,12 @@ fn elab_match(
         None => return Err(Error::at(span, format!("unknown enum `{}`", enum_name))),
     };
 
-    if arms.is_empty() {
-        if !info.ctors.is_empty() {
-            return Err(Error::at(
-                span,
-                format!(
-                    "match is not exhaustive: missing constructor `{}`",
-                    info.ctors[0].name
-                ),
-            ));
-        }
-        let expected = expected.ok_or_else(|| {
-            Error::at(
-                span,
-                "cannot infer the result type of a match on an empty enum; add an expected type",
-            )
-        })?;
-        let motive = build_motive(globals, ctx, &scrut_tm, &scrut_ty, expected);
-        let motive_v = eval(globals, &ctx.env, &motive);
-        let scrut_v = eval(globals, &ctx.env, &scrut_tm);
-        let ty = vapp(globals, motive_v, scrut_v);
-        return Ok((
-            rc(Tm::Match {
-                motive,
-                scrut: scrut_tm,
-                branches: Vec::new(),
-            }),
-            ty,
-        ));
+    // Refine each constructor's result indices against the scrutinee type.
+    // This decides which constructors can produce a value of this type and
+    // which field indices are forced by the scrutinee's indices.
+    let mut refinements = Vec::with_capacity(info.ctors.len());
+    for ctor in &info.ctors {
+        refinements.push(check::refine_ctor(globals, ctx, ctor, &params, &scrut_ty)?);
     }
 
     // A bare identifier naming a nullary constructor is a constructor pattern,
@@ -967,8 +945,11 @@ fn elab_match(
             }
         }
     }
+    // Exhaustiveness: every reachable constructor needs an arm. Arms for
+    // impossible constructors are accepted but their bodies are not checked,
+    // because no value of this scrutinee type can use them.
     for (i, arm) in by_index.iter().enumerate() {
-        if arm.is_none() {
+        if arm.is_none() && refinements[i].possible {
             return Err(Error::at(
                 span,
                 format!(
@@ -987,13 +968,14 @@ fn elab_match(
         }
         None => {
             let mut inferred: Option<V> = None;
-            for arm in arms {
-                let idx = info
-                    .ctors
-                    .iter()
-                    .position(|c| c.name == arm_pattern_ctor(&arm.pattern))
-                    .unwrap();
-                let pushed = push_ctor_binders(globals, ctx, &info, idx, &params, &arm.pattern)?;
+            for (idx, arm_opt) in by_index.iter().enumerate() {
+                let Some(arm) = arm_opt else {
+                    continue;
+                };
+                if !refinements[idx].possible {
+                    continue;
+                }
+                let pushed = push_ctor_binders(ctx, &arm.pattern, &refinements[idx].field_tys)?;
                 let (_, body_ty) = elab_infer(globals, ctx, &arm.body)?;
                 for _ in 0..pushed {
                     ctx.pop();
@@ -1010,7 +992,12 @@ fn elab_match(
                     }
                 }
             }
-            let rt = inferred.unwrap();
+            let rt = inferred.ok_or_else(|| {
+                Error::at(
+                    span,
+                    "cannot infer the result type of a match with no reachable branches; add an expected type",
+                )
+            })?;
             let dom = quote(globals, ctx.level(), &scrut_ty);
             let body = quote(globals, ctx.level() + 1, &rt);
             (lam("_", dom, body), rt)
@@ -1018,20 +1005,46 @@ fn elab_match(
     };
 
     let motive_v = eval(globals, &ctx.env, &motive);
-    let mut branches = Vec::new();
-    for (idx, arm) in by_index.into_iter().enumerate() {
-        let arm = arm.unwrap();
-        let ctor = &info.ctors[idx];
-        let pushed = push_ctor_binders(globals, ctx, &info, idx, &params, &arm.pattern)?;
+    let mut branches = Vec::with_capacity(info.ctors.len());
+    for (idx, ctor) in info.ctors.iter().enumerate() {
+        let refinement = &refinements[idx];
+        if !refinement.possible {
+            // The constructor cannot produce a value of this scrutinee type.
+            // Keep a placeholder so branch order still matches constructor
+            // order; the kernel skips it and code generation omits it.
+            branches.push(Branch {
+                ctor: ctor.name.clone(),
+                binders: ctor.num_fields,
+                body: rc(Tm::Prop),
+                impossible: true,
+            });
+            continue;
+        }
+        let arm = by_index[idx]
+            .ok_or_else(|| Error::new("internal: reachable constructor has no arm"))?;
+        let pushed = push_ctor_binders(ctx, &arm.pattern, &refinement.field_tys)?;
         let mut field_vals = Vec::new();
         for j in 0..ctor.num_fields {
-            field_vals.push(vvar(ctx.level() - ctor.num_fields + j));
+            match &refinement.field_solutions[j] {
+                Some(solution) => field_vals.push(solution.clone()),
+                None => {
+                    let level = ctx.level() - ctor.num_fields + j;
+                    field_vals.push(vvar(level));
+                }
+            }
         }
         let mut ctor_args = params.clone();
         ctor_args.extend(field_vals);
         let ctor_v = vctor(enum_name.clone(), idx, ctor_args);
         let branch_ty = vapp(globals, motive_v.clone(), ctor_v);
         let body_tm = elab_check(globals, ctx, &arm.body, &branch_ty)?;
+        let body_tm = substitute_field_solutions(
+            globals,
+            ctx.level(),
+            ctor.num_fields,
+            &refinement.field_solutions,
+            body_tm,
+        );
         for _ in 0..pushed {
             ctx.pop();
         }
@@ -1039,6 +1052,7 @@ fn elab_match(
             ctor: ctor.name.clone(),
             binders: ctor.num_fields,
             body: body_tm,
+            impossible: false,
         });
     }
 
@@ -1052,38 +1066,42 @@ fn elab_match(
     Ok((tm, ty))
 }
 
-fn arm_pattern_ctor(p: &Pattern) -> String {
-    match p {
-        Pattern::Ctor(n, _, _) => n.clone(),
-        _ => String::new(),
+/// Replace the branch-local variables of fields that the index refinement
+/// solved, so the checked body mentions the same values used to build the
+/// constructor in the motive. Runs a few passes to resolve solution chains.
+fn substitute_field_solutions(
+    globals: &Globals,
+    level: usize,
+    num_fields: usize,
+    solutions: &[Option<V>],
+    body: RcTm,
+) -> RcTm {
+    let mut body = body;
+    if solutions.iter().all(|s| s.is_none()) {
+        return body;
     }
+    for _ in 0..=num_fields {
+        for (j, solution) in solutions.iter().enumerate() {
+            if let Some(solution) = solution {
+                let index = num_fields - 1 - j;
+                let replacement = quote(globals, level, solution);
+                body = crate::core::subst(&body, index, &replacement);
+            }
+        }
+    }
+    body
 }
 
-fn push_ctor_binders(
-    globals: &Globals,
-    ctx: &mut Ctx,
-    info: &EnumInfo,
-    idx: usize,
-    params: &[V],
-    pattern: &Pattern,
-) -> Result<usize> {
-    let ctor = &info.ctors[idx];
+fn push_ctor_binders(ctx: &mut Ctx, pattern: &Pattern, field_tys: &[V]) -> Result<usize> {
     let subpats = match pattern {
         Pattern::Ctor(_, ps, _) => ps.as_slice(),
         _ => return Err(Error::new("internal: expected a constructor pattern")),
     };
-    let mut field_ty = eval(globals, &Vec::new(), &ctor.ty);
-    for p in params {
-        field_ty = apply_pi(globals, field_ty, p.clone())
-            .ok_or_else(|| Error::new("constructor parameter mismatch"))?;
+    if subpats.len() != field_tys.len() {
+        return Err(Error::new("internal: constructor field mismatch"));
     }
     let mut pushed = 0;
     for (j, sp) in subpats.iter().enumerate() {
-        let ft = force(globals, field_ty);
-        let (dom, closure) = match &*ft {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
-            _ => return Err(Error::new("constructor field mismatch")),
-        };
         let name = match sp {
             Pattern::Var(n, _) => n.clone(),
             Pattern::Wild(_) => format!("_p{}", j),
@@ -1094,8 +1112,7 @@ fn push_ctor_binders(
                 ));
             }
         };
-        let fresh = ctx.push(name, dom);
-        field_ty = eval_closure(globals, &closure, fresh);
+        ctx.push(name, field_tys[j].clone());
         pushed += 1;
     }
     Ok(pushed)

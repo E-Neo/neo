@@ -997,6 +997,9 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
     fn compile_match(&mut self, scrut: &RcTm, branches: &[crate::core::Branch]) -> Result<()> {
         let mut entries: Vec<(usize, usize, RcTm)> = Vec::new();
         for b in branches {
+            if b.impossible {
+                continue;
+            }
             let ci =
                 self.cg.globals.get_ctor(&b.ctor).ok_or_else(|| {
                     Error::new(format!("unknown constructor `{}` in match", b.ctor))

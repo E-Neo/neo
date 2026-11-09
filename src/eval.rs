@@ -58,7 +58,17 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
             let forced = force(globals, scrut_v.clone());
             match &*forced {
                 Val::Ctor(enum_name, index, args) => {
-                    let branch = branches.get(*index).expect("missing constructor branch");
+                    let branch = match branches.get(*index) {
+                        Some(b) if !b.impossible => b,
+                        _ => {
+                            return vneutral(Neutral::Match {
+                                env: env.clone(),
+                                motive: motive.clone(),
+                                scrut: forced.clone(),
+                                branches: branches.clone(),
+                            });
+                        }
+                    };
                     let field_count = branch.binders;
                     let mut env2 = env.clone();
                     let start = args.len().saturating_sub(field_count);
@@ -178,8 +188,8 @@ pub fn reduce_match(
     match &*forced {
         Val::Ctor(enum_name, index, args) => {
             let branch = match branches.get(*index) {
-                Some(b) => b,
-                None => {
+                Some(b) if !b.impossible => b,
+                _ => {
                     return vneutral(Neutral::Match {
                         env: env.clone(),
                         motive: motive.clone(),

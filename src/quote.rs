@@ -80,6 +80,7 @@ fn quote_neutral(globals: &Globals, level: usize, n: &Neutral) -> RcTm {
                     ctor: b.ctor.clone(),
                     binders: b.binders,
                     body: quote_open_binders(globals, level, env, b.binders, &b.body),
+                    impossible: b.impossible,
                 });
             }
             Rc::new(Tm::Match {
@@ -184,6 +185,7 @@ fn close_under(globals: &Globals, level: usize, env: &Env, tm: &RcTm, extra: usi
                     ctor: b.ctor.clone(),
                     binders: b.binders,
                     body: close_under(globals, level + b.binders, env, &b.body, extra + b.binders),
+                    impossible: b.impossible,
                 })
                 .collect(),
         }),

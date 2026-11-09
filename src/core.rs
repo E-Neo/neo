@@ -43,6 +43,10 @@ pub struct Branch {
     pub ctor: String,
     pub binders: usize,
     pub body: RcTm,
+    /// True when the constructor's result indices cannot unify with the
+    /// scrutinee type. Such a branch is unreachable for well-typed scrutinees:
+    /// the kernel does not check its body, and the evaluator never selects it.
+    pub impossible: bool,
 }
 
 pub fn rc(t: Tm) -> RcTm {
@@ -137,6 +141,7 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
                     ctor: b.ctor.clone(),
                     binders: b.binders,
                     body: shift(&b.body, delta, cutoff + b.binders),
+                    impossible: b.impossible,
                 })
                 .collect(),
         }),
@@ -221,6 +226,7 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
                     ctor: b.ctor.clone(),
                     binders: b.binders,
                     body: subst_at(&b.body, index, replacement, depth + b.binders),
+                    impossible: b.impossible,
                 })
                 .collect(),
         }),
@@ -302,6 +308,7 @@ fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> Rc
                     ctor: b.ctor.clone(),
                     binders: b.binders,
                     body: abstract_at(target, replacement, &b.body, depth + b.binders),
+                    impossible: b.impossible,
                 })
                 .collect(),
         }),
@@ -379,7 +386,10 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
                 && same_tm(s1, s2)
                 && b1.len() == b2.len()
                 && b1.iter().zip(b2).all(|(x, y)| {
-                    x.ctor == y.ctor && x.binders == y.binders && same_tm(&x.body, &y.body)
+                    x.ctor == y.ctor
+                        && x.binders == y.binders
+                        && x.impossible == y.impossible
+                        && same_tm(&x.body, &y.body)
                 })
         }
         (Tm::Eq(a1, b1, c1), Tm::Eq(a2, b2, c2)) => {

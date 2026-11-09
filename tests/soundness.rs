@@ -170,3 +170,59 @@ enum Vec(A: Type, n: Nat) {
 "#,
     );
 }
+
+#[test]
+fn rejects_bare_parameter_index_match() {
+    assert_rejected(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => 0
+    vcons(m, x, xs) => 1
+  }
+}
+"#,
+        "cannot refine constructor",
+    );
+}
+
+#[test]
+fn rejects_missing_reachable_indexed_constructor() {
+    assert_rejected(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn bad(v: Vec(Nat, zero)): Nat {
+  match v {
+    vcons(m, x, xs) => x
+  }
+}
+"#,
+        "not exhaustive",
+    );
+}
+
+#[test]
+fn rejects_indexed_constructor_with_wrong_index() {
+    assert_rejected(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn bad(): Vec(Nat, 1) {
+  vnil
+}
+"#,
+        "produce the expected type",
+    );
+}

@@ -110,6 +110,7 @@ fn inline_lets(tm: &RcTm) -> RcTm {
                     ctor: b.ctor.clone(),
                     binders: b.binders,
                     body: inline_lets(&b.body),
+                    impossible: b.impossible,
                 })
                 .collect(),
         }),

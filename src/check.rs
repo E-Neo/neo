@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::conv::{conv, conv_ty};
 use crate::core::{Branch, RcTm, Tm};
-use crate::env::{Globals, Sort};
+use crate::env::{CtorInfo, Globals, Sort};
 use crate::error::{Error, Result};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
@@ -235,6 +235,291 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
     }
 }
 
+/// The result of refining a constructor's result indices against the type of
+/// the scrutinee. The values are in the temporary context obtained by cloning
+/// the outer context and pushing the constructor's fields.
+pub struct CtorRefinement {
+    /// False when the constructor's result indices are disjoint from the
+    /// scrutinee's indices (an impossible branch).
+    pub possible: bool,
+    /// Field types after applying the index solutions.
+    pub field_tys: Vec<V>,
+    /// Solutions for flexible field variables, in the temporary context.
+    pub field_solutions: Vec<Option<V>>,
+}
+
+enum UnifyOutcome {
+    Ok,
+    Impossible,
+    Stuck,
+}
+
+/// Refine `ctor`'s result indices against `scrut_ty`, where the constructor's
+/// parameters have already been instantiated by the scrutinee's parameters.
+///
+/// This is a first-order pattern unifier: it solves constructor field
+/// variables, recognises constructor clashes as impossible branches, and
+/// reports anything else as stuck. It is deliberately conservative; the
+/// elaborator and the kernel call the same function so they agree on which
+/// branches are reachable.
+pub fn refine_ctor(
+    globals: &Globals,
+    ctx: &Ctx,
+    ctor: &CtorInfo,
+    params: &[V],
+    scrut_ty: &V,
+) -> Result<CtorRefinement> {
+    let mut temp = ctx.clone();
+    let mut field_ty = eval(globals, &Vec::new(), &ctor.ty);
+    for p in params {
+        field_ty = apply_pi(globals, field_ty, p.clone())
+            .ok_or_else(|| Error::new("match: constructor parameter mismatch"))?;
+    }
+
+    let mut field_tys = Vec::with_capacity(ctor.num_fields);
+    let mut field_levels = Vec::with_capacity(ctor.num_fields);
+    for j in 0..ctor.num_fields {
+        let ft = force(globals, field_ty);
+        let (dom, closure) = match &*ft {
+            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            _ => return Err(Error::new("match: constructor field mismatch")),
+        };
+        let level = temp.level();
+        temp.push(format!("f{}", j), dom.clone());
+        field_tys.push(dom);
+        field_levels.push(level);
+        field_ty = eval_closure(globals, &closure, vvar(level));
+    }
+
+    let result_ty = force(globals, field_ty);
+    let scrut_ty = force(globals, scrut_ty.clone());
+    let mut solutions = std::collections::HashMap::new();
+    let outcome = unify_indices(
+        globals,
+        temp.level(),
+        &field_levels,
+        &mut solutions,
+        &result_ty,
+        &scrut_ty,
+    );
+
+    match outcome {
+        UnifyOutcome::Impossible => Ok(CtorRefinement {
+            possible: false,
+            field_tys,
+            field_solutions: vec![None; ctor.num_fields],
+        }),
+        UnifyOutcome::Stuck => {
+            let got = crate::pretty::show_val(globals, temp.level(), &result_ty);
+            let want = crate::pretty::show_val(globals, temp.level(), &scrut_ty);
+            Err(Error::new(format!(
+                "match: cannot refine constructor `{}` result `{}` against scrutinee type `{}`",
+                ctor.name, got, want
+            )))
+        }
+        UnifyOutcome::Ok => {
+            let result_ty = apply_solutions(globals, &temp, &field_levels, &solutions, &result_ty);
+            if !conv(globals, temp.level(), &result_ty, &scrut_ty) {
+                let got = crate::pretty::show_val(globals, temp.level(), &result_ty);
+                let want = crate::pretty::show_val(globals, temp.level(), &scrut_ty);
+                return Err(Error::new(format!(
+                    "match: refined constructor `{}` result `{}` does not match scrutinee type `{}`",
+                    ctor.name, got, want
+                )));
+            }
+            let field_tys = field_tys
+                .iter()
+                .map(|ty| apply_solutions(globals, &temp, &field_levels, &solutions, ty))
+                .collect();
+            let field_solutions = field_levels
+                .iter()
+                .map(|level| {
+                    solutions.get(level).map(|value| {
+                        apply_solutions(globals, &temp, &field_levels, &solutions, value)
+                    })
+                })
+                .collect();
+            Ok(CtorRefinement {
+                possible: true,
+                field_tys,
+                field_solutions,
+            })
+        }
+    }
+}
+
+fn unify_indices(
+    globals: &Globals,
+    level: usize,
+    flexible: &[usize],
+    solutions: &mut std::collections::HashMap<usize, V>,
+    a: &V,
+    b: &V,
+) -> UnifyOutcome {
+    if conv(globals, level, a, b) {
+        return UnifyOutcome::Ok;
+    }
+    let a = force(globals, a.clone());
+    let b = force(globals, b.clone());
+
+    if let Val::Neutral(na) = &*a
+        && let Neutral::Var(i) = &**na
+        && flexible.contains(i)
+    {
+        return bind_flexible(globals, level, flexible, solutions, *i, &b);
+    }
+    if let Val::Neutral(nb) = &*b
+        && let Neutral::Var(i) = &**nb
+        && flexible.contains(i)
+    {
+        return bind_flexible(globals, level, flexible, solutions, *i, &a);
+    }
+
+    match (&*a, &*b) {
+        (Val::Ctor(n1, i1, args1), Val::Ctor(n2, i2, args2)) => {
+            if n1 != n2 || i1 != i2 {
+                UnifyOutcome::Impossible
+            } else {
+                unify_lists(globals, level, flexible, solutions, args1, args2)
+            }
+        }
+        (Val::Ind(n1, args1), Val::Ind(n2, args2)) => {
+            if n1 != n2 {
+                UnifyOutcome::Impossible
+            } else {
+                unify_lists(globals, level, flexible, solutions, args1, args2)
+            }
+        }
+        (Val::Type(u), Val::Type(v)) => {
+            if u == v {
+                UnifyOutcome::Ok
+            } else {
+                UnifyOutcome::Stuck
+            }
+        }
+        (Val::Prop, Val::Prop) => UnifyOutcome::Ok,
+        (Val::Eq(t1, l1, r1), Val::Eq(t2, l2, r2)) => unify_lists(
+            globals,
+            level,
+            flexible,
+            solutions,
+            &[t1.clone(), l1.clone(), r1.clone()],
+            &[t2.clone(), l2.clone(), r2.clone()],
+        ),
+        (Val::Refl(x), Val::Refl(y)) => unify_indices(globals, level, flexible, solutions, x, y),
+        (Val::Neutral(n1), Val::Neutral(n2)) => match (&**n1, &**n2) {
+            (Neutral::Var(i), Neutral::Var(j)) if i == j => UnifyOutcome::Ok,
+            (Neutral::Global(x), Neutral::Global(y)) if x == y => UnifyOutcome::Ok,
+            (Neutral::App(f1, a1), Neutral::App(f2, a2)) => {
+                let f = unify_indices(
+                    globals,
+                    level,
+                    flexible,
+                    solutions,
+                    &vneutral((**f1).clone()),
+                    &vneutral((**f2).clone()),
+                );
+                match f {
+                    UnifyOutcome::Impossible => UnifyOutcome::Impossible,
+                    UnifyOutcome::Stuck => UnifyOutcome::Stuck,
+                    UnifyOutcome::Ok => unify_indices(globals, level, flexible, solutions, a1, a2),
+                }
+            }
+            _ => UnifyOutcome::Stuck,
+        },
+        _ => UnifyOutcome::Stuck,
+    }
+}
+
+fn unify_lists(
+    globals: &Globals,
+    level: usize,
+    flexible: &[usize],
+    solutions: &mut std::collections::HashMap<usize, V>,
+    a: &[V],
+    b: &[V],
+) -> UnifyOutcome {
+    if a.len() != b.len() {
+        return UnifyOutcome::Stuck;
+    }
+    let mut stuck = false;
+    for (x, y) in a.iter().zip(b.iter()) {
+        match unify_indices(globals, level, flexible, solutions, x, y) {
+            UnifyOutcome::Impossible => return UnifyOutcome::Impossible,
+            UnifyOutcome::Stuck => stuck = true,
+            UnifyOutcome::Ok => {}
+        }
+    }
+    if stuck {
+        UnifyOutcome::Stuck
+    } else {
+        UnifyOutcome::Ok
+    }
+}
+
+fn bind_flexible(
+    globals: &Globals,
+    level: usize,
+    flexible: &[usize],
+    solutions: &mut std::collections::HashMap<usize, V>,
+    var: usize,
+    value: &V,
+) -> UnifyOutcome {
+    if let Some(existing) = solutions.get(&var).cloned() {
+        return unify_indices(globals, level, flexible, solutions, &existing, value);
+    }
+    if occurs(globals, var, value) {
+        return UnifyOutcome::Stuck;
+    }
+    solutions.insert(var, value.clone());
+    UnifyOutcome::Ok
+}
+
+fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
+    let value = force(globals, value.clone());
+    match &*value {
+        Val::Neutral(n) => match &**n {
+            Neutral::Var(i) => *i == var,
+            Neutral::App(f, a) => {
+                occurs(globals, var, &vneutral((**f).clone())) || occurs(globals, var, a)
+            }
+            Neutral::Global(_) => false,
+            Neutral::Match { .. } | Neutral::J { .. } => true,
+        },
+        Val::Ind(_, args) | Val::Ctor(_, _, args) => args.iter().any(|a| occurs(globals, var, a)),
+        Val::Eq(a, b, c) => {
+            occurs(globals, var, a) || occurs(globals, var, b) || occurs(globals, var, c)
+        }
+        Val::Refl(a) => occurs(globals, var, a),
+        Val::Pi(..) | Val::Lam(_) => true,
+        Val::Type(_) | Val::Prop | Val::Glob(_) => false,
+    }
+}
+
+fn apply_solutions(
+    globals: &Globals,
+    temp: &Ctx,
+    field_levels: &[usize],
+    solutions: &std::collections::HashMap<usize, V>,
+    value: &V,
+) -> V {
+    if solutions.is_empty() {
+        return value.clone();
+    }
+    let level = temp.level();
+    let mut tm = quote(globals, level, value);
+    for _ in 0..=field_levels.len() {
+        for field_level in field_levels {
+            if let Some(solution) = solutions.get(field_level) {
+                let index = level - 1 - *field_level;
+                let replacement = quote(globals, level, solution);
+                tm = crate::core::subst(&tm, index, &replacement);
+            }
+        }
+    }
+    eval(globals, &temp.env, &tm)
+}
+
 fn infer_match(
     globals: &Globals,
     ctx: &mut Ctx,
@@ -304,32 +589,39 @@ fn infer_match(
                 ctor.name, ctor.num_fields, branch.binders
             )));
         }
-        let mut field_ty = eval(globals, &Vec::new(), &ctor.ty);
-        for (param_idx, param) in params.iter().enumerate() {
-            let _ = param_idx;
-            field_ty = apply_pi(globals, field_ty, param.clone())
-                .ok_or_else(|| Error::new("match: constructor parameter mismatch"))?;
+
+        let refinement = refine_ctor(globals, ctx, ctor, &params, &scrut_ty)?;
+        if !refinement.possible {
+            // The constructor's result indices are disjoint from the
+            // scrutinee type, so this branch is unreachable. Its body is not
+            // checked; the elaborator marks it so evaluation and code
+            // generation skip it.
+            continue;
         }
-        let mut field_vals = Vec::new();
-        for j in 0..ctor.num_fields {
-            let field_ty_f = force(globals, field_ty);
-            match &*field_ty_f {
-                Val::Pi(dom, closure) => {
-                    let fresh = ctx.push(format!("f{}", j), dom.clone());
-                    field_vals.push(fresh.clone());
-                    field_ty = eval_closure(globals, closure, fresh);
-                }
-                _ => return Err(Error::new("match: constructor field mismatch")),
+        if branch.impossible {
+            return Err(Error::new(format!(
+                "match: branch for `{}` is marked impossible but is reachable",
+                ctor.name
+            )));
+        }
+
+        let mut field_vals = Vec::with_capacity(ctor.num_fields);
+        for (j, ty) in refinement.field_tys.iter().enumerate() {
+            let fresh = ctx.push(format!("f{}", j), ty.clone());
+            match &refinement.field_solutions[j] {
+                Some(solution) => field_vals.push(solution.clone()),
+                None => field_vals.push(fresh),
             }
         }
         let mut ctor_args = params.clone();
         ctor_args.extend(field_vals);
         let ctor_v = vctor(enum_name.clone(), i, ctor_args);
         let branch_ty = vapp(globals, motive_v.clone(), ctor_v);
-        check(globals, ctx, &branch.body, &branch_ty)?;
+        let result = check(globals, ctx, &branch.body, &branch_ty);
         for _ in 0..ctor.num_fields {
             ctx.pop();
         }
+        result?;
     }
 
     Ok(vapp(globals, motive_v, scrut_v))
