@@ -81,6 +81,7 @@ More examples live in [`examples/`](examples):
 | `indexed_vec.neo` | indexed families, length, append | `3` |
 | `indexed_match.neo` | branch-field index refinement | `4` |
 | `indexed_append.neo` | context index refinement in `append` | `3` |
+| `pattern_matching.neo` | nested patterns, tree recursion | `4` |
 
 ## Documentation
 

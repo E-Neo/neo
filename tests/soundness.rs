@@ -255,6 +255,61 @@ fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
 }
 
 #[test]
+fn accepts_nested_constructor_patterns() {
+    elaborate_ok(
+        r#"
+fn classify(n: Nat): Nat {
+  match n {
+    zero => zero
+    succ(zero) => 1
+    succ(succ(zero)) => 2
+    succ(succ(succ(k))) => 3
+  }
+}
+
+fn heads(xs: List(Nat)): Nat {
+  match xs {
+    nil => zero
+    cons(zero, rest) => zero
+    cons(succ(k), cons(x, rest)) => succ(x)
+    cons(succ(k), nil) => k
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_non_exhaustive_nested_pattern() {
+    assert_rejected(
+        r#"
+fn bad(n: Nat): Nat {
+  match n {
+    zero => zero
+    succ(zero) => 1
+  }
+}
+"#,
+        "not exhaustive",
+    );
+}
+
+#[test]
+fn rejects_nested_pattern_with_wrong_arity() {
+    assert_rejected(
+        r#"
+fn bad(n: Nat): Nat {
+  match n {
+    zero => zero
+    succ(succ(zero, zero)) => 1
+  }
+}
+"#,
+        "field(s), but the pattern binds",
+    );
+}
+
+#[test]
 fn rejects_cyclic_index_refinement() {
     assert_rejected(
         r#"

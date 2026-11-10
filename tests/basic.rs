@@ -378,6 +378,164 @@ fn demo(): Nat {
 }
 
 #[test]
+fn nested_patterns_select_ordered_arms() {
+    let globals = define(
+        r#"
+fn classify(n: Nat): Nat {
+  match n {
+    zero => zero
+    succ(zero) => 1
+    succ(succ(zero)) => 2
+    succ(succ(succ(k))) => 3
+  }
+}
+
+fn main(): Nat {
+  classify(3)
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 3);
+}
+
+#[test]
+fn nested_patterns_infer_result_type() {
+    let globals = define(
+        r#"
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn inferred(n: Nat): Nat {
+  r = match n {
+    zero => 0
+    succ(zero) => 1
+    succ(succ(k)) => 2
+  }
+  r
+}
+
+fn main(): Nat {
+  add(inferred(2), inferred(1))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 3);
+}
+
+#[test]
+fn nested_patterns_decompose_indexed_values() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn two(v: Vec(Nat, 2)): Nat {
+  match v {
+    vcons(succ(zero), x, vcons(zero, y, vnil)) => add(x, y)
+    vcons(succ(zero), x, vcons(zero, y, vcons(k, z, zs))) => z
+  }
+}
+
+fn v2(): Vec(Nat, 2) {
+  vcons(1, 10, vcons(0, 20, vnil))
+}
+
+fn main(): Nat {
+  two(v2())
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 30);
+}
+
+#[test]
+fn nested_patterns_infer_dependent_index() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+  match v {
+    vcons(m, x, xs) => x
+  }
+}
+
+fn tail2(n: Nat, v: Vec(Nat, succ(succ(n)))): Vec(Nat, n) {
+  match v {
+    vcons(m, x, vcons(k, y, ys)) => ys
+  }
+}
+
+fn v3(): Vec(Nat, 3) {
+  vcons(2, 10, vcons(1, 20, vcons(0, 30, vnil)))
+}
+
+fn main(): Nat {
+  head(0, tail2(1, v3()))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 30);
+}
+
+#[test]
+fn nested_patterns_recursing_on_inner_fields() {
+    let globals = define(
+        r#"
+enum Tree {
+  leaf
+  node(Tree, Tree)
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn count(t: Tree): Nat {
+  match t {
+    leaf => zero
+    node(leaf, r) => succ(count(r))
+    node(node(a, b), r) => succ(add(succ(add(count(a), count(b))), count(r)))
+  }
+}
+
+fn sample(): Tree {
+  node(node(leaf, leaf), node(leaf, node(leaf, leaf)))
+}
+
+fn main(): Nat {
+  count(sample())
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 4);
+}
+
+#[test]
 fn omits_impossible_indexed_branch() {
     define(
         r#"

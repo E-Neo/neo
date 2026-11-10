@@ -348,6 +348,10 @@ be related to `zero` or `succ(...)`, so the match is rejected. `Prop`-typed
 evidence is never solved, because it cannot occur in an index and solving it
 would amount to proof search.
 
+Surface nested patterns and several arms for one constructor are elaborated
+into nested core matches. Each nested match has its own motive and is checked by
+the rules above; the core calculus is unchanged.
+
 ## 8. Termination
 
 All functions are total. A definition passes the termination checker only when:

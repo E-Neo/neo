@@ -1,0 +1,31 @@
+// Nested constructor patterns and multiple arms for one constructor.
+//
+// The pattern matrix is compiled into nested matches. Arms are tried in source
+// order, and each nested match must be exhaustive for the values it inspects.
+enum Tree {
+  leaf
+  node(Tree, Tree)
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn count(t: Tree): Nat {
+  match t {
+    leaf => zero
+    node(leaf, r) => succ(count(r))
+    node(node(a, b), r) => succ(add(succ(add(count(a), count(b))), count(r)))
+  }
+}
+
+fn sample(): Tree {
+  node(node(leaf, leaf), node(leaf, node(leaf, leaf)))
+}
+
+fn main(): Nat {
+  count(sample())
+}

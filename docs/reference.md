@@ -684,13 +684,15 @@ match scrutinee {
 - The scrutinee must be an enum value or an equality proof.
 - Each arm is on its own line. The closing `}` may follow the last arm on the
   same line.
-- Every **reachable** constructor of the enum must appear exactly once
-  (exhaustiveness). Constructors whose result indices cannot match the
-  scrutinee type are impossible: their arms may be omitted, and arms written
-  for them are ignored. See [indexed families](#indexed-families).
+- Every **reachable** constructor of the enum must be covered (exhaustiveness).
+  Constructors whose result indices cannot match the scrutinee type are
+  impossible: their arms may be omitted, and arms written for them are ignored.
+  See [indexed families](#indexed-families).
+- Several arms may start with the same constructor. They are tried in source
+  order; the first matching row wins. The nested patterns within all arms for
+  one constructor must cover every reachable value they inspect.
 - An enum with no constructors, or a scrutinee type whose constructors are all
   impossible, is matched with zero arms; an expected result type is required.
-- Duplicate arms are rejected.
 
 Example:
 
@@ -706,17 +708,47 @@ fn pred(n: Nat): Nat {
 ### Patterns
 
 ```
-_                   wildcard
-x                   variable binder
-zero                nullary constructor
-succ(p)             constructor with sub-patterns
-cons(_, t)          wildcard field
+_                        wildcard
+x                        variable binder
+zero                     nullary constructor
+succ(p)                  constructor with sub-patterns
+cons(_, t)               wildcard field
+cons(succ(k), rest)      nested constructor pattern
 ```
+
+Patterns nest arbitrarily. A nested pattern compiles to an inner `match` on the
+field, using the same index refinement as an ordinary match:
+
+```neo
+fn classify(n: Nat): Nat {
+  match n {
+    zero => zero
+    succ(zero) => 1
+    succ(succ(zero)) => 2
+    succ(succ(succ(k))) => 3
+  }
+}
+```
+
+Multiple arms for one constructor are allowed and checked in order:
+
+```neo
+fn small(xs: List(Nat)): Nat {
+  match xs {
+    nil => zero
+    cons(zero, rest) => zero
+    cons(succ(k), rest) => k
+  }
+}
+```
+
+Each nested match must cover the values it inspects. If an index refinement
+makes a nested value a known constructor, patterns for the other constructors
+are simply impossible and may be omitted.
 
 Restrictions:
 
-- Sub-patterns of a constructor must be variables or `_`. **Nested constructor
-  patterns are not supported**; bind a variable and match again if needed.
+- There are no pattern guards, or-patterns, as-patterns, or literal patterns.
 - A single arm whose pattern is a variable or `_` is an irrefutable binding:
 
 ```neo
@@ -895,7 +927,9 @@ patterns, aliases) cannot hide a recursive occurrence. It requires:
 2. **Every call is structurally decreasing in one fixed argument position**
    shared by all recursive calls.
 3. The decreasing argument must be a **variable** bound by a pattern
-   destructure of a parameter (or of an already-smaller variable).
+   destructure of a parameter (or of an already-smaller variable), at any
+   nesting depth. Nested constructor patterns expose inner fields as smaller
+   values.
 
 Accepted:
 
@@ -1324,8 +1358,6 @@ Common messages:
 | `recursive function ... is used as a value` | The recursive name escaped; only fully applied calls are allowed. |
 | `recursive call to ... is not structurally decreasing ...` | A recursive call does not descend on a subterm of one fixed parameter. |
 | `constructor ... must return ...` | A constructor's explicit result type must be its declaring enum. |
-| `duplicate arm for ...` | Remove one of the arms. |
-| `nested constructor patterns are not supported; bind a variable instead` | Sub-pattern is a constructor. |
 | `a match on an equality proof must use the pattern refl` | Equality matches have one `refl`/`_` arm. |
 | `recursive call ... is not structurally decreasing ...` | Termination check failed. |
 | `... is not strictly positive ...` | Positivity check failed. |
@@ -1588,6 +1620,28 @@ fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
 The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
 The `m` field is refined to `n`, which gives `xs` the type `Vec(Nat, n)`. With
 `main` returning `head(1, vcons(1, 4, vcons(0, 3, vnil)))`, the output is `4`.
+
+`examples/pattern_matching.neo` shows nested patterns and multiple arms for one
+constructor:
+
+```neo
+enum Tree {
+  leaf
+  node(Tree, Tree)
+}
+
+fn count(t: Tree): Nat {
+  match t {
+    leaf => zero
+    node(leaf, r) => succ(count(r))
+    node(node(a, b), r) => succ(add(succ(add(count(a), count(b))), count(r)))
+  }
+}
+```
+
+The nested `node(a, b)` pattern exposes the inner subtree's fields, and
+recursion on `a`, `b`, and `r` is accepted because all three are structural
+subterms of `t`. Output: `4`.
 
 ---
 
