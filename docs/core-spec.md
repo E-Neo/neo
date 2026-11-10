@@ -286,19 +286,42 @@ Ci : (params) -> (fields) -> E(indices)
 Given a scrutinee type `E(s*)`, the kernel first unifies each `index` against the
 corresponding `s*`. Refinement is deliberately first-order:
 
-- Constructor field variables may be solved by constructor-headed indices.
+- The flexible variables are the surrounding context variables whose types can
+  occur in an index (everything except `Prop`-typed evidence and equality
+  proofs) together with the constructor's fields.
+- A flexible variable may be solved by any index term, including one that
+  mentions constructor fields. For example, matching `Vec(A, n)` against
+  `vcons` solves the context index `n := succ(m)`.
 - A constructor clash (`zero` against `succ(n)`, two different constructors, or
   two different enum names) means the branch is **impossible**.
 - Any equation that is neither already definitionally equal nor a solvable
-  field variable is **stuck**, and the match is rejected with an error.
+  flexible variable is **stuck**, and the match is rejected with an error.
+
+Solutions are then flattened: a solution may mention another solved variable,
+so chains are resolved until every value is expressed in unsolved variables
+only. A cycle, or an equation that would solve a variable with a term containing
+itself, is **stuck**; the branch is refused rather than guessed. This is the
+occurs check.
+
+Every solution must also inhabit the variable's declared type in the extended
+context, after applying the other solutions. This is the soundness gate: a
+branch may assume the equation only because it holds for every value the branch
+can match. Finally, the refined constructor result must be convertible to the
+refined scrutinee type.
 
 For a possible branch, fields are bound in telescope order. Let `theta` be the
-solutions for solved fields.
+solutions for solved context variables and fields.
 
 1. Push each field with its refined type `A[theta]`.
 2. Form `Ci(params, fields)` where a solved field uses its solution and an
    unsolved field uses the freshly bound variable.
-3. Check the branch body against `m(Ci(...))`.
+3. Check the branch body against `m(Ci(...))[theta]` in a context where every
+   local type has `theta` applied and the evaluation environment maps each
+   solved variable to its solution.
+
+The branch body keeps the same de Bruijn layout. Only the stored local types and
+the evaluation environment are refined, so a variable can be known to equal a
+constructor field without rewriting the term.
 
 The elaborator performs the same refinement (`check::refine_ctor`) so that the
 surface branch is elaborated in the refined context. It additionally replaces
@@ -317,11 +340,13 @@ unify with the scrutinee type. Exactly one branch per constructor is stored, in
 constructor order. If a constructor is reachable and its arm is missing, the
 match is rejected as non-exhaustive.
 
-This is the only index refinement in Stage 0. The kernel does **not** refine
-the surrounding context. In particular, matching on `Vec(A, n)` where `n` is an
-ordinary context variable is rejected: the `vnil` branch would require solving
-`n = zero` in the context. Write the index in constructor-headed form
-(`Vec(A, succ(n))`, `Vec(A, zero)`) to use refinement.
+Refinement is still first-order and conservative. A context index is refined
+only when the equations determine it: matching `Vec(A, n)` works because the
+branches force `n := zero` and `n := succ(m)`. An index whose head is stuck, for
+example `Vec(A, pred(n))` where `pred` is an ordinary recursive function, cannot
+be related to `zero` or `succ(...)`, so the match is rejected. `Prop`-typed
+evidence is never solved, because it cannot occur in an index and solving it
+would amount to proof search.
 
 ## 8. Termination
 
@@ -396,7 +421,8 @@ stored data, so a mismatch is detected rather than trusted.
 
 These are deliberate Stage 0 limits, not soundness holes:
 
-- No context refinement (see section 7.3).
+- Index refinement is first-order: a stuck or compound scrutinee index is
+  rejected rather than solved by proof search (see section 7.3).
 - No mutual or nested inductives, no higher inductive types.
 - No proof irrelevance in conversion. Two different proofs of the same
   proposition are not automatically convertible.

@@ -408,9 +408,9 @@ Here `m` is an ordinary runtime field that records the length of the tail,
 and the constructor's result type connects it to `succ(m)`. Because `Vec` has
 parameters, `vcons(...)` must be used where the expected type is known.
 
-Indexed families support **branch-field refinement**. Matching refines field
-indices that are forced by the scrutinee, and constructors whose result indices
-cannot match become impossible branches:
+Indexed families support **index refinement**. Matching refines both constructor
+fields and ordinary context parameters that the scrutinee's indices determine.
+Constructors whose result indices cannot match become impossible branches:
 
 ```neo
 enum Vec(T: Type, n: Nat) {
@@ -427,22 +427,52 @@ fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
 
 The scrutinee `Vec(Nat, succ(n))` cannot be built by `vnil`, so the `vnil` arm
 may be omitted. In the `vcons` branch, the equation `succ(m) == succ(n)`
-refines `m` to `n`, so `xs` has type `Vec(Nat, n)`. An arm written for an
-impossible constructor is accepted but never checked, and the generated code
+refines the field `m` to `n`, so `xs` has type `Vec(Nat, n)`. An arm written for
+an impossible constructor is accepted but never checked, and the generated code
 omits it.
+
+Context parameters are refined too. The classic length and append functions
+work directly on a bare index:
+
+```neo
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(m, xs))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+  }
+}
+```
+
+In the `vnil` branch of `length`, the equation `n == zero` refines `n`; in the
+`vcons` branch it refines `n` to `succ(m)`. In `append`, the `vcons` branch
+learns `n == succ(k)`, so the constructed vector has index
+`succ(add(k, m))`, convertible to `add(succ(k), m)`.
 
 Indexed families are still limited:
 
-- Refinement solves only *constructor fields* against constructor-headed
-  indices. A scrutinee whose index is an ordinary parameter, such as
-  `Vec(T, n)` where `n` is a function parameter, cannot be matched: that would
-  require refining the surrounding context (`n := zero` in the `vnil` branch).
-  Write the index in constructor-headed form, or avoid matching on it.
+- Refinement is first-order. An index that is stuck, such as `pred(n)` where
+  `pred` is an ordinary recursive function, cannot be related to a constructor
+  and the match is rejected. A cyclic equation is rejected too.
 - A value whose type has a field like `Vec(T, m)` that remains dependent on an
   earlier field cannot be the result of `main`, because it is not printable.
 
-See [`docs/core-spec.md`](core-spec.md) for the exact refinement rule, and
-`examples/indexed_match.neo` for a runnable example.
+See [`docs/core-spec.md`](core-spec.md) for the exact refinement rule,
+`examples/indexed_match.neo` for branch-field refinement, and
+`examples/indexed_append.neo` for context refinement.
 
 ### Empty enums
 
@@ -705,16 +735,16 @@ fn force(n: Nat): Nat {
 ### Dependent results
 
 If the expected result type is known and the scrutinee is a variable, the
-result type is abstracted over that variable, so it may mention it. Branch
-fields are refined from the scrutinee's indices (see
+result type is abstracted over that variable, so it may mention it. Indices are
+refined from the scrutinee type (see
 [indexed families](#indexed-families)): solving `succ(m) = succ(n)` gives the
 branch field `m` the value `n`, and field types that mention `m` are rewritten
-accordingly.
+accordingly. Solving `succ(m) = n` refines the context parameter `n` to
+`succ(m)`, so later branches and recursive calls see the refined type.
 
-There is **no general context refinement**. Matching does not rewrite other
-local variables or ordinary parameter indices. A match on `Vec(T, n)` with a
-bare parameter index is therefore rejected; use a constructor-headed index such
-as `Vec(T, succ(n))` or `Vec(T, zero)`.
+Refinement is first-order and total. It does not guess: a stuck index such as
+`pred(n)`, or an equation that would make an index depend on itself, is
+rejected instead of being assumed.
 
 ### Matching on equality proofs
 
@@ -1320,9 +1350,10 @@ design:
 - built-in arithmetic or other infix operators;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
-- dependent pattern matching that refines context variables. Branch-field
-  refinement is supported (see [section 6](#6-enums)), but a bare parameter
-  index such as `Vec(T, n)` cannot be matched;
+- higher-order or non-first-order dependent pattern matching: indices are
+  refined only when they unify structurally with a constructor result. Context
+  and field refinement are supported (see [section 6](#6-enums)); a stuck index
+  such as `pred(n)` is rejected;
 - proof irrelevance in the conversion checker;
 - custom printing and user-defined entry points;
 - `def`, `let`, `<-`, mutable variables, `proc`, `theorem`, `forall`, `lambda`,
@@ -1497,18 +1528,46 @@ enum Vec(T: Type, n: Nat) {
   vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
 }
 
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(m, xs))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+  }
+}
+
 fn two(): Vec(Nat, 2) {
   vcons(1, 4, vcons(0, 3, vnil))
 }
 
+fn three(): Vec(Nat, 3) {
+  append(2, 1, two(), vcons(0, 7, vnil))
+}
+
 fn main(): Nat {
-  2
+  length(3, three())
 }
 ```
 
 The REPL can display `two()` as `vcons(1, 4, vcons(0, 3, vnil))`. The program
 builds because `main` returns `Nat`; a `main` returning `Vec` itself is not
-printable.
+printable. `length` matches on a bare index `n`; refinement learns `n` is `zero`
+or `succ(m)` in the two branches, which is what makes the recursive call
+`length(m, xs)` well typed. `append` learns `n := succ(k)` in its `vcons`
+branch. Output: `3`.
 
 `examples/indexed_match.neo` shows branch-field refinement:
 

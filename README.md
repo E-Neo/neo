@@ -78,8 +78,9 @@ More examples live in [`examples/`](examples):
 | `closures.neo` | closures, first-class functions | `7` |
 | `enums.neo` | user enums and patterns | `12` |
 | `proofs.neo` | equality proofs, proof erasure | `7` |
-| `indexed_vec.neo` | indexed families | `2` |
+| `indexed_vec.neo` | indexed families, length, append | `3` |
 | `indexed_match.neo` | branch-field index refinement | `4` |
+| `indexed_append.neo` | context index refinement in `append` | `3` |
 
 ## Documentation
 

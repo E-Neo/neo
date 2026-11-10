@@ -246,6 +246,11 @@ pub struct CtorRefinement {
     pub field_tys: Vec<V>,
     /// Solutions for flexible field variables, in the temporary context.
     pub field_solutions: Vec<Option<V>>,
+    /// Solutions for outer-context variables that this branch forces, as
+    /// `(level, value)` pairs. The values live in the temporary context that
+    /// extends the outer context with the constructor fields, so a solution may
+    /// mention a field (for example `n := succ(m)`).
+    pub context_solutions: Vec<(usize, V)>,
 }
 
 enum UnifyOutcome {
@@ -293,21 +298,43 @@ pub fn refine_ctor(
 
     let result_ty = force(globals, field_ty);
     let scrut_ty = force(globals, scrut_ty.clone());
+    let inner = ctx.level();
+    // Context parameters and the constructor's own fields are the variables a
+    // match can determine. Evidence (`Prop`-typed locals) is excluded: it never
+    // appears in an index, and solving it would amount to proof search.
+    let mut flexible: Vec<usize> = (0..inner)
+        .filter(|&level| solvable_index(globals, &ctx.locals[level].1))
+        .collect();
+    flexible.extend(field_levels.iter().copied());
     let mut solutions = std::collections::HashMap::new();
     let outcome = unify_indices(
         globals,
         temp.level(),
-        &field_levels,
+        &flexible,
         &mut solutions,
         &result_ty,
         &scrut_ty,
     );
+    // A solution may mention another variable, so flatten chains before using
+    // or checking the result. A cycle means the equations do not determine the
+    // branch, so the branch is refused rather than guessed.
+    let outcome = match outcome {
+        UnifyOutcome::Ok => match resolve_solutions(globals, temp.level(), &flexible, &solutions) {
+            Some(resolved) => {
+                solutions = resolved;
+                UnifyOutcome::Ok
+            }
+            None => UnifyOutcome::Stuck,
+        },
+        other => other,
+    };
 
     match outcome {
         UnifyOutcome::Impossible => Ok(CtorRefinement {
             possible: false,
             field_tys,
             field_solutions: vec![None; ctor.num_fields],
+            context_solutions: Vec::new(),
         }),
         UnifyOutcome::Stuck => {
             let got = crate::pretty::show_val(globals, temp.level(), &result_ty);
@@ -318,10 +345,39 @@ pub fn refine_ctor(
             )))
         }
         UnifyOutcome::Ok => {
-            let result_ty = apply_solutions(globals, &temp, &field_levels, &solutions, &result_ty);
-            if !conv(globals, temp.level(), &result_ty, &scrut_ty) {
-                let got = crate::pretty::show_val(globals, temp.level(), &result_ty);
-                let want = crate::pretty::show_val(globals, temp.level(), &scrut_ty);
+            // Every solution must inhabit its variable's declared type in the
+            // extended context. This is the soundness gate: the branch may
+            // assume the equation only because it holds for every value the
+            // branch can match.
+            for (var, value) in &solutions {
+                let expected = if *var < inner {
+                    ctx.locals[*var].1.clone()
+                } else {
+                    field_tys[*var - inner].clone()
+                };
+                let expected =
+                    apply_solutions(globals, temp.level(), &flexible, &solutions, &expected);
+                let tm = quote(globals, temp.level(), value);
+                let mut solution_ctx = temp.clone();
+                let inferred = infer(globals, &mut solution_ctx, &tm)?;
+                let inferred =
+                    apply_solutions(globals, temp.level(), &flexible, &solutions, &inferred);
+                if !conv_ty(globals, temp.level(), &inferred, &expected) {
+                    let got = crate::pretty::show_val(globals, temp.level(), &inferred);
+                    let want = crate::pretty::show_val(globals, temp.level(), &expected);
+                    return Err(Error::new(format!(
+                        "match: index solution for constructor `{}` has type `{}`, expected `{}`",
+                        ctor.name, got, want
+                    )));
+                }
+            }
+            let refined_result =
+                apply_solutions(globals, temp.level(), &flexible, &solutions, &result_ty);
+            let refined_scrut =
+                apply_solutions(globals, temp.level(), &flexible, &solutions, &scrut_ty);
+            if !conv(globals, temp.level(), &refined_result, &refined_scrut) {
+                let got = crate::pretty::show_val(globals, temp.level(), &refined_result);
+                let want = crate::pretty::show_val(globals, temp.level(), &refined_scrut);
                 return Err(Error::new(format!(
                     "match: refined constructor `{}` result `{}` does not match scrutinee type `{}`",
                     ctor.name, got, want
@@ -329,23 +385,84 @@ pub fn refine_ctor(
             }
             let field_tys = field_tys
                 .iter()
-                .map(|ty| apply_solutions(globals, &temp, &field_levels, &solutions, ty))
+                .map(|ty| apply_solutions(globals, temp.level(), &flexible, &solutions, ty))
                 .collect();
             let field_solutions = field_levels
                 .iter()
-                .map(|level| {
-                    solutions.get(level).map(|value| {
-                        apply_solutions(globals, &temp, &field_levels, &solutions, value)
-                    })
-                })
+                .map(|level| solutions.get(level).cloned())
+                .collect();
+            let context_solutions = (0..inner)
+                .filter_map(|level| solutions.get(&level).map(|value| (level, value.clone())))
                 .collect();
             Ok(CtorRefinement {
                 possible: true,
                 field_tys,
                 field_solutions,
+                context_solutions,
             })
         }
     }
+}
+
+/// Whether a local may be refined by a match: parameters that can occur in an
+/// index are candidates, while generic evidence is rigid.
+fn solvable_index(globals: &Globals, ty: &V) -> bool {
+    let ty = force(globals, ty.clone());
+    match &*ty {
+        Val::Prop | Val::Eq(..) => false,
+        Val::Ind(name, _) => globals
+            .get_enum(name)
+            .is_none_or(|info| info.sort != Sort::Prop),
+        _ => true,
+    }
+}
+
+/// Flatten solution chains until they are acyclic. Returns `None` when a cycle
+/// survives, which means the branch's indices are not determined. The values
+/// are in the temporary context of length `level`.
+///
+/// Solutions are peeled off one at a time: a solution whose value mentions no
+/// other unsolved variable is final, and is substituted into the rest. This
+/// avoids repeatedly expanding mutually recursive values while looking for a
+/// cycle.
+fn resolve_solutions(
+    globals: &Globals,
+    level: usize,
+    vars: &[usize],
+    solutions: &std::collections::HashMap<usize, V>,
+) -> Option<std::collections::HashMap<usize, V>> {
+    let mut pending = solutions.clone();
+    let mut resolved = std::collections::HashMap::new();
+    while !pending.is_empty() {
+        let ready = pending.iter().find_map(|(var, value)| {
+            let independent = vars
+                .iter()
+                .all(|other| !pending.contains_key(other) || !occurs(globals, *other, value));
+            if independent {
+                Some((*var, value.clone()))
+            } else {
+                None
+            }
+        });
+        let (var, value) = ready?;
+        pending.remove(&var);
+        for other in pending.values_mut() {
+            *other = replace_var(globals, level, var, &value, other);
+        }
+        resolved.insert(var, value);
+    }
+    Some(resolved)
+}
+
+/// Replace one variable in a value, leaving the canonical variables of all
+/// other levels alone.
+fn replace_var(globals: &Globals, level: usize, var: usize, value: &V, target: &V) -> V {
+    let index = level - 1 - var;
+    let mut tm = quote(globals, level, target);
+    let replacement = quote(globals, level, value);
+    tm = crate::core::subst(&tm, index, &replacement);
+    let env: Env = (0..level).map(vvar).collect();
+    eval(globals, &env, &tm)
 }
 
 fn unify_indices(
@@ -496,28 +613,33 @@ fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
     }
 }
 
-fn apply_solutions(
+/// Apply index solutions to a value living in a context of length `level`.
+///
+/// The value is quoted in the canonical environment, so the result is a pure
+/// substitution: unsolved variables stay as themselves even when a caller's
+/// environment has already refined them.
+pub fn apply_solutions(
     globals: &Globals,
-    temp: &Ctx,
-    field_levels: &[usize],
+    level: usize,
+    vars: &[usize],
     solutions: &std::collections::HashMap<usize, V>,
     value: &V,
 ) -> V {
     if solutions.is_empty() {
         return value.clone();
     }
-    let level = temp.level();
     let mut tm = quote(globals, level, value);
-    for _ in 0..=field_levels.len() {
-        for field_level in field_levels {
-            if let Some(solution) = solutions.get(field_level) {
-                let index = level - 1 - *field_level;
+    for _ in 0..=vars.len() {
+        for var in vars {
+            if let Some(solution) = solutions.get(var) {
+                let index = level - 1 - *var;
                 let replacement = quote(globals, level, solution);
                 tm = crate::core::subst(&tm, index, &replacement);
             }
         }
     }
-    eval(globals, &temp.env, &tm)
+    let env: Env = (0..level).map(vvar).collect();
+    eval(globals, &env, &tm)
 }
 
 fn infer_match(
@@ -605,23 +727,48 @@ fn infer_match(
             )));
         }
 
+        let inner = ctx.level();
+        let mut branch_ctx = ctx.clone();
         let mut field_vals = Vec::with_capacity(ctor.num_fields);
         for (j, ty) in refinement.field_tys.iter().enumerate() {
-            let fresh = ctx.push(format!("f{}", j), ty.clone());
+            let fresh = branch_ctx.push(format!("f{}", j), ty.clone());
             match &refinement.field_solutions[j] {
                 Some(solution) => field_vals.push(solution.clone()),
                 None => field_vals.push(fresh),
             }
         }
+
+        let mut vars: Vec<usize> = refinement
+            .context_solutions
+            .iter()
+            .map(|(level, _)| *level)
+            .collect();
+        let mut sols: std::collections::HashMap<usize, V> =
+            refinement.context_solutions.iter().cloned().collect();
+        for (j, solution) in refinement.field_solutions.iter().enumerate() {
+            if let Some(value) = solution {
+                vars.push(inner + j);
+                sols.insert(inner + j, value.clone());
+            }
+        }
+
         let mut ctor_args = params.clone();
         ctor_args.extend(field_vals);
         let ctor_v = vctor(enum_name.clone(), i, ctor_args);
         let branch_ty = vapp(globals, motive_v.clone(), ctor_v);
-        let result = check(globals, ctx, &branch.body, &branch_ty);
-        for _ in 0..ctor.num_fields {
-            ctx.pop();
+        let level = branch_ctx.level();
+        let branch_ty = apply_solutions(globals, level, &vars, &sols, &branch_ty);
+
+        // The branch body is a term in the same de Bruijn layout, so only the
+        // stored types and the evaluation environment are refined.
+        for (_, ty) in branch_ctx.locals.iter_mut() {
+            *ty = apply_solutions(globals, level, &vars, &sols, &*ty);
         }
-        result?;
+        for (var, value) in &sols {
+            branch_ctx.env[*var] = value.clone();
+        }
+
+        check(globals, &mut branch_ctx, &branch.body, &branch_ty)?;
     }
 
     Ok(vapp(globals, motive_v, scrut_v))

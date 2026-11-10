@@ -975,11 +975,8 @@ fn elab_match(
                 if !refinements[idx].possible {
                     continue;
                 }
-                let pushed = push_ctor_binders(ctx, &arm.pattern, &refinements[idx].field_tys)?;
-                let (_, body_ty) = elab_infer(globals, ctx, &arm.body)?;
-                for _ in 0..pushed {
-                    ctx.pop();
-                }
+                let mut branch = refine_branch(globals, ctx, &refinements[idx], &arm.pattern)?;
+                let (_, body_ty) = elab_infer(globals, &mut branch.ctx, &arm.body)?;
                 match &inferred {
                     None => inferred = Some(body_ty),
                     Some(t) => {
@@ -1022,32 +1019,29 @@ fn elab_match(
         }
         let arm = by_index[idx]
             .ok_or_else(|| Error::new("internal: reachable constructor has no arm"))?;
-        let pushed = push_ctor_binders(ctx, &arm.pattern, &refinement.field_tys)?;
+        let mut branch = refine_branch(globals, ctx, refinement, &arm.pattern)?;
+        let level = branch.ctx.level();
         let mut field_vals = Vec::new();
         for j in 0..ctor.num_fields {
             match &refinement.field_solutions[j] {
                 Some(solution) => field_vals.push(solution.clone()),
-                None => {
-                    let level = ctx.level() - ctor.num_fields + j;
-                    field_vals.push(vvar(level));
-                }
+                None => field_vals.push(vvar(ctx.level() + j)),
             }
         }
         let mut ctor_args = params.clone();
         ctor_args.extend(field_vals);
         let ctor_v = vctor(enum_name.clone(), idx, ctor_args);
         let branch_ty = vapp(globals, motive_v.clone(), ctor_v);
-        let body_tm = elab_check(globals, ctx, &arm.body, &branch_ty)?;
+        let branch_ty =
+            check::apply_solutions(globals, level, &branch.vars, &branch.solutions, &branch_ty);
+        let body_tm = elab_check(globals, &mut branch.ctx, &arm.body, &branch_ty)?;
         let body_tm = substitute_field_solutions(
             globals,
-            ctx.level(),
+            level,
             ctor.num_fields,
             &refinement.field_solutions,
             body_tm,
         );
-        for _ in 0..pushed {
-            ctx.pop();
-        }
         branches.push(Branch {
             ctor: ctor.name.clone(),
             binders: ctor.num_fields,
@@ -1064,6 +1058,60 @@ fn elab_match(
     });
     let ty = vapp(globals, motive_v, scrut_v);
     Ok((tm, ty))
+}
+
+/// A branch-local context together with the index solutions that the
+/// constructor refinement determined. The solutions live in the extended
+/// context (`ctx` after the constructor fields have been pushed).
+struct BranchCtx {
+    ctx: Ctx,
+    vars: Vec<usize>,
+    solutions: std::collections::HashMap<usize, V>,
+}
+
+/// Extend the outer context with the constructor's fields and apply the index
+/// solutions to every local type and to the branch environment.
+///
+/// The branch body keeps the same de Bruijn layout; only the types of the
+/// locals and their evaluation environment are refined, so a variable may be
+/// known to equal a constructor field without the term being rewritten.
+fn refine_branch(
+    globals: &Globals,
+    ctx: &Ctx,
+    refinement: &check::CtorRefinement,
+    pattern: &Pattern,
+) -> Result<BranchCtx> {
+    let mut branch_ctx = ctx.clone();
+    push_ctor_binders(&mut branch_ctx, pattern, &refinement.field_tys)?;
+    let inner = ctx.level();
+    let level = branch_ctx.level();
+
+    let mut vars = Vec::new();
+    let mut solutions = std::collections::HashMap::new();
+    for (var, value) in &refinement.context_solutions {
+        vars.push(*var);
+        solutions.insert(*var, value.clone());
+    }
+    for (j, solution) in refinement.field_solutions.iter().enumerate() {
+        if let Some(value) = solution {
+            let var = inner + j;
+            vars.push(var);
+            solutions.insert(var, value.clone());
+        }
+    }
+
+    for (_, ty) in branch_ctx.locals.iter_mut() {
+        *ty = check::apply_solutions(globals, level, &vars, &solutions, ty);
+    }
+    for (var, value) in &solutions {
+        branch_ctx.env[*var] = value.clone();
+    }
+
+    Ok(BranchCtx {
+        ctx: branch_ctx,
+        vars,
+        solutions,
+    })
 }
 
 /// Replace the branch-local variables of fields that the index refinement

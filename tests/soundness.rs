@@ -172,8 +172,8 @@ enum Vec(A: Type, n: Nat) {
 }
 
 #[test]
-fn rejects_bare_parameter_index_match() {
-    assert_rejected(
+fn accepts_indexed_length() {
+    elaborate_ok(
         r#"
 enum Vec(A: Type, n: Nat) {
   vnil : Vec(A, zero)
@@ -182,8 +182,116 @@ enum Vec(A: Type, n: Nat) {
 
 fn length(n: Nat, v: Vec(Nat, n)): Nat {
   match v {
-    vnil => 0
-    vcons(m, x, xs) => 1
+    vnil => zero
+    vcons(m, x, xs) => succ(length(m, xs))
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn accepts_indexed_append() {
+    elaborate_ok(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn accepts_fin_elimination() {
+    elaborate_ok(
+        r#"
+enum Fin(n: Nat) {
+  fzero(m: Nat) : Fin(succ(m))
+  fsucc(m: Nat, f: Fin(m)) : Fin(succ(m))
+}
+
+fn fin_to_nat(n: Nat, f: Fin(n)): Nat {
+  match f {
+    fzero(m) => zero
+    fsucc(m, g) => succ(fin_to_nat(m, g))
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn accepts_impossible_branch_with_unchecked_body() {
+    elaborate_ok(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+  match v {
+    vnil => False
+    vcons(m, x, xs) => x
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_cyclic_index_refinement() {
+    assert_rejected(
+        r#"
+enum T(a: Nat, b: Nat) {
+  c(m: Nat) : T(m, succ(m))
+}
+
+fn bad(n: Nat, x: T(succ(n), n)): Nat {
+  match x {
+    c(m) => zero
+  }
+}
+"#,
+        "cannot refine constructor",
+    );
+}
+
+#[test]
+fn rejects_non_refinable_index_match() {
+    assert_rejected(
+        r#"
+fn pred(n: Nat): Nat {
+  match n {
+    zero => zero
+    succ(k) => k
+  }
+}
+
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn bad(n: Nat, v: Vec(Nat, pred(n))): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => zero
   }
 }
 "#,

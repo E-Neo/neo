@@ -311,6 +311,73 @@ fn demo(): Nat {
 }
 
 #[test]
+fn refines_field_from_context_index() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+  match v {
+    vcons(m, x, xs) => x
+  }
+}
+
+fn demo(): Nat {
+  head(0, vcons(0, 7, vnil))
+}
+"#,
+    );
+    let result = call(&globals, "demo", &[]);
+    assert_eq!(as_nat(&globals, &result), 7);
+}
+
+#[test]
+fn refines_context_index_in_append() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(m, xs))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+  }
+}
+
+fn two(): Vec(Nat, 2) {
+  vcons(1, 4, vcons(0, 3, vnil))
+}
+
+fn demo(): Nat {
+  length(3, append(2, 1, two(), vcons(0, 7, vnil)))
+}
+"#,
+    );
+    let result = call(&globals, "demo", &[]);
+    assert_eq!(as_nat(&globals, &result), 3);
+}
+
+#[test]
 fn omits_impossible_indexed_branch() {
     define(
         r#"
