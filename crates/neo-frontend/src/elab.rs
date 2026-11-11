@@ -439,14 +439,114 @@ fn elab_app(
     args: &[Expr],
     span: Span,
 ) -> Result<(RcTm, V)> {
+    elab_app_with(globals, ctx, f, args, None, span)
+}
+
+/// Elaborate an application whose result is checked against `expected`.
+/// The expected type participates in leading-argument inference.
+fn elab_app_check(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    f: &Expr,
+    args: &[Expr],
+    expected: &V,
+    span: Span,
+) -> Result<RcTm> {
+    let (tm, ty) = elab_app_with(globals, ctx, f, args, Some(expected), span)?;
+    if conv_ty(globals, ctx.level(), &ty, expected) {
+        Ok(tm)
+    } else {
+        let found = crate::pretty::show_val(globals, ctx.level(), &ty);
+        let want = crate::pretty::show_val(globals, ctx.level(), expected);
+        Err(Error::at(
+            span,
+            format!("type mismatch: expected `{}`, found `{}`", want, found),
+        ))
+    }
+}
+
+fn elab_app_with(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    f: &Expr,
+    args: &[Expr],
+    expected: Option<&V>,
+    span: Span,
+) -> Result<(RcTm, V)> {
     if let Expr::Var(name, _) = f
         && globals.get_enum(name).is_some()
     {
         return elab_enum_app(globals, ctx, name, args, span);
     }
-    let (mut f_tm, mut f_ty) = elab_infer(globals, ctx, f)?;
+    let (f_tm, f_ty) = elab_infer(globals, ctx, f)?;
+
+    let explicit = {
+        let mut work = ctx.clone();
+        apply_args(globals, &mut work, &f_tm, &f_ty, args)
+    };
+    let explicit_matches = match &explicit {
+        Ok((_, ty)) => expected.is_none_or(|exp| conv_ty(globals, ctx.level(), ty, exp)),
+        Err(_) => false,
+    };
+    if explicit_matches {
+        return explicit;
+    }
+    let fallback = match explicit {
+        Err(err) => err,
+        Ok((_, ty)) => {
+            let found = crate::pretty::show_val(globals, ctx.level(), &ty);
+            let want = expected
+                .map(|e| crate::pretty::show_val(globals, ctx.level(), e))
+                .unwrap_or_else(|| "?".to_string());
+            Error::at(
+                span,
+                format!("type mismatch: expected `{}`, found `{}`", want, found),
+            )
+        }
+    };
+
+    // Try omitting an increasing prefix of the function's parameters. The
+    // omitted arguments are represented by fresh context variables and solved
+    // by unifying the remaining argument types (and the expected type) with
+    // the parameter types.
+    let call = ElideCall {
+        f_tm: &f_tm,
+        f_ty: &f_ty,
+        args,
+        expected,
+        span,
+    };
+    let mut elide_error = None;
+    for k in 1..=32 {
+        match try_elided_app(globals, ctx, &call, k) {
+            ElideResult::Ok(tm, ty) => return Ok((tm, ty)),
+            ElideResult::NoParams => break,
+            ElideResult::Failed(err) => {
+                if elide_error.is_none() {
+                    elide_error = Some(err);
+                }
+            }
+        }
+    }
+    if let Some(err) = elide_error
+        && err.message.starts_with("cannot infer omitted")
+    {
+        return Err(err);
+    }
+    Err(fallback)
+}
+
+fn apply_args(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    f_tm: &RcTm,
+    f_ty: &V,
+    args: &[Expr],
+) -> Result<(RcTm, V)> {
+    let mut tm = f_tm.clone();
+    let mut ty = f_ty.clone();
     for arg in args {
-        let ft = force(globals, f_ty);
+        let ft = force(globals, ty);
         let (dom, closure) = match &*ft {
             Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
             _ => {
@@ -458,10 +558,394 @@ fn elab_app(
         };
         let arg_tm = elab_check(globals, ctx, arg, &dom)?;
         let arg_v = eval(globals, &ctx.env, &arg_tm);
-        f_tm = app(f_tm, arg_tm);
-        f_ty = eval_closure(globals, &closure, arg_v);
+        tm = app(tm, arg_tm);
+        ty = eval_closure(globals, &closure, arg_v);
     }
-    Ok((f_tm, f_ty))
+    Ok((tm, ty))
+}
+
+enum ElideResult {
+    Ok(RcTm, V),
+    NoParams,
+    Failed(Error),
+}
+
+struct MetaInfo {
+    level: usize,
+    ty: V,
+}
+
+struct ElideCall<'a> {
+    f_tm: &'a RcTm,
+    f_ty: &'a V,
+    args: &'a [Expr],
+    expected: Option<&'a V>,
+    span: Span,
+}
+
+fn meta_name(level: usize) -> String {
+    // A control character cannot appear in a source identifier, so an
+    // internal meta never shadows a user name.
+    format!("\u{1}elide{}", level)
+}
+
+/// Apply `k` leading parameters as inferred arguments and elaborate the rest
+/// of the call in the extended context.
+fn try_elided_app(globals: &Globals, ctx: &Ctx, call: &ElideCall<'_>, k: usize) -> ElideResult {
+    let mut work = ctx.clone();
+    let base = work.level();
+    let mut ty = call.f_ty.clone();
+    let mut metas = Vec::with_capacity(k);
+    for _ in 0..k {
+        let ft = force(globals, ty);
+        let (dom, closure) = match &*ft {
+            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            _ => return ElideResult::NoParams,
+        };
+        let level = work.level();
+        work.push(meta_name(level), dom.clone());
+        metas.push(MetaInfo {
+            level,
+            ty: dom.clone(),
+        });
+        ty = eval_closure(globals, &closure, vvar(level));
+    }
+    let levels: Vec<usize> = metas.iter().map(|m| m.level).collect();
+    let ext_level = work.level();
+
+    let mut tm = shift(call.f_tm, k as isize, 0);
+    for meta in &metas {
+        tm = app(tm, var(ext_level - 1 - meta.level));
+    }
+
+    let mut sols = std::collections::HashMap::new();
+    for arg in call.args {
+        let ft = force(globals, ty);
+        let (dom, closure) = match &*ft {
+            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            _ => {
+                return ElideResult::Failed(Error::at(
+                    call.span,
+                    "application: the function has a non-function type",
+                ));
+            }
+        };
+        let dom = check::apply_solutions(globals, work.level(), &levels, &sols, &dom);
+        let arg_tm = match elab_arg_with_metas(globals, &mut work, arg, &dom, &levels, &mut sols) {
+            Ok(tm) => tm,
+            Err(err) => return ElideResult::Failed(err),
+        };
+        let arg_v = eval(globals, &work.env, &arg_tm);
+        tm = app(tm, arg_tm);
+        ty = eval_closure(globals, &closure, arg_v);
+    }
+
+    let ty = check::apply_solutions(globals, work.level(), &levels, &sols, &ty);
+    if let Some(exp) = call.expected
+        && let Err(err) = unify_meta(globals, work.level(), &levels, &mut sols, &ty, exp)
+    {
+        return ElideResult::Failed(err);
+    }
+    if let Err(err) = resolve_metas(globals, work.level(), &metas, &mut sols) {
+        return ElideResult::Failed(err);
+    }
+
+    let ty = check::apply_solutions(globals, work.level(), &levels, &sols, &ty);
+    let tm = strip_metas(globals, base, &metas, &sols, tm);
+    let ty_tm = quote(globals, ext_level, &ty);
+    let ty_tm = strip_metas(globals, base, &metas, &sols, ty_tm);
+    let ty = eval(globals, &ctx.env, &ty_tm);
+    if let Some(exp) = call.expected
+        && !conv_ty(globals, ctx.level(), &ty, exp)
+    {
+        let found = crate::pretty::show_val(globals, ctx.level(), &ty);
+        let want = crate::pretty::show_val(globals, ctx.level(), exp);
+        return ElideResult::Failed(Error::at(
+            call.span,
+            format!("type mismatch: expected `{}`, found `{}`", want, found),
+        ));
+    }
+    ElideResult::Ok(tm, ty)
+}
+
+fn elab_arg_with_metas(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    arg: &Expr,
+    dom: &V,
+    levels: &[usize],
+    sols: &mut std::collections::HashMap<usize, V>,
+) -> Result<RcTm> {
+    if !value_mentions_any(globals, ctx.level(), dom, levels) {
+        return elab_check(globals, ctx, arg, dom);
+    }
+    // An expected type that mentions a metavariable still carries useful
+    // information for constructors and lambdas, so try checking first.
+    let mut trial = ctx.clone();
+    if let Ok(tm) = elab_check(globals, &mut trial, arg, dom) {
+        return Ok(tm);
+    }
+    let (tm, ty) = elab_infer(globals, ctx, arg)?;
+    unify_meta(globals, ctx.level(), levels, sols, &ty, dom)?;
+    Ok(tm)
+}
+
+/// First-order unification with the fresh leading arguments as flexible
+/// variables. It is deliberately conservative: higher-order meta applications
+/// and escaping solutions are rejected.
+fn unify_meta(
+    globals: &Globals,
+    level: usize,
+    levels: &[usize],
+    sols: &mut std::collections::HashMap<usize, V>,
+    a: &V,
+    b: &V,
+) -> Result<()> {
+    let a = force(
+        globals,
+        check::apply_solutions(globals, level, levels, sols, a),
+    );
+    let b = force(
+        globals,
+        check::apply_solutions(globals, level, levels, sols, b),
+    );
+    if conv(globals, level, &a, &b) {
+        return Ok(());
+    }
+    if let Some(var) = as_meta(&a, levels) {
+        return bind_meta(globals, level, levels, sols, var, &b);
+    }
+    if let Some(var) = as_meta(&b, levels) {
+        return bind_meta(globals, level, levels, sols, var, &a);
+    }
+
+    match (&*a, &*b) {
+        (Val::Pi(da, ca), Val::Pi(db, cb)) => {
+            unify_meta(globals, level, levels, sols, da, db)?;
+            let fresh = vvar(level);
+            let ca = eval_closure(globals, ca, fresh.clone());
+            let cb = eval_closure(globals, cb, fresh);
+            unify_meta(globals, level + 1, levels, sols, &ca, &cb)
+        }
+        (Val::Ind(n1, a1), Val::Ind(n2, a2)) if n1 == n2 => {
+            unify_meta_lists(globals, level, levels, sols, a1, a2)
+        }
+        (Val::Ctor(n1, i1, a1), Val::Ctor(n2, i2, a2)) if n1 == n2 && i1 == i2 => {
+            unify_meta_lists(globals, level, levels, sols, a1, a2)
+        }
+        (Val::Eq(t1, l1, r1), Val::Eq(t2, l2, r2)) => {
+            unify_meta(globals, level, levels, sols, t1, t2)?;
+            unify_meta(globals, level, levels, sols, l1, l2)?;
+            unify_meta(globals, level, levels, sols, r1, r2)
+        }
+        (Val::Refl(x), Val::Refl(y)) => unify_meta(globals, level, levels, sols, x, y),
+        (Val::Neutral(n1), Val::Neutral(n2)) => match (&**n1, &**n2) {
+            (Neutral::App(f1, a1), Neutral::App(f2, a2)) => {
+                unify_meta(
+                    globals,
+                    level,
+                    levels,
+                    sols,
+                    &vneutral((**f1).clone()),
+                    &vneutral((**f2).clone()),
+                )?;
+                unify_meta(globals, level, levels, sols, a1, a2)
+            }
+            (Neutral::Global(x), Neutral::Global(y)) if x == y => Ok(()),
+            _ => Err(unify_failure(globals, level, &a, &b)),
+        },
+        (Val::Type(u), Val::Type(v)) if u == v => Ok(()),
+        (Val::Prop, Val::Prop) => Ok(()),
+        _ => Err(unify_failure(globals, level, &a, &b)),
+    }
+}
+
+fn unify_meta_lists(
+    globals: &Globals,
+    level: usize,
+    levels: &[usize],
+    sols: &mut std::collections::HashMap<usize, V>,
+    a: &[V],
+    b: &[V],
+) -> Result<()> {
+    if a.len() != b.len() {
+        return Err(Error::new(
+            "cannot infer omitted arguments: length mismatch",
+        ));
+    }
+    for (x, y) in a.iter().zip(b.iter()) {
+        unify_meta(globals, level, levels, sols, x, y)?;
+    }
+    Ok(())
+}
+
+fn as_meta(value: &V, levels: &[usize]) -> Option<usize> {
+    if let Val::Neutral(n) = &**value
+        && let Neutral::Var(level) = &**n
+        && levels.contains(level)
+    {
+        Some(*level)
+    } else {
+        None
+    }
+}
+
+fn bind_meta(
+    globals: &Globals,
+    level: usize,
+    levels: &[usize],
+    sols: &mut std::collections::HashMap<usize, V>,
+    var: usize,
+    value: &V,
+) -> Result<()> {
+    if let Some(existing) = sols.get(&var).cloned() {
+        return unify_meta(globals, level, levels, sols, &existing, value);
+    }
+    let free = free_var_levels(globals, level, value);
+    if free.contains(&var) {
+        return Err(Error::new(
+            "cannot infer omitted argument: cyclic index solution",
+        ));
+    }
+    for other in &free {
+        if *other >= var && !levels.contains(other) {
+            return Err(Error::new(
+                "cannot infer omitted argument: solution would escape its scope",
+            ));
+        }
+    }
+    sols.insert(var, value.clone());
+    Ok(())
+}
+
+fn resolve_metas(
+    globals: &Globals,
+    level: usize,
+    metas: &[MetaInfo],
+    sols: &mut std::collections::HashMap<usize, V>,
+) -> Result<()> {
+    let levels: Vec<usize> = metas.iter().map(|m| m.level).collect();
+    for _ in 0..=levels.len() {
+        for meta in metas {
+            if let Some(solution) = sols.get(&meta.level).cloned() {
+                let solution = check::apply_solutions(globals, level, &levels, sols, &solution);
+                sols.insert(meta.level, solution);
+            }
+        }
+    }
+    for meta in metas {
+        let Some(solution) = sols.get(&meta.level) else {
+            let ty = crate::pretty::show_val(globals, level, &meta.ty);
+            return Err(Error::new(format!(
+                "cannot infer omitted argument of type `{}`; pass it explicitly",
+                ty
+            )));
+        };
+        let free = free_var_levels(globals, level, solution);
+        if free.iter().any(|l| levels.contains(l)) {
+            return Err(Error::new(
+                "cannot infer omitted arguments: cyclic solutions",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Remove the fresh leading-argument variables from a term, substituting their
+/// solved values. The metas are the innermost locals, in order.
+fn strip_metas(
+    globals: &Globals,
+    base: usize,
+    metas: &[MetaInfo],
+    sols: &std::collections::HashMap<usize, V>,
+    mut tm: RcTm,
+) -> RcTm {
+    for (i, meta) in metas.iter().enumerate().rev() {
+        let solution = sols
+            .get(&meta.level)
+            .expect("internal: unresolved elided argument");
+        let replacement = quote(globals, base + i, solution);
+        tm = instantiate(&tm, &replacement);
+    }
+    tm
+}
+
+fn value_mentions_any(globals: &Globals, level: usize, value: &V, levels: &[usize]) -> bool {
+    free_var_levels(globals, level, value)
+        .iter()
+        .any(|l| levels.contains(l))
+}
+
+fn free_var_levels(globals: &Globals, level: usize, value: &V) -> Vec<usize> {
+    let tm = quote(globals, level, value);
+    let mut out = Vec::new();
+    collect_free_levels(&tm, level, 0, &mut out);
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn collect_free_levels(tm: &RcTm, level: usize, depth: usize, out: &mut Vec<usize>) {
+    match &**tm {
+        Tm::Var(i) if *i >= depth => {
+            out.push(level + depth - 1 - *i);
+        }
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => {}
+        Tm::Pi { dom, cod, .. } | Tm::Lam { dom, body: cod, .. } => {
+            collect_free_levels(dom, level, depth, out);
+            collect_free_levels(cod, level, depth + 1, out);
+        }
+        Tm::App(f, a) => {
+            collect_free_levels(f, level, depth, out);
+            collect_free_levels(a, level, depth, out);
+        }
+        Tm::Ind(_, args) | Tm::Ctor(_, _, args) => {
+            for arg in args {
+                collect_free_levels(arg, level, depth, out);
+            }
+        }
+        Tm::Match {
+            motive,
+            scrut,
+            branches,
+        } => {
+            collect_free_levels(motive, level, depth, out);
+            collect_free_levels(scrut, level, depth, out);
+            for branch in branches {
+                collect_free_levels(&branch.body, level, depth + branch.binders, out);
+            }
+        }
+        Tm::Eq(a, b, c) => {
+            collect_free_levels(a, level, depth, out);
+            collect_free_levels(b, level, depth, out);
+            collect_free_levels(c, level, depth, out);
+        }
+        Tm::Refl(a) => collect_free_levels(a, level, depth, out),
+        Tm::J {
+            ty,
+            lhs,
+            rhs,
+            proof,
+            motive,
+            refl_case,
+        } => {
+            collect_free_levels(ty, level, depth, out);
+            collect_free_levels(lhs, level, depth, out);
+            collect_free_levels(rhs, level, depth, out);
+            collect_free_levels(proof, level, depth, out);
+            collect_free_levels(motive, level, depth, out);
+            collect_free_levels(refl_case, level, depth, out);
+        }
+    }
+}
+
+fn unify_failure(globals: &Globals, level: usize, a: &V, b: &V) -> Error {
+    let a = crate::pretty::show_val(globals, level, a);
+    let b = crate::pretty::show_val(globals, level, b);
+    Error::new(format!(
+        "cannot infer omitted arguments: `{}` and `{}` are not equal",
+        a, b
+    ))
 }
 
 fn elab_pi(globals: &Globals, ctx: &mut Ctx, binders: &[Binder], body: &Expr) -> Result<(RcTm, V)> {
@@ -593,7 +1077,7 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
             {
                 return elab_ctor_check(globals, ctx, n, args, expected, *span);
             }
-            infer_and_check(globals, ctx, expr, expected)
+            elab_app_check(globals, ctx, f, args, expected, *span)
         }
         Expr::Match(scrut, arms, span) => {
             let (tm, _ty) = elab_match(globals, ctx, scrut, arms, Some(expected), *span)?;

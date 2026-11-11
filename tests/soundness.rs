@@ -280,6 +280,49 @@ fn heads(xs: List(Nat)): Nat {
 }
 
 #[test]
+fn accepts_elided_leading_arguments() {
+    elaborate_ok(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(xs))
+  }
+}
+
+fn v2(): Vec(Nat, 2) {
+  vcons(1, 20, vcons(0, 30, vnil))
+}
+
+fn main(): Nat {
+  length(v2())
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_uninferable_elided_argument() {
+    assert_rejected(
+        r#"
+fn constant(T: Type, n: Nat): Nat {
+  n
+}
+
+fn bad(): Nat {
+  constant(3)
+}
+"#,
+        "cannot infer omitted argument",
+    );
+}
+
+#[test]
 fn rejects_non_exhaustive_nested_pattern() {
     assert_rejected(
         r#"

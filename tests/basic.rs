@@ -378,6 +378,148 @@ fn demo(): Nat {
 }
 
 #[test]
+fn infers_omitted_leading_arguments() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(xs))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+  }
+}
+
+fn v1(): Vec(Nat, 1) {
+  vcons(0, 10, vnil)
+}
+
+fn v2(): Vec(Nat, 2) {
+  vcons(1, 20, vcons(0, 30, vnil))
+}
+
+fn both(): Vec(Nat, 3) {
+  append(v1(), v2())
+}
+
+fn main(): Nat {
+  add(length(both()), length(v2()))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 5);
+}
+
+#[test]
+fn infers_index_under_a_constructor() {
+    let globals = define(
+        r#"
+enum Vec(A: Type, n: Nat) {
+  vnil : Vec(A, zero)
+  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+}
+
+fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+  match v {
+    vcons(m, x, xs) => x
+  }
+}
+
+fn v2(): Vec(Nat, 2) {
+  vcons(1, 20, vcons(0, 30, vnil))
+}
+
+fn main(): Nat {
+  head(v2())
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 20);
+}
+
+#[test]
+fn infers_type_parameters() {
+    let globals = define(
+        r#"
+fn inc(n: Nat): Nat {
+  succ(n)
+}
+
+fn map(T: Type, U: Type, f: fn(T) -> U, xs: List(T)): List(U) {
+  match xs {
+    nil => nil
+    cons(x, rest) => cons(f(x), map(f, rest))
+  }
+}
+
+fn count(xs: List(Nat)): Nat {
+  match xs {
+    nil => zero
+    cons(x, rest) => succ(count(rest))
+  }
+}
+
+fn xs(): List(Nat) {
+  cons(1, cons(2, cons(3, nil)))
+}
+
+fn main(): Nat {
+  count(map(inc, xs()))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 3);
+}
+
+#[test]
+fn infers_leading_argument_from_expected_type() {
+    let globals = define(
+        r#"
+fn empty(T: Type): List(T) {
+  nil
+}
+
+fn count(xs: List(Nat)): Nat {
+  match xs {
+    nil => zero
+    cons(x, rest) => succ(count(rest))
+  }
+}
+
+fn empty_nat(): List(Nat) {
+  empty()
+}
+
+fn main(): Nat {
+  count(empty_nat())
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 0);
+}
+
+#[test]
 fn nested_patterns_select_ordered_arms() {
     let globals = define(
         r#"

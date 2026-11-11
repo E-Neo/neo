@@ -412,7 +412,7 @@ Trusted (must be audited):
 Untrusted (bugs cause rejection or wrong code generation, not a false proof):
 
 - lexer, parser, surface AST;
-- elaborator, implicit index inference, and surface `J` construction;
+- elaborator, argument elision, index inference, and surface `J` construction;
 - pretty printer and REPL;
 - WASM code generation;
 - the CLI.

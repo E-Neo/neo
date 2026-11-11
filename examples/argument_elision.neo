@@ -1,0 +1,44 @@
+// Leading arguments are inferred when a call omits them.
+//
+// Declarations are unchanged: `n`, `m`, and `xs` are ordinary parameters.
+// At a call site the elaborator may omit a leading prefix and solve those
+// arguments from the types of the remaining arguments and the expected type.
+enum Vec(T: Type, n: Nat) {
+  vnil : Vec(T, zero)
+  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+}
+
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(xs))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+  }
+}
+
+fn v1(): Vec(Nat, 1) {
+  vcons(0, 10, vnil)
+}
+
+fn v2(): Vec(Nat, 2) {
+  vcons(1, 20, vcons(0, 30, vnil))
+}
+
+fn main(): Nat {
+  // Both calls omit their leading length arguments. The explicit form
+  // `length(3, append(1, 2, v1(), v2()))` is still accepted.
+  length(append(v1(), v2()))
+}

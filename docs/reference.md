@@ -261,7 +261,9 @@ List(Nat)
 Vec(Nat, 2)
 ```
 
-Type arguments are always explicit. There are no implicit arguments.
+Type arguments in type expressions are explicit. Function calls may omit a
+leading prefix of their arguments; see [argument elision](#argument-elision).
+There are no declared implicit binders.
 
 ### Equality types
 
@@ -606,6 +608,42 @@ id(Nat, 4)          // type arguments are explicit
 - Application is left-associative: `f(a)(b)` applies `f` to `a`, then to `b`.
 - An empty argument list `f()` is accepted and is equivalent to `f`.
 - Type parameters are ordinary parameters; by convention they come first.
+
+### Argument elision
+
+A call may omit a **leading prefix** of the function's parameters. The
+elaborator fills those arguments with metavariables and solves them from the
+types of the supplied arguments and from the expected result type:
+
+```neo
+fn length(n: Nat, v: Vec(Nat, n)): Nat
+
+length(v)                 // n inferred from v
+append(xs, ys)            // both lengths inferred
+map(inc, xs)              // type parameters inferred from inc and xs
+```
+
+Declarations do not change, and there are no implicit binder markers.
+Explicit calls keep working:
+
+```neo
+length(2, v)
+append(2, 1, xs, ys)
+```
+
+Rules:
+
+- Elision applies only to a leading prefix. A middle argument cannot be
+  skipped.
+- The ordinary, more explicit interpretation is tried first. Elision is used
+  only when that interpretation does not typecheck.
+- Every omitted argument must be determined by the remaining arguments or the
+  expected type. Otherwise the program is rejected and the argument must be
+  passed explicitly.
+- Only first-order solutions are attempted. An omitted argument whose value
+  would be an applied function is rejected.
+- Elision is elaboration sugar. Core terms still contain every argument, so the
+  kernel and code generator are unchanged.
 
 There is no infix arithmetic. Define functions such as `add` and `mul`
 yourself.
@@ -1350,6 +1388,7 @@ Common messages:
 | `unknown name ...` | Name is undeclared or declared later. |
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
+| `cannot infer omitted argument of type ...; pass it explicitly` | An elided leading argument is not determined by the rest of the call. |
 | `match is not exhaustive: missing constructor ...` | Add the missing arm. |
 | `cannot infer the result type of a match on an empty enum; add an expected type` | Empty enums are eliminated with zero arms, but need a known result type. |
 | `match: cannot eliminate this proposition into a type` | Large elimination of a `Prop` enum was attempted. |
@@ -1376,7 +1415,8 @@ design:
 - arrays and growable vectors: the planned `Array(T, n)` and `Vec(T)`. (The
   indexed `Vec` in [section 6](#6-enums) is a user-defined demonstration, not
   the planned growable vector.)
-- traits, type classes, implicits, or implicit arguments;
+- declared implicit binders, traits, or type classes. Leading arguments can be
+  inferred at calls; see [argument elision](#argument-elision);
 - modules, imports, namespaces, or multiple files;
 - strings, characters, floats, and general I/O;
 - built-in arithmetic or other infix operators;
@@ -1642,6 +1682,33 @@ fn count(t: Tree): Nat {
 The nested `node(a, b)` pattern exposes the inner subtree's fields, and
 recursion on `a`, `b`, and `r` is accepted because all three are structural
 subterms of `t`. Output: `4`.
+
+`examples/argument_elision.neo` shows inferred leading arguments:
+
+```neo
+fn length(n: Nat, v: Vec(Nat, n)): Nat {
+  match v {
+    vnil => zero
+    vcons(m, x, xs) => succ(length(xs))
+  }
+}
+
+fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+  match xs {
+    vnil => ys
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+  }
+}
+
+fn main(): Nat {
+  length(append(v1(), v2()))
+}
+```
+
+The recursive calls `length(xs)` and `append(tail, ys)` omit their length
+arguments. The outer calls need no annotations either: the lengths of `v1()`
+and `v2()` determine the arguments to `append`, and the expected `Nat` plus the
+remaining arguments determine the argument to `length`. Output: `3`.
 
 ---
 

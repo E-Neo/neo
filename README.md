@@ -13,6 +13,7 @@ Implemented:
 
 - `enum` and `fn` declarations, `match`, equality and `refl`;
 - dependent function types and explicit type parameters;
+- inference of omitted leading arguments at call sites;
 - closures and first-class functions;
 - total recursive functions with a structural termination checker;
 - strict positivity checking;
@@ -82,6 +83,7 @@ More examples live in [`examples/`](examples):
 | `indexed_match.neo` | branch-field index refinement | `4` |
 | `indexed_append.neo` | context index refinement in `append` | `3` |
 | `pattern_matching.neo` | nested patterns, tree recursion | `4` |
+| `argument_elision.neo` | inferred leading arguments | `3` |
 
 ## Documentation
 
