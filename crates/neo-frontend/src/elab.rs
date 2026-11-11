@@ -343,6 +343,7 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
             let tm = nat_literal(globals, *n, *span)?;
             Ok((tm, vind("Nat", Vec::new())))
         }
+        Expr::Str(s, span) => string_literal(globals, s, *span),
         Expr::Type(u, _) => Ok((rc(Tm::Type(*u)), vtype(u + 1))),
         Expr::Prop(_) => Ok((rc(Tm::Prop), vtype(0))),
         Expr::FnType(binders, body, _) => elab_pi(globals, ctx, binders, body),
@@ -1296,6 +1297,28 @@ fn nat_literal(globals: &Globals, n: u64, span: Span) -> Result<RcTm> {
         tm = rc(Tm::Ctor("Nat".to_string(), succ, vec![tm]));
     }
     Ok(tm)
+}
+
+fn string_literal(globals: &Globals, text: &str, span: Span) -> Result<(RcTm, V)> {
+    let info = globals
+        .get_enum("String")
+        .ok_or_else(|| Error::at(span, "string literals require the `String` type"))?;
+    let nil = info
+        .ctors
+        .iter()
+        .position(|c| c.name == "str_nil")
+        .ok_or_else(|| Error::at(span, "`String` must have a `str_nil` constructor"))?;
+    let cons = info
+        .ctors
+        .iter()
+        .position(|c| c.name == "str_cons")
+        .ok_or_else(|| Error::at(span, "`String` must have a `str_cons` constructor"))?;
+    let mut tm = rc(Tm::Ctor("String".to_string(), nil, Vec::new()));
+    for byte in text.as_bytes().iter().rev() {
+        let head = nat_literal(globals, u64::from(*byte), span)?;
+        tm = rc(Tm::Ctor("String".to_string(), cons, vec![head, tm]));
+    }
+    Ok((tm, vind("String", Vec::new())))
 }
 
 fn elab_match(

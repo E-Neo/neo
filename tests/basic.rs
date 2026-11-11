@@ -520,6 +520,42 @@ fn main(): Nat {
 }
 
 #[test]
+fn string_literals_and_operations() {
+    let globals = define(
+        r#"
+fn add(a: Nat, b: Nat): Nat {
+  match a {
+    zero => b
+    succ(k) => succ(add(k, b))
+  }
+}
+
+fn main(): Nat {
+  add(str_length("hello"), str_length("\n\t\\\""))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert_eq!(as_nat(&globals, &result), 9);
+}
+
+#[test]
+fn string_equality_and_concat() {
+    let globals = define(
+        r#"
+fn main(): Bool {
+  str_eq(str_concat("ab", "cd"), "abcd")
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert!(matches!(
+        &*result,
+        neo::value::Val::Ctor(name, index, _) if name == "Bool" && *index == 1
+    ));
+}
+
+#[test]
 fn nested_patterns_select_ordered_arms() {
     let globals = define(
         r#"

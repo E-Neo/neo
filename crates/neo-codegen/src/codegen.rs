@@ -115,6 +115,7 @@ struct Codegen<'g> {
     print_nat_id: usize,
     print_bool_id: usize,
     print_unit_id: usize,
+    print_string_id: usize,
     run_id: usize,
 
     succ_index: i32,
@@ -144,6 +145,7 @@ impl<'g> Codegen<'g> {
             print_nat_id: 0,
             print_bool_id: 0,
             print_unit_id: 0,
+            print_string_id: 0,
             run_id: 0,
             succ_index,
         }
@@ -212,6 +214,7 @@ impl<'g> Codegen<'g> {
         self.print_nat_id = self.new_func(&[ValType::I32], &[]);
         self.print_bool_id = self.new_func(&[ValType::I32], &[]);
         self.print_unit_id = self.new_func(&[ValType::I32], &[]);
+        self.print_string_id = self.new_func(&[ValType::I32], &[]);
         self.run_id = self.new_func(&[], &[ValType::I32]);
 
         self.gen_alloc();
@@ -220,6 +223,7 @@ impl<'g> Codegen<'g> {
         self.gen_print_nat();
         self.gen_print_bool();
         self.gen_print_unit();
+        self.gen_print_string()?;
         Ok(())
     }
 
@@ -399,6 +403,104 @@ impl<'g> Codegen<'g> {
         self.set_body(id, body);
     }
 
+    fn gen_print_string(&mut self) -> Result<()> {
+        let string_info = self
+            .globals
+            .get_enum("String")
+            .ok_or_else(|| Error::new("the prelude is missing `String`"))?;
+        let nil = string_info
+            .ctors
+            .iter()
+            .position(|c| c.name == "str_nil")
+            .ok_or_else(|| Error::new("`String` is missing `str_nil`"))? as i32;
+        let cons = string_info
+            .ctors
+            .iter()
+            .position(|c| c.name == "str_cons")
+            .ok_or_else(|| Error::new("`String` is missing `str_cons`"))? as i32;
+        let nat_info = self
+            .globals
+            .get_enum("Nat")
+            .ok_or_else(|| Error::new("the prelude is missing `Nat`"))?;
+        let succ = nat_info
+            .ctors
+            .iter()
+            .position(|c| c.name == "succ")
+            .ok_or_else(|| Error::new("`Nat` is missing `succ`"))? as i32;
+
+        let print_bytes = self.print_bytes_fn();
+        let mut fc = FnCompiler::new(self, 1);
+        let cursor = fc.local();
+        let byte = fc.local();
+        let count = fc.local();
+
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::LocalSet(cursor));
+
+        // Walk the cons list.
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(cursor));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::I32Const(nil));
+        fc.emit(I::I32Eq);
+        fc.emit(I::BrIf(1));
+        fc.emit(I::LocalGet(cursor));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::I32Const(cons));
+        fc.emit(I::I32Ne);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::Unreachable);
+        fc.emit(I::End);
+
+        // Convert the unary `Nat` byte to a machine integer.
+        fc.emit(I::LocalGet(cursor));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::LocalSet(byte));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::LocalSet(count));
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(byte));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::I32Const(succ));
+        fc.emit(I::I32Ne);
+        fc.emit(I::BrIf(1));
+        fc.emit(I::LocalGet(count));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(count));
+        fc.emit(I::LocalGet(byte));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::LocalSet(byte));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+        fc.emit(I::End);
+
+        // Store the low byte and write it as a single-byte string.
+        fc.emit(I::I32Const(DIGIT_END));
+        fc.emit(I::LocalGet(count));
+        fc.emit(I::I32Const(255));
+        fc.emit(I::I32And);
+        fc.emit(I::I32Store8(mem8(0)));
+        fc.emit(I::I32Const(DIGIT_END));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::Call(print_bytes));
+
+        // Advance to the tail.
+        fc.emit(I::LocalGet(cursor));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(cursor));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+        fc.emit(I::End);
+
+        let body = fc.finish();
+        let id = self.print_string_id;
+        self.set_body(id, body);
+        Ok(())
+    }
+
     fn ensure_fn(&mut self, name: &str) -> Result<FnRef> {
         if let Some(&slot) = self.fn_slots.get(name) {
             return Ok(FnRef::Closure(slot));
@@ -518,6 +620,7 @@ impl<'g> Codegen<'g> {
                 "Nat" => Ok(self.print_nat_id),
                 "Bool" => Ok(self.print_bool_id),
                 "Unit" => Ok(self.print_unit_id),
+                "String" => Ok(self.print_string_id),
                 _ => self.enum_printer(name, args),
             },
             _ => Err(Error::new(

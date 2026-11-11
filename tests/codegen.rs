@@ -127,6 +127,32 @@ fn main(): List(Nat) {
 }
 
 #[test]
+fn prints_strings() {
+    check(
+        r#"
+fn main(): String {
+  "hello, world"
+}
+"#,
+        "string",
+        "hello, world\n",
+    );
+}
+
+#[test]
+fn prints_concatenated_strings() {
+    check(
+        r#"
+fn main(): String {
+  str_concat("hello, ", "world")
+}
+"#,
+        "string-concat",
+        "hello, world\n",
+    );
+}
+
+#[test]
 fn supports_closures_and_captures() {
     check(
         r#"

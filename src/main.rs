@@ -189,6 +189,53 @@ fn is_printable(globals: &Globals, ty: &V, visiting: &mut Vec<String>) -> bool {
     }
 }
 
+fn nat_to_u64(globals: &Globals, v: &V) -> Option<u64> {
+    let info = globals.get_enum("Nat")?;
+    let zero = info.ctors.iter().position(|c| c.name == "zero")?;
+    let succ = info.ctors.iter().position(|c| c.name == "succ")?;
+    let mut out = 0u64;
+    let mut cursor = force(globals, v.clone());
+    loop {
+        match &*cursor {
+            Val::Ctor(name, index, args) if name == "Nat" => {
+                if *index == zero {
+                    return Some(out);
+                }
+                if *index != succ {
+                    return None;
+                }
+                out = out.checked_add(1)?;
+                cursor = force(globals, args.first()?.clone());
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn print_string_value(globals: &Globals, v: &V) -> Option<String> {
+    let info = globals.get_enum("String")?;
+    let nil = info.ctors.iter().position(|c| c.name == "str_nil")?;
+    let cons = info.ctors.iter().position(|c| c.name == "str_cons")?;
+    let mut out = String::new();
+    let mut cursor = force(globals, v.clone());
+    loop {
+        match &*cursor {
+            Val::Ctor(name, index, args) if name == "String" => {
+                if *index == nil {
+                    return Some(out);
+                }
+                if *index != cons {
+                    return None;
+                }
+                let byte = nat_to_u64(globals, args.first()?)?;
+                out.push(char::from((byte & 0xff) as u8));
+                cursor = force(globals, args.get(1)?.clone());
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// Render a fully evaluated value using the surface constructor names.
 fn print_value(globals: &Globals, v: &V) -> Option<String> {
     let v = force(globals, v.clone());
@@ -197,6 +244,9 @@ fn print_value(globals: &Globals, v: &V) -> Option<String> {
         Val::Ctor(enum_name, index, args) => {
             if enum_name == "Nat" {
                 return Some(show_val(globals, 0, &v));
+            }
+            if enum_name == "String" {
+                return print_string_value(globals, &v);
             }
             let info = globals.get_enum(enum_name)?;
             let ctor = info.ctors.get(*index)?;

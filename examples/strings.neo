@@ -1,0 +1,5 @@
+// String literals elaborate to the prelude `String` list of byte values.
+// `main` prints the string as text in both the interpreter and `neo build`.
+fn main(): String {
+  "hello, world!"
+}

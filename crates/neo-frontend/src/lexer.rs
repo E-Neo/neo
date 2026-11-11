@@ -4,6 +4,7 @@ use neo_common::error::{Error, Result, Span};
 pub enum Tok {
     Ident(String),
     Nat(u64),
+    Str(String),
     Enum,
     Fn,
     Match,
@@ -72,6 +73,63 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                     span,
                 });
             }
+            continue;
+        }
+
+        if c == '"' {
+            advance(&mut i, &mut line, &mut col);
+            let mut text = String::new();
+            loop {
+                if i >= chars.len() {
+                    return Err(Error::at(span, "unterminated string literal"));
+                }
+                let ch = chars[i];
+                if ch == '"' {
+                    advance(&mut i, &mut line, &mut col);
+                    break;
+                }
+                if ch == '\n' {
+                    return Err(Error::at(
+                        Span::new(line, col),
+                        "string literals cannot contain a newline",
+                    ));
+                }
+                if ch == '\\' {
+                    advance(&mut i, &mut line, &mut col);
+                    if i >= chars.len() {
+                        return Err(Error::at(span, "unterminated string literal"));
+                    }
+                    let escaped = chars[i];
+                    let decoded = match escaped {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '\\' => '\\',
+                        '"' => '"',
+                        other => {
+                            return Err(Error::at(
+                                Span::new(line, col),
+                                format!("unknown string escape `\\{}`", other),
+                            ));
+                        }
+                    };
+                    text.push(decoded);
+                    advance(&mut i, &mut line, &mut col);
+                    continue;
+                }
+                if !ch.is_ascii() {
+                    return Err(Error::at(
+                        Span::new(line, col),
+                        "string literals must contain only ASCII characters",
+                    ));
+                }
+                text.push(ch);
+                advance(&mut i, &mut line, &mut col);
+            }
+            out.push(Token {
+                tok: Tok::Str(text),
+                span,
+            });
             continue;
         }
 

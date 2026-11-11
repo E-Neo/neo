@@ -17,14 +17,14 @@ Implemented:
 - closures and first-class functions;
 - total recursive functions with a structural termination checker;
 - strict positivity checking;
-- a small prelude (`Nat`, `Bool`, `Unit`, `List`, `True`, `False`, `And`,
-  `Or`, `Exists`);
+- a small prelude (`Nat`, `Bool`, `Unit`, `String`, `List`, `True`, `False`,
+  `And`, `Or`, `Exists`);
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
-and growable vectors (`Array(T, n)`, `Vec(T)`), modules, strings, general I/O,
-and built-in arithmetic. See the
+and growable vectors (`Array(T, n)`, `Vec(T)`), modules, general I/O, and
+built-in arithmetic. See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 
@@ -65,8 +65,8 @@ fn main(): Nat {
 }
 ```
 
-There are no string literals or I/O functions yet. A program reports its
-result by returning it from `main`; the runtime prints that value.
+There are no general I/O functions yet. A program reports its result by
+returning it from `main`; the runtime prints that value, including strings.
 
 More examples live in [`examples/`](examples):
 
@@ -84,6 +84,7 @@ More examples live in [`examples/`](examples):
 | `indexed_append.neo` | context index refinement in `append` | `3` |
 | `pattern_matching.neo` | nested patterns, tree recursion | `4` |
 | `argument_elision.neo` | inferred leading arguments | `3` |
+| `strings.neo` | string literals and printing | `hello, world!` |
 
 ## Documentation
 

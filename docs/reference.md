@@ -55,8 +55,8 @@ wasmtime hello.wasm                # runs the component: prints 5
 
 `neo build` writes `hello.wasm` next to the input by default.
 
-There are no string literals or I/O functions yet. A program communicates its
-result by returning it from `main`; Neo prints that value.
+There are no general I/O functions yet. A program communicates its result by
+returning it from `main`; Neo prints that value, including `String` results.
 
 ---
 
@@ -168,6 +168,22 @@ Numeric literals are unsigned decimal integers:
 
 A literal is syntactic sugar for a `Nat` built from `zero` and `succ`. There
 are no negative, floating-point, hexadecimal, or character literals.
+
+### String literals
+
+A string literal is ASCII text in double quotes:
+
+```neo
+"hello"
+"line one\nline two"
+"quote: \" and backslash: \\"
+```
+
+Supported escapes are `\n`, `\t`, `\r`, `\\`, and `\"`. String literals cannot
+contain an unescaped newline or non-ASCII characters.
+
+A string literal elaborates to the prelude `String` type, a linked list of byte
+values. It is printed as text by both the interpreter and `neo build`.
 
 ### Operators and punctuation
 
@@ -1126,6 +1142,11 @@ enum Unit {
   unit
 }
 
+enum String {
+  str_nil
+  str_cons(Nat, String)
+}
+
 enum List(T: Type) {
   nil
   cons(T, List(T))
@@ -1152,9 +1173,18 @@ enum Exists(T: Type, P: fn(x: T) -> Prop) : Prop {
 }
 ```
 
+The prelude also defines these string functions:
+
+```neo
+fn str_length(s: String): Nat
+fn str_concat(a: String, b: String): String
+fn str_eq(a: String, b: String): Bool
+```
+
 Notes:
 
 - `Nat` numerals desugar to `zero` and `succ`.
+- String literals desugar to `str_nil` and `str_cons`; each byte is a `Nat`.
 - `List` is `List(T)`, not a built-in vector; it is a linked list.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
@@ -1179,7 +1209,7 @@ Its result type must be printable.
 
 A type is printable when it is:
 
-- `Nat`, `Bool`, or `Unit`;
+- `Nat`, `Bool`, `Unit`, or `String`;
 - an enum whose type arguments are printable and whose constructor field types
   are all printable.
 
@@ -1342,6 +1372,7 @@ args         ::= [ expr { "," expr } ]
 
 atom         ::= IDENT
                | NAT
+               | STRING
                | "Type" [ NAT ]
                | "Prop"
                | "(" expr ")"
@@ -1385,6 +1416,10 @@ Common messages:
 | `expected an enum or fn declaration` | Top-level input is not a declaration. |
 | `a block must end in an expression` | A block ended with a binding or was empty. |
 | `expected a newline after a binding` | Bindings must be one per line. |
+| `unterminated string literal` | Add the closing `"`. |
+| `string literals cannot contain a newline` | Write `\n` instead. |
+| `unknown string escape ...` | Use `\n`, `\t`, `\r`, `\\`, or `\"`. |
+| `string literals must contain only ASCII characters` | Strings are ASCII in Stage 0. |
 | `unknown name ...` | Name is undeclared or declared later. |
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
@@ -1418,7 +1453,7 @@ design:
 - declared implicit binders, traits, or type classes. Leading arguments can be
   inferred at calls; see [argument elision](#argument-elision);
 - modules, imports, namespaces, or multiple files;
-- strings, characters, floats, and general I/O;
+- characters, floats, and general I/O;
 - built-in arithmetic or other infix operators;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
@@ -1709,6 +1744,21 @@ The recursive calls `length(xs)` and `append(tail, ys)` omit their length
 arguments. The outer calls need no annotations either: the lengths of `v1()`
 and `v2()` determine the arguments to `append`, and the expected `Nat` plus the
 remaining arguments determine the argument to `length`. Output: `3`.
+
+`examples/strings.neo` prints a string:
+
+```neo
+fn main(): String {
+  "hello, world!"
+}
+```
+
+The literal elaborates to the prelude `String` list. Both the interpreter and
+the generated WASI component print it as text, followed by a newline. Output:
+
+```
+hello, world!
+```
 
 ---
 
