@@ -16,6 +16,8 @@ pub enum Tok {
     Eq,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
     LBrace,
     RBrace,
     Comma,
@@ -37,6 +39,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
     let mut line = 1usize;
     let mut col = 1usize;
     let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
     let mut out = Vec::new();
 
     let advance = |i: &mut usize, line: &mut usize, col: &mut usize| {
@@ -67,7 +70,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
 
         if c == '\n' {
             advance(&mut i, &mut line, &mut col);
-            if paren_depth == 0 {
+            if paren_depth == 0 && bracket_depth == 0 {
                 out.push(Token {
                     tok: Tok::Newline,
                     span,
@@ -184,6 +187,22 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 advance(&mut i, &mut line, &mut col);
                 out.push(Token {
                     tok: Tok::RParen,
+                    span,
+                });
+            }
+            '[' => {
+                bracket_depth += 1;
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::LBracket,
+                    span,
+                });
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::RBracket,
                     span,
                 });
             }

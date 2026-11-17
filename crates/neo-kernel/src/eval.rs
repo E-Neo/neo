@@ -19,14 +19,16 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
         },
         Type(u) => vtype(*u),
         Prop => vprop(),
-        Pi { dom, cod, .. } => {
+        Pi {
+            dom, cod, implicit, ..
+        } => {
             let dom_v = eval(globals, env, dom);
             let closure = Closure {
                 dom: None,
                 env: env.clone(),
                 body: cod.clone(),
             };
-            vpi(dom_v, closure)
+            vpi(dom_v, closure, *implicit)
         }
         Lam { dom, body, .. } => {
             let closure = Closure {
@@ -131,7 +133,7 @@ pub fn eval_closure(globals: &Globals, closure: &Closure, arg: V) -> V {
 pub fn apply_pi(globals: &Globals, pi: V, arg: V) -> Option<V> {
     let pi = force(globals, pi);
     match &*pi {
-        Val::Pi(_, closure) => Some(eval_closure(globals, closure, arg)),
+        Val::Pi(_, closure, _) => Some(eval_closure(globals, closure, arg)),
         _ => None,
     }
 }

@@ -12,8 +12,8 @@ Later stages will self-host the compiler in Neo.
 Implemented:
 
 - `enum` and `fn` declarations, `match`, equality and `refl`;
-- dependent function types and explicit type parameters;
-- inference of omitted leading arguments at call sites;
+- dependent function types and implicit parameters in `[]`;
+- implicit type and index parameters inferred at call sites;
 - closures and first-class functions;
 - total recursive functions with a structural termination checker;
 - strict positivity checking;
@@ -23,7 +23,7 @@ Implemented:
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
-and growable vectors (`Array(T, n)`, `Vec(T)`), modules, general I/O, and
+and growable vectors (`Array[T, n]`, `Vec[T]`), modules, general I/O, and
 built-in arithmetic. See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
@@ -83,7 +83,7 @@ More examples live in [`examples/`](examples):
 | `indexed_match.neo` | branch-field index refinement | `4` |
 | `indexed_append.neo` | context index refinement in `append` | `3` |
 | `pattern_matching.neo` | nested patterns, tree recursion | `4` |
-| `argument_elision.neo` | inferred leading arguments | `3` |
+| `argument_elision.neo` | inferred implicit arguments | `3` |
 | `strings.neo` | string literals and printing | `hello, world!` |
 
 ## Documentation

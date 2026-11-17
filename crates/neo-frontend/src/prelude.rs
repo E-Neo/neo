@@ -23,9 +23,9 @@ enum String {
   str_cons(Nat, String)
 }
 
-enum List(T: Type) {
+enum List[T: Type] {
   nil
-  cons(T, List(T))
+  cons(T, List[T])
 }
 
 enum False : Prop {
@@ -35,16 +35,16 @@ enum True : Prop {
   trivial
 }
 
-enum And(P: Prop, Q: Prop) : Prop {
+enum And[P: Prop, Q: Prop] : Prop {
   and(P, Q)
 }
 
-enum Or(P: Prop, Q: Prop) : Prop {
+enum Or[P: Prop, Q: Prop] : Prop {
   or_left(P)
   or_right(Q)
 }
 
-enum Exists(T: Type, P: fn(x: T) -> Prop) : Prop {
+enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
   exists(x: T, P(x))
 }
 

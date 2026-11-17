@@ -16,7 +16,7 @@ pub struct Closure {
 pub enum Val {
     Type(u32),
     Prop,
-    Pi(V, Rc<Closure>),
+    Pi(V, Rc<Closure>, bool),
     Lam(Rc<Closure>),
     Neutral(Rc<Neutral>),
     Ind(String, Vec<V>),
@@ -56,8 +56,8 @@ pub fn vprop() -> V {
     Rc::new(Val::Prop)
 }
 
-pub fn vpi(dom: V, closure: Closure) -> V {
-    Rc::new(Val::Pi(dom, Rc::new(closure)))
+pub fn vpi(dom: V, closure: Closure, implicit: bool) -> V {
+    Rc::new(Val::Pi(dom, Rc::new(closure), implicit))
 }
 
 pub fn vlam(closure: Closure) -> V {

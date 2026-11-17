@@ -1,5 +1,5 @@
 // `Bool` is an ordinary enum. There is no `if`; use `match`.
-// Note: `and` is already a prelude constructor (for `And(P, Q)`), so this
+// Note: `and` is already a prelude constructor (for `And[P, Q]`), so this
 // function is named `both`.
 fn not(b: Bool): Bool {
   match b {

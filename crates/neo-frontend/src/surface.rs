@@ -49,6 +49,7 @@ pub struct Param {
     pub name: String,
     pub ty: Expr,
     pub span: Span,
+    pub implicit: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +71,7 @@ pub struct Binder {
     pub name: Option<String>,
     pub ty: Expr,
     pub span: Span,
+    pub implicit: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -81,7 +83,12 @@ pub enum Expr {
     Prop(Span),
     FnType(Vec<Binder>, Box<Expr>, Span),
     FnLam(Vec<Binder>, Box<Expr>, Span),
-    App(Box<Expr>, Vec<Expr>, Span),
+    App {
+        f: Box<Expr>,
+        implicit: Vec<Expr>,
+        args: Vec<Expr>,
+        span: Span,
+    },
     Match(Box<Expr>, Vec<Arm>, Span),
     Eq(Box<Expr>, Box<Expr>, Span),
     Refl(Span),
@@ -99,7 +106,7 @@ impl Expr {
             | Expr::Prop(s)
             | Expr::FnType(_, _, s)
             | Expr::FnLam(_, _, s)
-            | Expr::App(_, _, s)
+            | Expr::App { span: s, .. }
             | Expr::Match(_, _, s)
             | Expr::Eq(_, _, s)
             | Expr::Refl(s)

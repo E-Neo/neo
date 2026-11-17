@@ -2,11 +2,11 @@
 // as binders for later fields and for the result type.
 //
 // Note: `neo` can build this program because `main` returns `Nat`. A program
-// whose `main` returns `Vec(T, n)` can be interpreted, but the WASM backend
+// whose `main` returns `Vec[T, n]` can be interpreted, but the WASM backend
 // cannot print fields whose types depend on earlier fields yet.
-enum Vec(T: Type, n: Nat) {
-  vnil : Vec(T, zero)
-  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+enum Vec[T: Type, n: Nat] {
+  vnil : Vec[T, zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -18,29 +18,32 @@ fn add(a: Nat, b: Nat): Nat {
 
 // Matching refines the context index: `n` is `zero` in the first branch and
 // `succ(m)` in the second, which is what makes the recursive call well typed.
-fn length(n: Nat, v: Vec(Nat, n)): Nat {
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
     vnil => zero
-    vcons(m, x, xs) => succ(length(m, xs))
+    vcons(m, x, xs) => succ(length(xs))
   }
 }
 
-fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+fn append[T: Type, n: Nat, m: Nat](
+  xs: Vec[T, n],
+  ys: Vec[T, m]
+): Vec[T, add(n, m)] {
   match xs {
     vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
   }
 }
 
-fn two(): Vec(Nat, 2) {
+fn two(): Vec[Nat, 2] {
   vcons(1, 4, vcons(0, 3, vnil))
 }
 
-fn three(): Vec(Nat, 3) {
-  append(2, 1, two(), vcons(0, 7, vnil))
+fn three(): Vec[Nat, 3] {
+  append(two(), vcons(0, 7, vnil))
 }
 
 fn main(): Nat {
   // Try `two()` or `three()` in the REPL to see the vectors.
-  length(3, three())
+  length(three())
 }

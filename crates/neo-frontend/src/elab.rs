@@ -1,6 +1,8 @@
 use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
-use crate::core::{Branch, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, rc, shift, var};
+use crate::core::{
+    Branch, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, pi_with, rc, shift, var,
+};
 use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
@@ -200,7 +202,7 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
             ty = pi(field_names[i].clone(), field_tms[i].clone(), ty);
         }
         for i in (0..np).rev() {
-            ty = pi(param_names[i].clone(), param_tys[i].clone(), ty);
+            ty = pi_with(param_names[i].clone(), param_tys[i].clone(), ty, true);
         }
 
         // Sanity-check that the constructor type is well formed and closed.
@@ -247,7 +249,7 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
 
 struct FnTypeInfo {
     ty: RcTm,
-    domains: Vec<(String, RcTm)>,
+    domains: Vec<(String, RcTm, bool)>,
     ret: RcTm,
 }
 
@@ -257,13 +259,13 @@ fn build_fn_type(globals: &Globals, decl: &FnDecl) -> Result<FnTypeInfo> {
     for p in &decl.params {
         let tm = elab_type(globals, &mut ctx, &p.ty)?;
         let v = eval(globals, &ctx.env, &tm);
-        domains.push((p.name.clone(), tm));
+        domains.push((p.name.clone(), tm, p.implicit));
         ctx.push(p.name.clone(), v);
     }
     let ret = elab_type(globals, &mut ctx, &decl.ret)?;
     let mut ty = ret.clone();
-    for (name, dom) in domains.iter().rev() {
-        ty = pi(name.clone(), dom.clone(), ty);
+    for (name, dom, implicit) in domains.iter().rev() {
+        ty = pi_with(name.clone(), dom.clone(), ty, *implicit);
     }
     Ok(FnTypeInfo { ty, domains, ret })
 }
@@ -289,14 +291,14 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
 
 fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, info: &FnTypeInfo) -> Result<()> {
     let mut ctx = Ctx::new();
-    for (name, dom) in &info.domains {
+    for (name, dom, _) in &info.domains {
         let dom_v = eval(globals, &ctx.env, dom);
         ctx.push(name.clone(), dom_v);
     }
     let ret_v = eval(globals, &ctx.env, &info.ret);
     let body_expr = Expr::Block(decl.body.clone());
     let mut body = elab_check(globals, &mut ctx, &body_expr, &ret_v)?;
-    for (name, dom) in info.domains.iter().rev() {
+    for (name, dom, _) in info.domains.iter().rev() {
         body = lam(name.clone(), dom.clone(), body);
     }
 
@@ -348,14 +350,25 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
         Expr::Prop(_) => Ok((rc(Tm::Prop), vtype(0))),
         Expr::FnType(binders, body, _) => elab_pi(globals, ctx, binders, body),
         Expr::FnLam(binders, body, span) => elab_lam_infer(globals, ctx, binders, body, *span),
-        Expr::App(f, args, span) => {
+        Expr::App {
+            f,
+            implicit,
+            args,
+            span,
+        } => {
             if let Expr::Var(n, _) = &**f
                 && ctx.lookup_index(n).is_none()
                 && globals.is_constructor(n)
             {
+                if !implicit.is_empty() {
+                    return Err(Error::at(
+                        *span,
+                        "constructor type arguments are inferred from the expected type; remove the `[...]` arguments",
+                    ));
+                }
                 return elab_ctor_infer(globals, ctx, n, args, *span);
             }
-            elab_app(globals, ctx, f, args, *span)
+            elab_app(globals, ctx, f, implicit, args, *span)
         }
         Expr::Match(scrut, arms, span) => {
             let (tm, ty) = elab_match(globals, ctx, scrut, arms, None, *span)?;
@@ -387,7 +400,7 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
         return Err(Error::at(
             span,
             format!(
-                "type constructor `{}` expects {} argument(s)",
+                "type constructor `{}` expects {} parameter(s) in `[]`",
                 name,
                 info.param_tys.len()
             ),
@@ -414,7 +427,7 @@ fn elab_enum_app(
         return Err(Error::at(
             span,
             format!(
-                "`{}` expects {} argument(s), got {}",
+                "`{}` expects {} parameter(s) in `[]`, got {}",
                 name,
                 param_tys.len(),
                 args.len()
@@ -437,23 +450,25 @@ fn elab_app(
     globals: &Globals,
     ctx: &mut Ctx,
     f: &Expr,
+    implicit: &[Expr],
     args: &[Expr],
     span: Span,
 ) -> Result<(RcTm, V)> {
-    elab_app_with(globals, ctx, f, args, None, span)
+    elab_app_with(globals, ctx, f, implicit, args, None, span)
 }
 
 /// Elaborate an application whose result is checked against `expected`.
-/// The expected type participates in leading-argument inference.
+/// The expected type participates in implicit-argument inference.
 fn elab_app_check(
     globals: &Globals,
     ctx: &mut Ctx,
     f: &Expr,
+    implicit: &[Expr],
     args: &[Expr],
     expected: &V,
     span: Span,
 ) -> Result<RcTm> {
-    let (tm, ty) = elab_app_with(globals, ctx, f, args, Some(expected), span)?;
+    let (tm, ty) = elab_app_with(globals, ctx, f, implicit, args, Some(expected), span)?;
     if conv_ty(globals, ctx.level(), &ty, expected) {
         Ok(tm)
     } else {
@@ -470,102 +485,81 @@ fn elab_app_with(
     globals: &Globals,
     ctx: &mut Ctx,
     f: &Expr,
+    implicit: &[Expr],
     args: &[Expr],
     expected: Option<&V>,
     span: Span,
 ) -> Result<(RcTm, V)> {
     if let Expr::Var(name, _) = f
+        && ctx.lookup_index(name).is_none()
         && globals.get_enum(name).is_some()
     {
-        return elab_enum_app(globals, ctx, name, args, span);
-    }
-    let (f_tm, f_ty) = elab_infer(globals, ctx, f)?;
-
-    let explicit = {
-        let mut work = ctx.clone();
-        apply_args(globals, &mut work, &f_tm, &f_ty, args)
-    };
-    let explicit_matches = match &explicit {
-        Ok((_, ty)) => expected.is_none_or(|exp| conv_ty(globals, ctx.level(), ty, exp)),
-        Err(_) => false,
-    };
-    if explicit_matches {
-        return explicit;
-    }
-    let fallback = match explicit {
-        Err(err) => err,
-        Ok((_, ty)) => {
-            let found = crate::pretty::show_val(globals, ctx.level(), &ty);
-            let want = expected
-                .map(|e| crate::pretty::show_val(globals, ctx.level(), e))
-                .unwrap_or_else(|| "?".to_string());
-            Error::at(
+        if !args.is_empty() {
+            return Err(Error::at(
                 span,
-                format!("type mismatch: expected `{}`, found `{}`", want, found),
-            )
+                format!("the parameters of `{}` are written in `[]`, not `()`", name),
+            ));
         }
-    };
+        return elab_enum_app(globals, ctx, name, implicit, span);
+    }
 
-    // Try omitting an increasing prefix of the function's parameters. The
-    // omitted arguments are represented by fresh context variables and solved
-    // by unifying the remaining argument types (and the expected type) with
-    // the parameter types.
-    let call = ElideCall {
+    let (mut f_tm, mut f_ty) = elab_infer(globals, ctx, f)?;
+
+    // Apply any explicitly supplied implicit arguments.
+    for arg in implicit {
+        let ft = force(globals, f_ty);
+        let (dom, closure) = match &*ft {
+            Val::Pi(dom, closure, true) => (dom.clone(), closure.clone()),
+            Val::Pi(_, _, false) => {
+                return Err(Error::at(
+                    arg.span(),
+                    "too many implicit arguments for this function (it has no implicit parameter here)",
+                ));
+            }
+            _ => {
+                return Err(Error::at(
+                    arg.span(),
+                    "too many implicit arguments for this function",
+                ));
+            }
+        };
+        let arg_tm = elab_check(globals, ctx, arg, &dom)?;
+        let arg_v = eval(globals, &ctx.env, &arg_tm);
+        f_tm = app(f_tm, arg_tm);
+        f_ty = eval_closure(globals, &closure, arg_v);
+    }
+
+    // The remaining leading implicit parameters are inferred.
+    let k = leading_implicit_count(globals, ctx.level(), &f_ty);
+    let call = ImplicitCall {
         f_tm: &f_tm,
         f_ty: &f_ty,
         args,
         expected,
         span,
     };
-    let mut elide_error = None;
-    for k in 1..=32 {
-        match try_elided_app(globals, ctx, &call, k) {
-            ElideResult::Ok(tm, ty) => return Ok((tm, ty)),
-            ElideResult::NoParams => break,
-            ElideResult::Failed(err) => {
-                if elide_error.is_none() {
-                    elide_error = Some(err);
-                }
-            }
-        }
+    match try_implicit_app(globals, ctx, &call, k) {
+        ImplicitResult::Ok(tm, ty) => Ok((tm, ty)),
+        ImplicitResult::Failed(err) => Err(err),
+        ImplicitResult::NoParams => Err(Error::at(
+            span,
+            "application: the function has a non-function type",
+        )),
     }
-    if let Some(err) = elide_error
-        && err.message.starts_with("cannot infer omitted")
-    {
-        return Err(err);
-    }
-    Err(fallback)
 }
 
-fn apply_args(
-    globals: &Globals,
-    ctx: &mut Ctx,
-    f_tm: &RcTm,
-    f_ty: &V,
-    args: &[Expr],
-) -> Result<(RcTm, V)> {
-    let mut tm = f_tm.clone();
-    let mut ty = f_ty.clone();
-    for arg in args {
-        let ft = force(globals, ty);
-        let (dom, closure) = match &*ft {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
-            _ => {
-                return Err(Error::at(
-                    arg.span(),
-                    "application: the function has a non-function type",
-                ));
-            }
-        };
-        let arg_tm = elab_check(globals, ctx, arg, &dom)?;
-        let arg_v = eval(globals, &ctx.env, &arg_tm);
-        tm = app(tm, arg_tm);
-        ty = eval_closure(globals, &closure, arg_v);
+fn leading_implicit_count(globals: &Globals, base: usize, ty: &V) -> usize {
+    let mut ty = force(globals, ty.clone());
+    let mut count = 0;
+    while let Val::Pi(_, closure, true) = &*ty {
+        let closure = closure.clone();
+        ty = eval_closure(globals, &closure, vvar(base + count));
+        count += 1;
     }
-    Ok((tm, ty))
+    count
 }
 
-enum ElideResult {
+enum ImplicitResult {
     Ok(RcTm, V),
     NoParams,
     Failed(Error),
@@ -576,7 +570,7 @@ struct MetaInfo {
     ty: V,
 }
 
-struct ElideCall<'a> {
+struct ImplicitCall<'a> {
     f_tm: &'a RcTm,
     f_ty: &'a V,
     args: &'a [Expr],
@@ -587,12 +581,17 @@ struct ElideCall<'a> {
 fn meta_name(level: usize) -> String {
     // A control character cannot appear in a source identifier, so an
     // internal meta never shadows a user name.
-    format!("\u{1}elide{}", level)
+    format!("\u{1}implicit{}", level)
 }
 
-/// Apply `k` leading parameters as inferred arguments and elaborate the rest
-/// of the call in the extended context.
-fn try_elided_app(globals: &Globals, ctx: &Ctx, call: &ElideCall<'_>, k: usize) -> ElideResult {
+/// Insert inferred arguments for the first `k` (implicit) parameters, then
+/// elaborate the explicit arguments in the extended context.
+fn try_implicit_app(
+    globals: &Globals,
+    ctx: &Ctx,
+    call: &ImplicitCall<'_>,
+    k: usize,
+) -> ImplicitResult {
     let mut work = ctx.clone();
     let base = work.level();
     let mut ty = call.f_ty.clone();
@@ -600,8 +599,8 @@ fn try_elided_app(globals: &Globals, ctx: &Ctx, call: &ElideCall<'_>, k: usize) 
     for _ in 0..k {
         let ft = force(globals, ty);
         let (dom, closure) = match &*ft {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
-            _ => return ElideResult::NoParams,
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
+            _ => return ImplicitResult::NoParams,
         };
         let level = work.level();
         work.push(meta_name(level), dom.clone());
@@ -623,18 +622,24 @@ fn try_elided_app(globals: &Globals, ctx: &Ctx, call: &ElideCall<'_>, k: usize) 
     for arg in call.args {
         let ft = force(globals, ty);
         let (dom, closure) = match &*ft {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
             _ => {
-                return ElideResult::Failed(Error::at(
+                return ImplicitResult::Failed(Error::at(
                     call.span,
                     "application: the function has a non-function type",
                 ));
             }
         };
         let dom = check::apply_solutions(globals, work.level(), &levels, &sols, &dom);
-        let arg_tm = match elab_arg_with_metas(globals, &mut work, arg, &dom, &levels, &mut sols) {
-            Ok(tm) => tm,
-            Err(err) => return ElideResult::Failed(err),
+        let arg_tm = {
+            let mut meta = MetaSolver {
+                levels: &levels,
+                sols: &mut sols,
+            };
+            match elab_arg_with_metas(globals, &mut work, arg, &dom, &mut meta) {
+                Ok(tm) => tm,
+                Err(err) => return ImplicitResult::Failed(err),
+            }
         };
         let arg_v = eval(globals, &work.env, &arg_tm);
         tm = app(tm, arg_tm);
@@ -645,10 +650,10 @@ fn try_elided_app(globals: &Globals, ctx: &Ctx, call: &ElideCall<'_>, k: usize) 
     if let Some(exp) = call.expected
         && let Err(err) = unify_meta(globals, work.level(), &levels, &mut sols, &ty, exp)
     {
-        return ElideResult::Failed(err);
+        return ImplicitResult::Failed(err);
     }
     if let Err(err) = resolve_metas(globals, work.level(), &metas, &mut sols) {
-        return ElideResult::Failed(err);
+        return ImplicitResult::Failed(err);
     }
 
     let ty = check::apply_solutions(globals, work.level(), &levels, &sols, &ty);
@@ -661,12 +666,12 @@ fn try_elided_app(globals: &Globals, ctx: &Ctx, call: &ElideCall<'_>, k: usize) 
     {
         let found = crate::pretty::show_val(globals, ctx.level(), &ty);
         let want = crate::pretty::show_val(globals, ctx.level(), exp);
-        return ElideResult::Failed(Error::at(
+        return ImplicitResult::Failed(Error::at(
             call.span,
             format!("type mismatch: expected `{}`, found `{}`", want, found),
         ));
     }
-    ElideResult::Ok(tm, ty)
+    ImplicitResult::Ok(tm, ty)
 }
 
 fn elab_arg_with_metas(
@@ -674,10 +679,15 @@ fn elab_arg_with_metas(
     ctx: &mut Ctx,
     arg: &Expr,
     dom: &V,
-    levels: &[usize],
-    sols: &mut std::collections::HashMap<usize, V>,
+    meta: &mut MetaSolver<'_>,
 ) -> Result<RcTm> {
-    if !value_mentions_any(globals, ctx.level(), dom, levels) {
+    if let Some((name, args, span)) = ctor_application(arg)
+        && ctx.lookup_index(name).is_none()
+        && globals.is_constructor(name)
+    {
+        return elab_ctor_check_metas(globals, ctx, name, args, dom, meta, span);
+    }
+    if !value_mentions_any(globals, ctx.level(), dom, meta.levels) {
         return elab_check(globals, ctx, arg, dom);
     }
     // An expected type that mentions a metavariable still carries useful
@@ -687,11 +697,30 @@ fn elab_arg_with_metas(
         return Ok(tm);
     }
     let (tm, ty) = elab_infer(globals, ctx, arg)?;
-    unify_meta(globals, ctx.level(), levels, sols, &ty, dom)?;
+    unify_meta(globals, ctx.level(), meta.levels, meta.sols, &ty, dom)?;
     Ok(tm)
 }
 
-/// First-order unification with the fresh leading arguments as flexible
+fn ctor_application(expr: &Expr) -> Option<(&str, &[Expr], Span)> {
+    match expr {
+        Expr::Var(name, span) => Some((name.as_str(), &[], *span)),
+        Expr::App {
+            f,
+            implicit,
+            args,
+            span,
+        } if implicit.is_empty() => {
+            if let Expr::Var(name, _) = &**f {
+                Some((name.as_str(), args, *span))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// First-order unification with the fresh implicit arguments as flexible
 /// variables. It is deliberately conservative: higher-order meta applications
 /// and escaping solutions are rejected.
 fn unify_meta(
@@ -721,7 +750,7 @@ fn unify_meta(
     }
 
     match (&*a, &*b) {
-        (Val::Pi(da, ca), Val::Pi(db, cb)) => {
+        (Val::Pi(da, ca, _), Val::Pi(db, cb, _)) => {
             unify_meta(globals, level, levels, sols, da, db)?;
             let fresh = vvar(level);
             let ca = eval_closure(globals, ca, fresh.clone());
@@ -771,7 +800,7 @@ fn unify_meta_lists(
 ) -> Result<()> {
     if a.len() != b.len() {
         return Err(Error::new(
-            "cannot infer omitted arguments: length mismatch",
+            "cannot infer implicit arguments: length mismatch",
         ));
     }
     for (x, y) in a.iter().zip(b.iter()) {
@@ -805,13 +834,13 @@ fn bind_meta(
     let free = free_var_levels(globals, level, value);
     if free.contains(&var) {
         return Err(Error::new(
-            "cannot infer omitted argument: cyclic index solution",
+            "cannot infer implicit argument: cyclic index solution",
         ));
     }
     for other in &free {
         if *other >= var && !levels.contains(other) {
             return Err(Error::new(
-                "cannot infer omitted argument: solution would escape its scope",
+                "cannot infer implicit argument: solution would escape its scope",
             ));
         }
     }
@@ -838,21 +867,21 @@ fn resolve_metas(
         let Some(solution) = sols.get(&meta.level) else {
             let ty = crate::pretty::show_val(globals, level, &meta.ty);
             return Err(Error::new(format!(
-                "cannot infer omitted argument of type `{}`; pass it explicitly",
+                "cannot infer implicit argument of type `{}`; pass it explicitly with `[...]`",
                 ty
             )));
         };
         let free = free_var_levels(globals, level, solution);
         if free.iter().any(|l| levels.contains(l)) {
             return Err(Error::new(
-                "cannot infer omitted arguments: cyclic solutions",
+                "cannot infer implicit arguments: cyclic solutions",
             ));
         }
     }
     Ok(())
 }
 
-/// Remove the fresh leading-argument variables from a term, substituting their
+/// Remove the fresh implicit-argument variables from a term, substituting their
 /// solved values. The metas are the innermost locals, in order.
 fn strip_metas(
     globals: &Globals,
@@ -864,7 +893,7 @@ fn strip_metas(
     for (i, meta) in metas.iter().enumerate().rev() {
         let solution = sols
             .get(&meta.level)
-            .expect("internal: unresolved elided argument");
+            .expect("internal: unresolved implicit argument");
         let replacement = quote(globals, base + i, solution);
         tm = instantiate(&tm, &replacement);
     }
@@ -944,7 +973,7 @@ fn unify_failure(globals: &Globals, level: usize, a: &V, b: &V) -> Error {
     let a = crate::pretty::show_val(globals, level, a);
     let b = crate::pretty::show_val(globals, level, b);
     Error::new(format!(
-        "cannot infer omitted arguments: `{}` and `{}` are not equal",
+        "cannot infer implicit arguments: `{}` and `{}` are not equal",
         a, b
     ))
 }
@@ -959,15 +988,15 @@ fn elab_pi(globals: &Globals, ctx: &mut Ctx, binders: &[Binder], body: &Expr) ->
             .clone()
             .unwrap_or_else(|| format!("_x{}", doms.len()));
         ctx.push(name.clone(), v);
-        doms.push((name, tm));
+        doms.push((name, tm, b.implicit));
     }
     let cod = elab_type(globals, ctx, body)?;
     for _ in 0..doms.len() {
         ctx.pop();
     }
     let mut tm = cod;
-    for (name, dom) in doms.into_iter().rev() {
-        tm = pi(name, dom, tm);
+    for (name, dom, implicit) in doms.into_iter().rev() {
+        tm = pi_with(name, dom, tm, implicit);
     }
     let ty = check::infer(globals, ctx, &tm)?;
     Ok((tm, ty))
@@ -989,7 +1018,7 @@ fn elab_lam_infer(
             .clone()
             .unwrap_or_else(|| format!("_x{}", doms.len()));
         ctx.push(name.clone(), v);
-        doms.push((name, tm));
+        doms.push((name, tm, b.implicit));
     }
     if doms.is_empty() {
         return Err(Error::at(span, "a lambda must bind at least one argument"));
@@ -1001,9 +1030,9 @@ fn elab_lam_infer(
     }
     let mut tm = body_tm;
     let mut ty_tm = cod;
-    for (name, dom) in doms.into_iter().rev() {
+    for (name, dom, implicit) in doms.into_iter().rev() {
         tm = lam(name.clone(), dom.clone(), tm);
-        ty_tm = pi(name, dom, ty_tm);
+        ty_tm = pi_with(name, dom, ty_tm, implicit);
     }
     let ty = eval(globals, &ctx.env, &ty_tm);
     Ok((tm, ty))
@@ -1018,7 +1047,11 @@ fn elab_eq(globals: &Globals, ctx: &mut Ctx, lhs: &Expr, rhs: &Expr) -> Result<(
 
 fn elab_block_infer(globals: &Globals, ctx: &mut Ctx, block: &Block) -> Result<(RcTm, V)> {
     let saved = elab_bindings(globals, ctx, block)?;
-    let (tail_tm, _tail_ty) = elab_infer(globals, ctx, &block.tail)?;
+    let (tail_tm, tail_ty) = elab_infer(globals, ctx, &block.tail)?;
+    // Compute the result type before popping the bindings. Kernel inference of
+    // the let-chain would lose the implicit-parameter metadata of a function
+    // value, so substitute through the binding types instead.
+    let ty = type_after_bindings(globals, ctx, &saved, &tail_ty)?;
     for _ in &block.bindings {
         ctx.pop();
     }
@@ -1026,8 +1059,34 @@ fn elab_block_infer(globals: &Globals, ctx: &mut Ctx, block: &Block) -> Result<(
     for (name, dom, value) in saved.into_iter().rev() {
         tm = app(lam(name, dom, tm), value);
     }
-    let ty = check::infer(globals, ctx, &tm)?;
     Ok((tm, ty))
+}
+
+/// Result type of a nested chain of let-bindings `((fn(x: A) => tail) value)`.
+///
+/// `saved` is in binding order: each domain and value lives in the context
+/// prefix that precedes its binding, and `tail_ty` lives in the fully extended
+/// context. `ctx` must still contain every binding.
+fn type_after_bindings(
+    globals: &Globals,
+    ctx: &Ctx,
+    saved: &[(String, RcTm, RcTm)],
+    tail_ty: &V,
+) -> Result<V> {
+    let base = ctx.level() - saved.len();
+    let mut ty = tail_ty.clone();
+    for i in (0..saved.len()).rev() {
+        let (name, dom, value) = &saved[i];
+        let cod = quote(globals, base + i + 1, &ty);
+        let pi_tm = pi_with(name.clone(), dom.clone(), cod, false);
+        let here = ctx.env[..base + i + 1].to_vec();
+        let pi_v = eval(globals, &here, &pi_tm);
+        let prefix = ctx.env[..base + i].to_vec();
+        let value_v = eval(globals, &prefix, value);
+        ty = apply_pi(globals, pi_v, value_v)
+            .ok_or_else(|| Error::new("internal: binding type is not a function"))?;
+    }
+    Ok(ty)
 }
 
 fn elab_block_check(globals: &Globals, ctx: &mut Ctx, block: &Block, expected: &V) -> Result<RcTm> {
@@ -1071,14 +1130,25 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
                 infer_and_check(globals, ctx, expr, expected)
             }
         }
-        Expr::App(f, args, span) => {
+        Expr::App {
+            f,
+            implicit,
+            args,
+            span,
+        } => {
             if let Expr::Var(n, _) = &**f
                 && ctx.lookup_index(n).is_none()
                 && globals.is_constructor(n)
             {
+                if !implicit.is_empty() {
+                    return Err(Error::at(
+                        *span,
+                        "constructor type arguments are inferred from the expected type; remove the `[...]` arguments",
+                    ));
+                }
                 return elab_ctor_check(globals, ctx, n, args, expected, *span);
             }
-            elab_app_check(globals, ctx, f, args, expected, *span)
+            elab_app_check(globals, ctx, f, implicit, args, expected, *span)
         }
         Expr::Match(scrut, arms, span) => {
             let (tm, _ty) = elab_match(globals, ctx, scrut, arms, Some(expected), *span)?;
@@ -1093,15 +1163,31 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
 fn infer_and_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -> Result<RcTm> {
     let (tm, ty) = elab_infer(globals, ctx, expr)?;
     if conv_ty(globals, ctx.level(), &ty, expected) {
-        Ok(tm)
-    } else {
-        let found = crate::pretty::show_val(globals, ctx.level(), &ty);
-        let want = crate::pretty::show_val(globals, ctx.level(), expected);
-        Err(Error::at(
-            expr.span(),
-            format!("type mismatch: expected `{}`, found `{}`", want, found),
-        ))
+        return Ok(tm);
     }
+    let k = leading_implicit_count(globals, ctx.level(), &ty);
+    if k > 0 {
+        let call = ImplicitCall {
+            f_tm: &tm,
+            f_ty: &ty,
+            args: &[],
+            expected: Some(expected),
+            span: expr.span(),
+        };
+        match try_implicit_app(globals, ctx, &call, k) {
+            ImplicitResult::Ok(tm, ty) if conv_ty(globals, ctx.level(), &ty, expected) => {
+                return Ok(tm);
+            }
+            ImplicitResult::Failed(err) => return Err(err),
+            _ => {}
+        }
+    }
+    let found = crate::pretty::show_val(globals, ctx.level(), &ty);
+    let want = crate::pretty::show_val(globals, ctx.level(), expected);
+    Err(Error::at(
+        expr.span(),
+        format!("type mismatch: expected `{}`, found `{}`", want, found),
+    ))
 }
 
 fn elab_ctor_fields(
@@ -1132,7 +1218,7 @@ fn elab_ctor_fields(
     for arg in args {
         let ft = force(globals, field_ty);
         let (dom, closure) = match &*ft {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
             _ => return Err(Error::new("constructor field mismatch")),
         };
         let tm = elab_check(globals, ctx, arg, &dom)?;
@@ -1176,6 +1262,84 @@ fn elab_ctor_check(
             format!("constructor `{}` does not produce the expected type", name),
         ));
     }
+    let mut all: Vec<RcTm> = param_vals
+        .iter()
+        .map(|p| quote(globals, ctx.level(), p))
+        .collect();
+    all.extend(field_tms);
+    Ok(rc(Tm::Ctor(ci.enum_name.clone(), ci.index, all)))
+}
+
+struct MetaSolver<'a> {
+    levels: &'a [usize],
+    sols: &'a mut std::collections::HashMap<usize, V>,
+}
+
+fn elab_ctor_check_metas(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    name: &str,
+    args: &[Expr],
+    expected: &V,
+    meta: &mut MetaSolver<'_>,
+    span: Span,
+) -> Result<RcTm> {
+    let ci = globals
+        .get_ctor(name)
+        .cloned()
+        .ok_or_else(|| Error::at(span, format!("unknown constructor `{}`", name)))?;
+    let expected_f = force(globals, expected.clone());
+    let param_vals = match &*expected_f {
+        Val::Ind(en, ps) if *en == ci.enum_name => ps.clone(),
+        _ => {
+            let want = crate::pretty::show_val(globals, ctx.level(), expected);
+            return Err(Error::at(
+                span,
+                format!(
+                    "cannot infer the type arguments of `{}` here; expected `{}`",
+                    name, want
+                ),
+            ));
+        }
+    };
+    if args.len() != ci.num_fields {
+        return Err(Error::at(
+            span,
+            format!(
+                "constructor `{}` takes {} field(s), got {}",
+                ci.name,
+                ci.num_fields,
+                args.len()
+            ),
+        ));
+    }
+    let mut field_ty = eval(globals, &Vec::new(), &ci.ty);
+    for p in &param_vals {
+        field_ty = apply_pi(globals, field_ty, p.clone())
+            .ok_or_else(|| Error::new("constructor parameter mismatch"))?;
+    }
+    let mut field_tms = Vec::new();
+    for arg in args {
+        let ft = force(globals, field_ty);
+        let (dom, closure) = match &*ft {
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
+            _ => return Err(Error::new("constructor field mismatch")),
+        };
+        let dom = check::apply_solutions(globals, ctx.level(), meta.levels, meta.sols, &dom);
+        let tm = elab_arg_with_metas(globals, ctx, arg, &dom, meta)?;
+        let v = eval(globals, &ctx.env, &tm);
+        field_ty = eval_closure(globals, &closure, v);
+        field_tms.push(tm);
+    }
+    let result = force(globals, field_ty);
+    unify_meta(
+        globals,
+        ctx.level(),
+        meta.levels,
+        meta.sols,
+        &result,
+        &expected_f,
+    )?;
     let mut all: Vec<RcTm> = param_vals
         .iter()
         .map(|p| quote(globals, ctx.level(), p))
@@ -1242,7 +1406,7 @@ fn elab_lam_check(
     for b in binders {
         let exp = force(globals, expected);
         let (dom_v, closure) = match &*exp {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
             _ => {
                 return Err(Error::at(
                     span,
@@ -1394,16 +1558,19 @@ fn elab_match(
         };
         let dom = quote(globals, ctx.level(), &scrut_ty);
         ctx.push(name.clone(), scrut_ty.clone());
-        let body_tm = match expected {
-            Some(exp) => elab_check(globals, ctx, &arms[0].body, exp)?,
-            None => elab_infer(globals, ctx, &arms[0].body)?.0,
+        let (body_tm, body_ty) = match expected {
+            Some(exp) => (elab_check(globals, ctx, &arms[0].body, exp)?, exp.clone()),
+            None => elab_infer(globals, ctx, &arms[0].body)?,
+        };
+        let ty = match expected {
+            Some(exp) => exp.clone(),
+            None => {
+                let saved = [(name.clone(), dom.clone(), scrut_tm.clone())];
+                type_after_bindings(globals, ctx, &saved, &body_ty)?
+            }
         };
         ctx.pop();
         let tm = app(lam(name, dom, body_tm), scrut_tm);
-        let ty = match expected {
-            Some(e) => e.clone(),
-            None => check::infer(globals, ctx, &tm)?,
-        };
         return Ok((tm, ty));
     }
 
@@ -2157,7 +2324,7 @@ fn ctor_field_types(
     for field in fields {
         let forced = force(globals, ty);
         let (dom, closure) = match &*forced {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
             _ => return Err(Error::new("match: constructor field mismatch")),
         };
         out.push(dom);

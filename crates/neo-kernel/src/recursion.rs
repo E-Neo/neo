@@ -1,5 +1,5 @@
 use crate::check::{self, Ctx};
-use crate::core::{Branch, RcTm, Tm, app, ctor, eq, ind, lam, pi, rc};
+use crate::core::{Branch, RcTm, Tm, app, ctor, eq, ind, lam, pi_with, rc};
 use crate::env::Globals;
 use crate::eval::eval;
 use neo_common::error::{Error, Result};
@@ -92,7 +92,12 @@ fn inline_lets(tm: &RcTm) -> RcTm {
             app(f, a)
         }
         Tm::Lam { name, dom, body } => lam(name.clone(), inline_lets(dom), inline_lets(body)),
-        Tm::Pi { name, dom, cod } => pi(name.clone(), inline_lets(dom), inline_lets(cod)),
+        Tm::Pi {
+            name,
+            dom,
+            cod,
+            implicit,
+        } => pi_with(name.clone(), inline_lets(dom), inline_lets(cod), *implicit),
         Tm::Ind(name, args) => ind(name.clone(), args.iter().map(inline_lets).collect()),
         Tm::Ctor(name, index, args) => {
             ctor(name.clone(), *index, args.iter().map(inline_lets).collect())

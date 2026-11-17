@@ -10,7 +10,7 @@ pub fn quote(globals: &Globals, level: usize, v: &V) -> RcTm {
     match &*v {
         Val::Type(u) => Rc::new(Tm::Type(*u)),
         Val::Prop => Rc::new(Tm::Prop),
-        Val::Pi(dom, closure) => {
+        Val::Pi(dom, closure, implicit) => {
             let dom_tm = quote(globals, level, dom);
             let fresh = vvar(level);
             let cod_v = eval_closure(globals, closure, fresh);
@@ -19,6 +19,7 @@ pub fn quote(globals: &Globals, level: usize, v: &V) -> RcTm {
                 name: "x".to_string(),
                 dom: dom_tm,
                 cod: cod_tm,
+                implicit: *implicit,
             })
         }
         Val::Lam(closure) => {
@@ -145,10 +146,16 @@ fn close_under(globals: &Globals, level: usize, env: &Env, tm: &RcTm, extra: usi
         Tm::Const(name) => Rc::new(Tm::Const(name.clone())),
         Tm::Type(u) => Rc::new(Tm::Type(*u)),
         Tm::Prop => Rc::new(Tm::Prop),
-        Tm::Pi { name, dom, cod } => Rc::new(Tm::Pi {
+        Tm::Pi {
+            name,
+            dom,
+            cod,
+            implicit,
+        } => Rc::new(Tm::Pi {
             name: name.clone(),
             dom: close_under(globals, level, env, dom, extra),
             cod: close_under(globals, level + 1, env, cod, extra + 1),
+            implicit: *implicit,
         }),
         Tm::Lam { name, dom, body } => Rc::new(Tm::Lam {
             name: name.clone(),

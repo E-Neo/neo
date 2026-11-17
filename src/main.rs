@@ -170,7 +170,7 @@ fn is_printable(globals: &Globals, ty: &V, visiting: &mut Vec<String>) -> bool {
                 for _ in 0..c.num_fields {
                     let f = force(globals, field_ty);
                     match &*f {
-                        Val::Pi(dom, closure) => {
+                        Val::Pi(dom, closure, _) => {
                             if !is_printable(globals, dom, visiting) {
                                 return false;
                             }

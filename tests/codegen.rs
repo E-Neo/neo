@@ -110,14 +110,14 @@ fn main(): Color {
 fn prints_recursive_enum_values() {
     check(
         r#"
-fn range(n: Nat): List(Nat) {
+fn range(n: Nat): List[Nat] {
   match n {
     zero => nil
     succ(p) => cons(p, range(p))
   }
 }
 
-fn main(): List(Nat) {
+fn main(): List[Nat] {
   range(3)
 }
 "#,
@@ -194,15 +194,15 @@ fn main(): Nat {
 fn compiles_generic_functions() {
     check(
         r#"
-fn append(T: Type, xs: List(T), ys: List(T)): List(T) {
+fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   match xs {
     nil => ys
-    cons(h, t) => cons(h, append(T, t, ys))
+    cons(h, t) => cons(h, append(t, ys))
   }
 }
 
-fn main(): List(Nat) {
-  append(Nat, cons(1, cons(2, nil)), cons(3, nil))
+fn main(): List[Nat] {
+  append(cons(1, cons(2, nil)), cons(3, nil))
 }
 "#,
         "append",
@@ -221,7 +221,7 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn sym(T: Type, x: T, y: T, p: x == y): y == x {
+fn sym[T: Type](x: T, y: T, p: x == y): y == x {
   match p {
     refl => refl
   }
@@ -230,7 +230,7 @@ fn sym(T: Type, x: T, y: T, p: x == y): y == x {
 fn add_zero(a: Nat): add(a, zero) == a {
   match a {
     zero => refl
-    succ(p) => match sym(Nat, add(p, zero), p, add_zero(p)) {
+    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
       refl => refl
     }
   }

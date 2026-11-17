@@ -641,7 +641,7 @@ impl<'g> Codegen<'g> {
             .ok_or_else(|| Error::new(format!("unknown enum `{}`", name)))?;
 
         // Register the function before generating its body so recursive types
-        // such as `List(T)` can call themselves.
+        // such as `List[T]` can call themselves.
         let id = self.new_func(&[ValType::I32], &[]);
         self.printers.insert(key, id);
 
@@ -661,7 +661,7 @@ impl<'g> Codegen<'g> {
             for j in 0..ctor.num_fields {
                 let f = force(self.globals, field_ty);
                 let (dom, closure) = match &*f {
-                    Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+                    Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
                     _ => {
                         return Err(Error::new(format!(
                             "cannot print field {} of constructor `{}`",
@@ -1249,7 +1249,7 @@ fn contains_neutral(v: &V) -> bool {
         Val::Ctor(_, _, args) => args.iter().any(contains_neutral),
         Val::Eq(a, b, c) => contains_neutral(a) || contains_neutral(b) || contains_neutral(c),
         Val::Refl(a) => contains_neutral(a),
-        Val::Pi(dom, _) => contains_neutral(dom),
+        Val::Pi(dom, _, _) => contains_neutral(dom),
         Val::Lam(_) => false,
         Val::Type(_) | Val::Prop | Val::Glob(_) => false,
     }

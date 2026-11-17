@@ -27,12 +27,21 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
         Tm::Type(0) => "Type 0".to_string(),
         Tm::Type(u) => format!("Type {}", u),
         Tm::Prop => "Prop".to_string(),
-        Tm::Pi { name, dom, cod } => {
+        Tm::Pi {
+            name,
+            dom,
+            cod,
+            implicit,
+        } => {
             let d = term_at(globals, names, dom);
             names.push(name.clone());
             let c = term_at(globals, names, cod);
             names.pop();
-            format!("fn({}: {}) -> {}", name, d, c)
+            if *implicit {
+                format!("fn[{}: {}] -> {}", name, d, c)
+            } else {
+                format!("fn({}: {}) -> {}", name, d, c)
+            }
         }
         Tm::Lam { name, dom, body } => {
             let d = term_at(globals, names, dom);

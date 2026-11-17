@@ -7,7 +7,7 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn sym(T: Type, x: T, y: T, p: x == y): y == x {
+fn sym[T: Type](x: T, y: T, p: x == y): y == x {
   match p {
     refl => refl
   }
@@ -16,7 +16,7 @@ fn sym(T: Type, x: T, y: T, p: x == y): y == x {
 fn add_zero(a: Nat): add(a, zero) == a {
   match a {
     zero => refl
-    succ(p) => match sym(Nat, add(p, zero), p, add_zero(p)) {
+    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
       refl => refl
     }
   }

@@ -12,6 +12,7 @@ pub enum Tm {
         name: String,
         dom: RcTm,
         cod: RcTm,
+        implicit: bool,
     },
     Lam {
         name: String,
@@ -66,10 +67,15 @@ pub fn app_many(f: RcTm, args: Vec<RcTm>) -> RcTm {
 }
 
 pub fn pi(name: impl Into<String>, dom: RcTm, cod: RcTm) -> RcTm {
+    pi_with(name, dom, cod, false)
+}
+
+pub fn pi_with(name: impl Into<String>, dom: RcTm, cod: RcTm, implicit: bool) -> RcTm {
     rc(Tm::Pi {
         name: name.into(),
         dom,
         cod,
+        implicit,
     })
 }
 
@@ -108,10 +114,16 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
             }
         }
         Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
-        Tm::Pi { name, dom, cod } => pi(
+        Tm::Pi {
+            name,
+            dom,
+            cod,
+            implicit,
+        } => pi_with(
             name.clone(),
             shift(dom, delta, cutoff),
             shift(cod, delta, cutoff + 1),
+            *implicit,
         ),
         Tm::Lam { name, dom, body } => lam(
             name.clone(),
@@ -186,10 +198,16 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
             }
         }
         Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
-        Tm::Pi { name, dom, cod } => pi(
+        Tm::Pi {
+            name,
+            dom,
+            cod,
+            implicit,
+        } => pi_with(
             name.clone(),
             subst_at(dom, index, replacement, depth),
             subst_at(cod, index, replacement, depth + 1),
+            *implicit,
         ),
         Tm::Lam { name, dom, body } => lam(
             name.clone(),
@@ -268,10 +286,16 @@ fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> Rc
     }
     match &**tm {
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
-        Tm::Pi { name, dom, cod } => pi(
+        Tm::Pi {
+            name,
+            dom,
+            cod,
+            implicit,
+        } => pi_with(
             name.clone(),
             abstract_at(target, replacement, dom, depth),
             abstract_at(target, replacement, cod, depth + 1),
+            *implicit,
         ),
         Tm::Lam { name, dom, body } => lam(
             name.clone(),

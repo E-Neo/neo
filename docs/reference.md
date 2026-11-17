@@ -120,8 +120,8 @@ Newlines are significant. They separate:
 - block bindings,
 - match arms.
 
-A newline **inside parentheses** is ignored, so argument lists, parameter
-lists, and constructor fields may span lines:
+A newline **inside parentheses or brackets** is ignored, so argument lists,
+parameter lists, and constructor fields may span lines:
 
 ```neo
 fn add(
@@ -188,11 +188,12 @@ values. It is printed as text by both the interpreter and `neo build`.
 ### Operators and punctuation
 
 ```
-(  )  {  }  ,  :  =  ==  ->  =>
+(  )  [  ]  {  }  ,  :  =  ==  ->  =>
 ```
 
-`->` is function-type arrow; `=>` introduces a lambda body or match arm.
-`-` is not valid outside `->`.
+`[` and `]` delimit implicit parameter and argument lists. `->` is
+function-type arrow; `=>` introduces a lambda body or match arm. `-` is not
+valid outside `->`.
 
 ---
 
@@ -202,7 +203,7 @@ A program is a sequence of top-level declarations:
 
 ```neo
 enum Name { ... }
-fn name(...): Result { ... }
+fn name[implicit, ...](parameter, ...): Result { ... }
 ```
 
 Rules:
@@ -240,7 +241,7 @@ Because prelude constructors already occupy names, this is an error:
 fn and(a: Bool, b: Bool): Bool { ... }  // `and` is already defined
 ```
 
-The prelude's `and` is the constructor of `And(P, Q)`. Use another name such
+The prelude's `and` is the constructor of `And[P, Q]`. Use another name such
 as `both`.
 
 ---
@@ -273,13 +274,13 @@ Multiple binders are nested function types.
 
 ```neo
 Nat
-List(Nat)
-Vec(Nat, 2)
+List[Nat]
+Vec[Nat, 2]
 ```
 
-Type arguments in type expressions are explicit. Function calls may omit a
-leading prefix of their arguments; see [argument elision](#argument-elision).
-There are no declared implicit binders.
+Parameters of a type constructor are written in `[]`. A function may declare
+implicit parameters in `[]` and explicit parameters in `()`; calls omit the
+implicit ones by default. See [implicit parameters](#implicit-parameters).
 
 ### Equality types
 
@@ -320,13 +321,14 @@ enum Nat {
 Syntax:
 
 ```
-enum Name(parameters) : Sort {
+enum Name[parameters] : Sort {
   constructor(fields)
   constructor(fields) : ResultType
 }
 ```
 
-- The parameter list is optional.
+- The parameter list is optional and written in `[]`. Parentheses are not
+  accepted; `enum E(A: Type)` is an error.
 - The sort annotation is optional and must be `Prop` or `Type u`. The default
   is `Type 0`.
 - Each constructor is on its own line. A trailing `}` may follow the last
@@ -342,16 +344,19 @@ enum Name(parameters) : Sort {
 Parameters may depend on earlier parameters:
 
 ```neo
-enum Dep(A: Type, x: A) {
+enum Dep[A: Type, x: A] {
   mk(y: A)
 }
 ```
 
-Constructors take the enum parameters first, then their fields. Parameterised
-constructors cannot be inferred from their arguments alone. Given:
+Enum parameters are implicit parameters: they are written in `[]`, and type
+application supplies them in `[]`. Constructors take the enum parameters
+implicitly, then their fields explicitly. Parameterised constructors therefore
+need an expected type; Stage 0 has no explicit constructor type-argument
+syntax.
 
 ```neo
-enum Maybe(T: Type) {
+enum Maybe[T: Type] {
   none
   some(T)
 }
@@ -369,7 +374,7 @@ fn bad(): Nat {
 The expected type must be known:
 
 ```neo
-fn five(): Maybe(Nat) {
+fn five(): Maybe[Nat] {
   some(5)
 }
 
@@ -388,7 +393,7 @@ enum Pair {
   pair(Nat, Bool)          // two unnamed fields
 }
 
-enum Sigma(A: Type, B: fn(x: A) -> Type) {
+enum Sigma[A: Type, B: fn(x: A) -> Type] {
   sigma(x: A, y: B(x))     // `x` is visible in `B(x)`
 }
 ```
@@ -412,12 +417,12 @@ later.
 Named fields and explicit result types let you write indexed types:
 
 ```neo
-enum Vec(T: Type, n: Nat) {
-  vnil : Vec(T, zero)
-  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+enum Vec[T: Type, n: Nat] {
+  vnil : Vec[T, zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
 }
 
-fn two(): Vec(Nat, 2) {
+fn two(): Vec[Nat, 2] {
   vcons(1, 4, vcons(0, 3, vnil))
 }
 ```
@@ -431,21 +436,21 @@ fields and ordinary context parameters that the scrutinee's indices determine.
 Constructors whose result indices cannot match become impossible branches:
 
 ```neo
-enum Vec(T: Type, n: Nat) {
-  vnil : Vec(T, zero)
-  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+enum Vec[T: Type, n: Nat] {
+  vnil : Vec[T, zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
 }
 
-fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
+fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
   match v {
     vcons(m, x, xs) => xs
   }
 }
 ```
 
-The scrutinee `Vec(Nat, succ(n))` cannot be built by `vnil`, so the `vnil` arm
+The scrutinee `Vec[Nat, succ(n)]` cannot be built by `vnil`, so the `vnil` arm
 may be omitted. In the `vcons` branch, the equation `succ(m) == succ(n)`
-refines the field `m` to `n`, so `xs` has type `Vec(Nat, n)`. An arm written for
+refines the field `m` to `n`, so `xs` has type `Vec[Nat, n]`. An arm written for
 an impossible constructor is accepted but never checked, and the generated code
 omits it.
 
@@ -460,17 +465,17 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn length(n: Nat, v: Vec(Nat, n)): Nat {
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
     vnil => zero
-    vcons(m, x, xs) => succ(length(m, xs))
+    vcons(m, x, xs) => succ(length(xs))
   }
 }
 
-fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
     vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
   }
 }
 ```
@@ -485,7 +490,7 @@ Indexed families are still limited:
 - Refinement is first-order. An index that is stuck, such as `pred(n)` where
   `pred` is an ordinary recursive function, cannot be related to a constructor
   and the match is rejected. A cyclic equation is rejected too.
-- A value whose type has a field like `Vec(T, m)` that remains dependent on an
+- A value whose type has a field like `Vec[T, m]` that remains dependent on an
   earlier field cannot be the result of `main`, because it is not printable.
 
 See [`docs/core-spec.md`](core-spec.md) for the exact refinement rule,
@@ -527,12 +532,15 @@ not contain a nested occurrence of the enum being defined. See
 ### Function declarations
 
 ```
-fn name(parameter, ...): ResultType {
+fn name[implicit, ...](parameter, ...): ResultType {
   binding
   ...
   finalExpression
 }
 ```
+
+The bracketed group is optional. Parameters in `[]` are implicit; parameters
+in `()` are explicit.
 
 Example:
 
@@ -545,20 +553,23 @@ fn add(a: Nat, b: Nat): Nat {
 }
 ```
 
-- Parentheses are always required, including for zero parameters:
-  `fn main(): Nat { ... }`.
+- Parentheses are always required for explicit parameters, including when
+  there are none: `fn main(): Nat { ... }`.
 - The body is always a block and must end in an expression. There is no
   `return` keyword.
 - Parameter types and the result type may depend on earlier parameters:
 
 ```neo
-fn replicate(T: Type, n: Nat, x: T): List(T) {
+fn replicate[T: Type](n: Nat, x: T): List[T] {
   match n {
     zero => nil
-    succ(p) => cons(x, replicate(T, p, x))
+    succ(p) => cons(x, replicate(p, x))
   }
 }
 ```
+
+Here `T` is implicit and inferred from `x`; `n` and `x` are explicit
+arguments.
 
 ### Blocks and bindings
 
@@ -601,7 +612,7 @@ fn main(): Nat {
 This works instead:
 
 ```neo
-fn five(): List(Nat) {
+fn five(): List[Nat] {
   cons(5, nil)
 }
 
@@ -613,53 +624,54 @@ fn main(): Nat {
 
 ### Application
 
-Application uses parentheses and commas:
+Application uses parentheses and commas. Implicit arguments use brackets:
 
 ```neo
 add(2, 3)
 f(x, y, z)
-id(Nat, 4)          // type arguments are explicit
+id(4)               // T inferred from the argument
+id[Nat](4)          // T supplied explicitly
 ```
 
 - Application is left-associative: `f(a)(b)` applies `f` to `a`, then to `b`.
-- An empty argument list `f()` is accepted and is equivalent to `f`.
-- Type parameters are ordinary parameters; by convention they come first.
+- An empty argument list `f()` is accepted. It may instantiate the function's
+  implicit parameters if the context determines them.
+- A function's `[]` parameters are implicit; its `()` parameters are explicit.
 
-### Argument elision
+### Implicit parameters
 
-A call may omit a **leading prefix** of the function's parameters. The
-elaborator fills those arguments with metavariables and solves them from the
+A parameter written in `[]` is **implicit**. Calls omit implicit parameters by
+default; the elaborator fills them with metavariables and solves them from the
 types of the supplied arguments and from the expected result type:
 
 ```neo
-fn length(n: Nat, v: Vec(Nat, n)): Nat
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat
 
-length(v)                 // n inferred from v
-append(xs, ys)            // both lengths inferred
-map(inc, xs)              // type parameters inferred from inc and xs
+length(v)                 // T and n inferred from v
+append(xs, ys)            // T, n, and m inferred
+map(inc, xs)              // T and U inferred from inc and xs
 ```
 
-Declarations do not change, and there are no implicit binder markers.
-Explicit calls keep working:
+To supply implicit arguments explicitly, use brackets:
 
 ```neo
-length(2, v)
-append(2, 1, xs, ys)
+length[Nat, 2](v)
+append[Nat, 1, 2](xs, ys)
 ```
+
+A bracket list may supply a prefix of the implicit parameters; any remaining
+implicit parameters are still inferred.
 
 Rules:
 
-- Elision applies only to a leading prefix. A middle argument cannot be
-  skipped.
-- The ordinary, more explicit interpretation is tried first. Elision is used
-  only when that interpretation does not typecheck.
-- Every omitted argument must be determined by the remaining arguments or the
-  expected type. Otherwise the program is rejected and the argument must be
-  passed explicitly.
-- Only first-order solutions are attempted. An omitted argument whose value
+- Only parameters declared in `[]` can be omitted. A parameter declared in
+  `()` must always be supplied; it can never be skipped.
+- Every omitted implicit parameter must be determined by the remaining
+  arguments or the expected type. Otherwise the program is rejected.
+- Only first-order solutions are attempted. An implicit parameter whose value
   would be an applied function is rejected.
-- Elision is elaboration sugar. Core terms still contain every argument, so the
-  kernel and code generator are unchanged.
+- Implicit parameters are elaboration sugar. Core terms still contain every
+  argument, so the kernel and code generator are unchanged.
 
 There is no infix arithmetic. Define functions such as `add` and `mul`
 yourself.
@@ -668,18 +680,24 @@ yourself.
 
 ```neo
 fn(x: Nat) -> Nat
-fn(T: Type, x: T) -> T
+fn[T: Type](x: T) -> T
+fn(x: Nat, y: Nat) -> Nat
 ```
 
-A binder name may be omitted: `fn(Nat) -> Nat`.
+A binder group in `[]` is implicit and a group in `()` is explicit. A binder
+name may be omitted: `fn(Nat) -> Nat` or `fn[Type](x: x) -> x`.
 
 ### Lambdas
 
 ```neo
 fn(x: Nat) => succ(x)
-fn(a: Type, x: a) => x
+fn[T: Type](x: T) => x
+fn(a: Nat, b: Nat) => add(a, b)
 fn(Nat) => zero
 ```
+
+A lambda may bind implicit parameters with `[]`; calls to the resulting
+function infer them just like calls to a named declaration.
 
 Lambdas capture their free variables by value. They are first-class values:
 
@@ -787,7 +805,7 @@ fn classify(n: Nat): Nat {
 Multiple arms for one constructor are allowed and checked in order:
 
 ```neo
-fn small(xs: List(Nat)): Nat {
+fn small(xs: List[Nat]): Nat {
   match xs {
     nil => zero
     cons(zero, rest) => zero
@@ -838,7 +856,7 @@ A match on a proof of `x == y` is special. It takes exactly one arm, whose
 pattern is `refl` or `_`:
 
 ```neo
-fn sym(T: Type, x: T, y: T, p: x == y): y == x {
+fn sym[T: Type](x: T, y: T, p: x == y): y == x {
   match p {
     refl => refl
   }
@@ -921,7 +939,7 @@ fn add(a: Nat, b: Nat): Nat {
 fn add_zero(a: Nat): add(a, zero) == a {
   match a {
     zero => refl
-    succ(p) => match sym(Nat, add(p, zero), p, add_zero(p)) {
+    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
       refl => refl
     }
   }
@@ -1056,17 +1074,17 @@ successfully.
 Every enum must be strictly positive. For each constructor field type, the
 enum being defined:
 
-- may occur **directly**: `T`, `List(T)`, `Vec(T, n)`;
+- may occur **directly**: `T`, `List[T]`, `Vec[T, n]`;
 - may not occur to the left of an arrow: `fn(x: T) -> Nat`;
 - may not occur as an argument of another type constructor:
-  `List(T)` inside `T`'s own definition is a nested inductive and is rejected;
+  `List[T]` inside `T`'s own definition is a nested inductive and is rejected;
 - may not be hidden inside an application or match.
 
 Rejected:
 
 ```neo
 enum Bad {
-  bad(List(Bad))            // nested inductive
+  bad(List[Bad])            // nested inductive
 }
 
 enum Negative {
@@ -1084,8 +1102,8 @@ The same applies to constructor result indices. The enum being defined may not
 occur anywhere inside them, so this is rejected as well:
 
 ```neo
-enum Bad(F: Type 1) : Type 1 {
-  mk(g: F) : Bad(fn(x: Bad(F)) -> Type 0)
+enum Bad[F: Type 1] : Type 1 {
+  mk(g: F) : Bad[fn(x: Bad[F]) -> Type 0]
 }
 ```
 
@@ -1094,7 +1112,7 @@ enum Bad(F: Type 1) : Type 1 {
 ```
 
 ```neo
-enum E(A: Type 1) : Type 0 {
+enum E[A: Type 1] : Type 0 {
   c(x: A)                  // rejected: a `Type 1` field in a `Type 0` enum
 }
 ```
@@ -1109,7 +1127,7 @@ For an enum declared at `Type u`, every constructor field type and index type
 must live in a sort at most `Type u`. Fields may not be larger than the enum:
 
 ```neo
-enum E(A: Type 1) : Type 0 {
+enum E[A: Type 1] : Type 0 {
   c(x: A)                  // rejected: a `Type 1` field in a `Type 0` enum
 }
 ```
@@ -1147,9 +1165,9 @@ enum String {
   str_cons(Nat, String)
 }
 
-enum List(T: Type) {
+enum List[T: Type] {
   nil
-  cons(T, List(T))
+  cons(T, List[T])
 }
 
 enum False : Prop {
@@ -1159,16 +1177,16 @@ enum True : Prop {
   trivial
 }
 
-enum And(P: Prop, Q: Prop) : Prop {
+enum And[P: Prop, Q: Prop] : Prop {
   and(P, Q)
 }
 
-enum Or(P: Prop, Q: Prop) : Prop {
+enum Or[P: Prop, Q: Prop] : Prop {
   or_left(P)
   or_right(Q)
 }
 
-enum Exists(T: Type, P: fn(x: T) -> Prop) : Prop {
+enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
   exists(x: T, P(x))
 }
 ```
@@ -1185,7 +1203,7 @@ Notes:
 
 - `Nat` numerals desugar to `zero` and `succ`.
 - String literals desugar to `str_nil` and `str_cons`; each byte is a `Nat`.
-- `List` is `List(T)`, not a built-in vector; it is a linked list.
+- `List` is `List[T]`, not a built-in vector; it is a linked list.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
   conjunction function; name it `both` instead.
@@ -1213,21 +1231,21 @@ A type is printable when it is:
 - an enum whose type arguments are printable and whose constructor field types
   are all printable.
 
-This includes ordinary parameterised enums such as `List(Nat)` and a
-user-defined `Maybe(Nat)`, and proposition enums with printable fields such as
+This includes ordinary parameterised enums such as `List[Nat]` and a
+user-defined `Maybe[Nat]`, and proposition enums with printable fields such as
 `True`. The following are **not** printable:
 
 - function types;
 - `Type` and `Prop`;
 - equality types such as `x == y`;
 - enums with a field whose type is a type family applied to an earlier field,
-  such as `Vec(T, m)` in the indexed `Vec` example.
+  such as `Vec[T, m]` in the indexed `Vec` example.
 
 A program whose `main` result is not printable is rejected by both the
 interpreter and `neo build`:
 
 ```
-the result type of `main` is not printable: `Vec(Nat, 2)`
+the result type of `main` is not printable: `Vec[Nat, 2]`
 ```
 
 A `main` returning a function type is currently reported as
@@ -1238,8 +1256,8 @@ A `main` returning a function type is currently reported as
 Values print with surface constructor names and without type parameters:
 
 ```neo
-cons(2, cons(1, cons(0, nil)))     // List(Nat)
-cons(5, nil)                       // List(Nat)
+cons(2, cons(1, cons(0, nil)))     // List[Nat]
+cons(5, nil)                       // List[Nat]
 pair(4, true)
 unit
 true
@@ -1328,7 +1346,7 @@ Display limits: the REPL prints data values (constructors, `Nat`, `Type`,
 
 - function values or function types;
 - equality proofs (for example, a proof of `2 == 2` cannot be displayed);
-- bare type constructors other than `Nat`, e.g. `List(Nat)`.
+- bare type constructors other than `Nat`, e.g. `List[Nat]`.
 
 REPL errors are printed and the session continues. The REPL does not require a
 `main` function.
@@ -1344,12 +1362,12 @@ program      ::= { NEWLINE } { decl { NEWLINE } }
 
 decl         ::= enum_decl | fn_decl
 
-enum_decl    ::= "enum" IDENT [ "(" params ")" ]
+enum_decl    ::= "enum" IDENT [ "[" params "]" ]
                  [ ":" expr ]
                  "{" { NEWLINE } { ctor NEWLINE } "}"
 ctor         ::= IDENT [ "(" fields ")" ] [ ":" expr ]
 
-fn_decl      ::= "fn" IDENT "(" params ")" ":" expr block
+fn_decl      ::= "fn" IDENT [ "[" params "]" ] "(" params ")" ":" expr block
 
 params       ::= [ param { "," param } ]
 param        ::= IDENT ":" expr
@@ -1362,12 +1380,12 @@ binding      ::= IDENT "=" expr
 
 expr         ::= fn_expr | eq_expr
 
-fn_expr      ::= "fn" "(" binders ")" ( "->" expr | "=>" expr )
+fn_expr      ::= "fn" [ "[" binders "]" ] "(" binders ")" ( "->" expr | "=>" expr )
 binders      ::= [ binder { "," binder } ]
 binder       ::= [ IDENT ":" ] expr
 
 eq_expr      ::= app { "==" app }
-app          ::= atom { "(" args ")" }
+app          ::= atom { ( "[" args "]" | "(" args ")" ) }
 args         ::= [ expr { "," expr } ]
 
 atom         ::= IDENT
@@ -1396,6 +1414,9 @@ Notes:
 - A bare `refl` name is parsed as the `refl` expression.
 - A lone identifier in a pattern is a binder unless it names a nullary
   constructor of the scrutinee's enum.
+- `[` and `]` delimit implicit parameter and argument lists. An empty `[]`
+  list is rejected.
+- Newlines inside `[...]` are ignored, just like newlines inside `(...)`.
 
 ---
 
@@ -1423,7 +1444,11 @@ Common messages:
 | `unknown name ...` | Name is undeclared or declared later. |
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
-| `cannot infer omitted argument of type ...; pass it explicitly` | An elided leading argument is not determined by the rest of the call. |
+| `cannot infer implicit argument of type ...; pass it explicitly with [...]` | An implicit argument is not determined by the rest of the call. |
+| `an implicit parameter list cannot be empty` / `an implicit argument list cannot be empty` | Remove the `[]` or add an entry. |
+| `enum parameters must be written in [], not ()` | Enum parameters are implicit and use `[]`. |
+| `the parameters of ... are written in [], not ()` | A type constructor was applied with `()`. |
+| `constructor type arguments are inferred from the expected type; remove the [...] arguments` | Constructors do not accept explicit bracket arguments in Stage 0. |
 | `match is not exhaustive: missing constructor ...` | Add the missing arm. |
 | `cannot infer the result type of a match on an empty enum; add an expected type` | Empty enums are eliminated with zero arms, but need a known result type. |
 | `match: cannot eliminate this proposition into a type` | Large elimination of a `Prop` enum was attempted. |
@@ -1447,11 +1472,11 @@ The following are **not** part of Stage 0, even if they appear in the long-term
 design:
 
 - references and ownership modes: `&T`, `&mut T`, `own T`;
-- arrays and growable vectors: the planned `Array(T, n)` and `Vec(T)`. (The
+- arrays and growable vectors: the planned `Array[T, n]` and `Vec[T]`. (The
   indexed `Vec` in [section 6](#6-enums) is a user-defined demonstration, not
   the planned growable vector.)
-- declared implicit binders, traits, or type classes. Leading arguments can be
-  inferred at calls; see [argument elision](#argument-elision);
+- traits or type classes. Implicit parameters are declared with `[]` and
+  inferred at calls; see [implicit parameters](#implicit-parameters);
 - modules, imports, namespaces, or multiple files;
 - characters, floats, and general I/O;
 - built-in arithmetic or other infix operators;
@@ -1467,7 +1492,7 @@ design:
   `case`, and `induction`. Use `fn`, block bindings, `fn(...) => ...`, and
   `match` instead.
 
-`main` result types with a field like `Vec(T, m)` that stays dependent on an
+`main` result types with a field like `Vec[T, m]` that stays dependent on an
 earlier field are also not buildable, because they are not printable.
 
 ---
@@ -1534,22 +1559,22 @@ Output: `true`.
 `examples/list.neo`:
 
 ```neo
-fn append(T: Type, xs: List(T), ys: List(T)): List(T) {
+fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   match xs {
     nil => ys
-    cons(h, t) => cons(h, append(T, t, ys))
+    cons(h, t) => cons(h, append(t, ys))
   }
 }
 
-fn range(n: Nat): List(Nat) {
+fn range(n: Nat): List[Nat] {
   match n {
     zero => nil
     succ(p) => cons(p, range(p))
   }
 }
 
-fn main(): List(Nat) {
-  append(Nat, range(3), range(2))
+fn main(): List[Nat] {
+  append(range(3), range(2))
 }
 ```
 
@@ -1611,7 +1636,7 @@ With `main` returning `area(rect(3, 4))`, the output is `12`.
 fn add_zero(a: Nat): add(a, zero) == a {
   match a {
     zero => refl
-    succ(p) => match sym(Nat, add(p, zero), p, add_zero(p)) {
+    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
       refl => refl
     }
   }
@@ -1630,9 +1655,9 @@ Output: `7`. The proof is checked and erased.
 `examples/indexed_vec.neo`:
 
 ```neo
-enum Vec(T: Type, n: Nat) {
-  vnil : Vec(T, zero)
-  vcons(m: Nat, x: T, xs: Vec(T, m)) : Vec(T, succ(m))
+enum Vec[T: Type, n: Nat] {
+  vnil : Vec[T, zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -1642,50 +1667,50 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn length(n: Nat, v: Vec(Nat, n)): Nat {
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
     vnil => zero
-    vcons(m, x, xs) => succ(length(m, xs))
+    vcons(m, x, xs) => succ(length(xs))
   }
 }
 
-fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
     vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
   }
 }
 
-fn two(): Vec(Nat, 2) {
+fn two(): Vec[Nat, 2] {
   vcons(1, 4, vcons(0, 3, vnil))
 }
 
-fn three(): Vec(Nat, 3) {
-  append(2, 1, two(), vcons(0, 7, vnil))
+fn three(): Vec[Nat, 3] {
+  append(two(), vcons(0, 7, vnil))
 }
 
 fn main(): Nat {
-  length(3, three())
+  length(three())
 }
 ```
 
 The REPL can display `two()` as `vcons(1, 4, vcons(0, 3, vnil))`. The program
 builds because `main` returns `Nat`; a `main` returning `Vec` itself is not
-printable. `length` matches on a bare index `n`; refinement learns `n` is `zero`
-or `succ(m)` in the two branches, which is what makes the recursive call
-`length(m, xs)` well typed. `append` learns `n := succ(k)` in its `vcons`
-branch. Output: `3`.
+printable. `length` matches on its implicit index `n`; refinement learns `n` is
+`zero` or `succ(m)` in the two branches, which is what makes the recursive call
+`length(xs)` well typed. `append` learns `n := succ(k)` in its `vcons` branch.
+Output: `3`.
 
 `examples/indexed_match.neo` shows branch-field refinement:
 
 ```neo
-fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+fn head[T: Type, n: Nat](v: Vec[T, succ(n)]): T {
   match v {
     vcons(m, x, xs) => x
   }
 }
 
-fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
+fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
   match v {
     vcons(m, x, xs) => xs
   }
@@ -1693,8 +1718,8 @@ fn tail(n: Nat, v: Vec(Nat, succ(n))): Vec(Nat, n) {
 ```
 
 The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
-The `m` field is refined to `n`, which gives `xs` the type `Vec(Nat, n)`. With
-`main` returning `head(1, vcons(1, 4, vcons(0, 3, vnil)))`, the output is `4`.
+The `m` field is refined to `n`, which gives `xs` the type `Vec[Nat, n]`. With
+`main` returning `head(vcons(1, 4, vcons(0, 3, vnil)))`, the output is `4`.
 
 `examples/pattern_matching.neo` shows nested patterns and multiple arms for one
 constructor:
@@ -1718,17 +1743,17 @@ The nested `node(a, b)` pattern exposes the inner subtree's fields, and
 recursion on `a`, `b`, and `r` is accepted because all three are structural
 subterms of `t`. Output: `4`.
 
-`examples/argument_elision.neo` shows inferred leading arguments:
+`examples/argument_elision.neo` shows inferred implicit arguments:
 
 ```neo
-fn length(n: Nat, v: Vec(Nat, n)): Nat {
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
     vnil => zero
     vcons(m, x, xs) => succ(length(xs))
   }
 }
 
-fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
     vnil => ys
     vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
@@ -1740,10 +1765,10 @@ fn main(): Nat {
 }
 ```
 
-The recursive calls `length(xs)` and `append(tail, ys)` omit their length
-arguments. The outer calls need no annotations either: the lengths of `v1()`
-and `v2()` determine the arguments to `append`, and the expected `Nat` plus the
-remaining arguments determine the argument to `length`. Output: `3`.
+The recursive calls `length(xs)` and `append(tail, ys)` omit their implicit
+arguments. The outer calls need no annotations either: the types of `v1()` and
+`v2()` determine the arguments to `append`, and the expected `Nat` plus the
+remaining arguments determine the arguments to `length`. Output: `3`.
 
 `examples/strings.neo` prints a string:
 

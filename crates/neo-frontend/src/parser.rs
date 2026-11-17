@@ -59,11 +59,17 @@ impl Parser {
         let span = self.peek().span;
         self.expect(&Tok::Enum, "expected `enum`")?;
         let name = self.expect_ident("expected enum name")?;
-        let params = if self.at(&Tok::LParen) {
-            self.parse_params()?
+        let params = if self.at(&Tok::LBracket) {
+            self.parse_params(Tok::LBracket, Tok::RBracket, true)?
         } else {
             Vec::new()
         };
+        if self.at(&Tok::LParen) {
+            return Err(Error::at(
+                self.peek().span,
+                "enum parameters must be written in `[]`, not `()`",
+            ));
+        }
         let sort = if self.at(&Tok::Colon) {
             self.advance();
             self.skip_newlines();
@@ -127,7 +133,11 @@ impl Parser {
         let span = self.peek().span;
         self.expect(&Tok::Fn, "expected `fn`")?;
         let name = self.expect_ident("expected function name")?;
-        let params = self.parse_params()?;
+        let mut params = Vec::new();
+        if self.at(&Tok::LBracket) {
+            params.extend(self.parse_params(Tok::LBracket, Tok::RBracket, true)?);
+        }
+        params.extend(self.parse_params(Tok::LParen, Tok::RParen, false)?);
         self.expect(&Tok::Colon, "expected `:` after function parameters")?;
         self.skip_newlines();
         let ret = self.parse_expr()?;
@@ -142,11 +152,17 @@ impl Parser {
         })
     }
 
-    fn parse_params(&mut self) -> Result<Vec<Param>> {
-        self.expect(&Tok::LParen, "expected `(`")?;
+    fn parse_params(&mut self, open: Tok, close: Tok, implicit: bool) -> Result<Vec<Param>> {
+        self.expect(&open, "expected a parameter list")?;
         let mut params = Vec::new();
-        if self.at(&Tok::RParen) {
+        if self.at(&close) {
             self.advance();
+            if implicit && params.is_empty() {
+                return Err(Error::at(
+                    self.peek().span,
+                    "an implicit parameter list cannot be empty",
+                ));
+            }
             return Ok(params);
         }
         loop {
@@ -155,13 +171,18 @@ impl Parser {
             self.expect(&Tok::Colon, "expected `:` after parameter name")?;
             self.skip_newlines();
             let ty = self.parse_expr()?;
-            params.push(Param { name, ty, span });
+            params.push(Param {
+                name,
+                ty,
+                span,
+                implicit,
+            });
             if self.at(&Tok::Comma) {
                 self.advance();
                 self.skip_newlines();
                 continue;
             }
-            self.expect(&Tok::RParen, "expected `)` after parameters")?;
+            self.expect(&close, "expected the end of the parameter list")?;
             break;
         }
         Ok(params)
@@ -272,42 +293,11 @@ impl Parser {
     fn parse_fn_expr(&mut self) -> Result<Expr> {
         let span = self.peek().span;
         self.expect(&Tok::Fn, "expected `fn`")?;
-        self.expect(&Tok::LParen, "expected `(` after `fn`")?;
         let mut binders = Vec::new();
-        if self.at(&Tok::RParen) {
-            self.advance();
-        } else {
-            loop {
-                let bspan = self.peek().span;
-                let named = matches!(self.peek().tok, Tok::Ident(_))
-                    && matches!(self.peek2().tok, Tok::Colon);
-                if named {
-                    let name = self.expect_ident("expected binder name")?;
-                    self.expect(&Tok::Colon, "expected `:` after binder name")?;
-                    self.skip_newlines();
-                    let ty = self.parse_expr()?;
-                    binders.push(Binder {
-                        name: Some(name),
-                        ty,
-                        span: bspan,
-                    });
-                } else {
-                    let ty = self.parse_expr()?;
-                    binders.push(Binder {
-                        name: None,
-                        ty,
-                        span: bspan,
-                    });
-                }
-                if self.at(&Tok::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                    continue;
-                }
-                self.expect(&Tok::RParen, "expected `)` after binders")?;
-                break;
-            }
+        if self.at(&Tok::LBracket) {
+            binders.extend(self.parse_binders(Tok::LBracket, Tok::RBracket, true)?);
         }
+        binders.extend(self.parse_binders(Tok::LParen, Tok::RParen, false)?);
         if self.at(&Tok::Arrow) {
             self.advance();
             self.skip_newlines();
@@ -326,6 +316,54 @@ impl Parser {
         }
     }
 
+    fn parse_binders(&mut self, open: Tok, close: Tok, implicit: bool) -> Result<Vec<Binder>> {
+        self.expect(&open, "expected a binder list")?;
+        let mut binders = Vec::new();
+        if self.at(&close) {
+            self.advance();
+            if implicit {
+                return Err(Error::at(
+                    self.peek().span,
+                    "an implicit binder list cannot be empty",
+                ));
+            }
+            return Ok(binders);
+        }
+        loop {
+            let bspan = self.peek().span;
+            let named =
+                matches!(self.peek().tok, Tok::Ident(_)) && matches!(self.peek2().tok, Tok::Colon);
+            if named {
+                let name = self.expect_ident("expected binder name")?;
+                self.expect(&Tok::Colon, "expected `:` after binder name")?;
+                self.skip_newlines();
+                let ty = self.parse_expr()?;
+                binders.push(Binder {
+                    name: Some(name),
+                    ty,
+                    span: bspan,
+                    implicit,
+                });
+            } else {
+                let ty = self.parse_expr()?;
+                binders.push(Binder {
+                    name: None,
+                    ty,
+                    span: bspan,
+                    implicit,
+                });
+            }
+            if self.at(&Tok::Comma) {
+                self.advance();
+                self.skip_newlines();
+                continue;
+            }
+            self.expect(&close, "expected the end of the binder list")?;
+            break;
+        }
+        Ok(binders)
+    }
+
     fn parse_eq(&mut self) -> Result<Expr> {
         let mut lhs = self.parse_app()?;
         while self.at(&Tok::EqEq) {
@@ -340,27 +378,58 @@ impl Parser {
 
     fn parse_app(&mut self) -> Result<Expr> {
         let mut f = self.parse_atom()?;
-        while self.at(&Tok::LParen) {
+        while self.at(&Tok::LBracket) || self.at(&Tok::LParen) {
             let span = self.peek().span;
-            self.advance();
-            let mut args = Vec::new();
-            if self.at(&Tok::RParen) {
-                self.advance();
+            if self.at(&Tok::LBracket) {
+                let implicit = self.parse_args(Tok::LBracket, Tok::RBracket, true)?;
+                let args = if self.at(&Tok::LParen) {
+                    self.parse_args(Tok::LParen, Tok::RParen, false)?
+                } else {
+                    Vec::new()
+                };
+                f = Expr::App {
+                    f: Box::new(f),
+                    implicit,
+                    args,
+                    span,
+                };
             } else {
-                loop {
-                    args.push(self.parse_expr()?);
-                    if self.at(&Tok::Comma) {
-                        self.advance();
-                        self.skip_newlines();
-                        continue;
-                    }
-                    self.expect(&Tok::RParen, "expected `)` after arguments")?;
-                    break;
-                }
+                let args = self.parse_args(Tok::LParen, Tok::RParen, false)?;
+                f = Expr::App {
+                    f: Box::new(f),
+                    implicit: Vec::new(),
+                    args,
+                    span,
+                };
             }
-            f = Expr::App(Box::new(f), args, span);
         }
         Ok(f)
+    }
+
+    fn parse_args(&mut self, open: Tok, close: Tok, implicit: bool) -> Result<Vec<Expr>> {
+        self.expect(&open, "expected an argument list")?;
+        let mut args = Vec::new();
+        if self.at(&close) {
+            self.advance();
+            if implicit {
+                return Err(Error::at(
+                    self.peek().span,
+                    "an implicit argument list cannot be empty",
+                ));
+            }
+            return Ok(args);
+        }
+        loop {
+            args.push(self.parse_expr()?);
+            if self.at(&Tok::Comma) {
+                self.advance();
+                self.skip_newlines();
+                continue;
+            }
+            self.expect(&close, "expected the end of the argument list")?;
+            break;
+        }
+        Ok(args)
     }
 
     fn parse_atom(&mut self) -> Result<Expr> {

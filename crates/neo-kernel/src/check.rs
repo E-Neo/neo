@@ -76,7 +76,7 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
         }
         Type(u) => Ok(vtype(u + 1)),
         Prop => Ok(vtype(0)),
-        Pi { dom, cod, name } => {
+        Pi { dom, cod, name, .. } => {
             let dom_sort = infer_sort(globals, ctx, dom)?;
             let dom_v = eval(globals, &ctx.env, dom);
             ctx.push(name.clone(), dom_v);
@@ -105,13 +105,14 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
                     env: outer_env,
                     body: cod_tm,
                 },
+                false,
             ))
         }
         App(f, a) => {
             let f_ty = infer(globals, ctx, f)?;
             let f_ty = force(globals, f_ty);
             let (dom, closure) = match &*f_ty {
-                Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+                Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
                 _ => return Err(Error::new("function application: expected a function")),
             };
             check(globals, ctx, a, &dom)?;
@@ -154,7 +155,7 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
             for arg in args {
                 let ty_f = force(globals, ty);
                 match &*ty_f {
-                    Val::Pi(dom, closure) => {
+                    Val::Pi(dom, closure, _) => {
                         check(globals, ctx, arg, dom)?;
                         let av = eval(globals, &ctx.env, arg);
                         ty = eval_closure(globals, closure, av);
@@ -217,7 +218,7 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
             let motive_ty = infer(globals, ctx, motive)?;
             let motive_ty = force(globals, motive_ty);
             let motive_dom = match &*motive_ty {
-                Val::Pi(dom, _) => dom.clone(),
+                Val::Pi(dom, _, _) => dom.clone(),
                 _ => {
                     return Err(Error::new("equality elimination: motive is not a function"));
                 }
@@ -286,7 +287,7 @@ pub fn refine_ctor(
     for j in 0..ctor.num_fields {
         let ft = force(globals, field_ty);
         let (dom, closure) = match &*ft {
-            Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+            Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
             _ => return Err(Error::new("match: constructor field mismatch")),
         };
         let level = temp.level();
@@ -665,7 +666,7 @@ fn infer_match(
     let motive_ty = infer(globals, ctx, motive)?;
     let motive_ty = force(globals, motive_ty);
     let motive_dom = match &*motive_ty {
-        Val::Pi(dom, _) => dom.clone(),
+        Val::Pi(dom, _, _) => dom.clone(),
         _ => return Err(Error::new("match: motive is not a function")),
     };
     if !conv(globals, ctx.level(), &motive_dom, &scrut_ty) {
@@ -678,7 +679,7 @@ fn infer_match(
     // singleton-eliminable may only be eliminated into `Prop`.
     if info.sort == Sort::Prop
         && !info.prop_eliminable
-        && let Val::Pi(dom, _) = &*motive_ty
+        && let Val::Pi(dom, _, _) = &*motive_ty
     {
         let created = ctx.push("_motive", dom.clone());
         let applied = crate::core::app(motive.clone(), crate::core::var(0));
@@ -780,7 +781,7 @@ pub fn check(globals: &Globals, ctx: &mut Ctx, tm: &RcTm, expected: &V) -> Resul
         Lam { name, dom, body } => {
             let expected = force(globals, expected.clone());
             let (dom_v, closure) = match &*expected {
-                Val::Pi(dom, closure) => (dom.clone(), closure.clone()),
+                Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
                 _ => return Err(Error::new("lambda: expected a function type")),
             };
             infer_sort(globals, ctx, dom)?;
@@ -836,7 +837,7 @@ pub fn sort_of_val_in(globals: &Globals, ctx: &Ctx, v: &V) -> Result<Sort> {
             .sort_of_enum(name)
             .ok_or_else(|| Error::new(format!("unknown enum `{}`", name))),
         Val::Eq(_, _, _) => Ok(Sort::Prop),
-        Val::Pi(dom, closure) => {
+        Val::Pi(dom, closure, _) => {
             let dom_sort = sort_of_val_in(globals, ctx, dom)?;
             let mut inner = ctx.clone();
             let fresh = inner.push("_", dom.clone());
@@ -867,7 +868,7 @@ fn neutral_type_in(globals: &Globals, ctx: &Ctx, n: &Neutral) -> Result<V> {
             let f_ty = neutral_type_in(globals, ctx, f)?;
             let f_ty = force(globals, f_ty);
             match &*f_ty {
-                Val::Pi(_, closure) => Ok(eval_closure(globals, closure, a.clone())),
+                Val::Pi(_, closure, _) => Ok(eval_closure(globals, closure, a.clone())),
                 _ => Err(Error::new("expected a type")),
             }
         }

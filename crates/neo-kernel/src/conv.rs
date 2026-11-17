@@ -8,7 +8,7 @@ pub fn conv(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
     match (&*a, &*b) {
         (Val::Type(u), Val::Type(v)) => u == v,
         (Val::Prop, Val::Prop) => true,
-        (Val::Pi(da, ca), Val::Pi(db, cb)) => {
+        (Val::Pi(da, ca, _), Val::Pi(db, cb, _)) => {
             if !conv(globals, level, da, db) {
                 return false;
             }
@@ -73,7 +73,7 @@ pub fn conv_ty(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
     match (&*a, &*b) {
         (Val::Type(u), Val::Type(v)) => u <= v,
         (Val::Prop, Val::Prop) => true,
-        (Val::Pi(da, ca), Val::Pi(db, cb)) => {
+        (Val::Pi(da, ca, _), Val::Pi(db, cb, _)) => {
             if !conv(globals, level, da, db) {
                 return false;
             }

@@ -139,7 +139,7 @@ fn bad(): (fn(x: Type 0) -> Type 1) == (fn(x: Type 1) -> Type 1) {
 fn rejects_type_field_in_small_enum() {
     assert_rejected(
         r#"
-enum E(A: Type 1) : Type 0 {
+enum E[A: Type 1] : Type 0 {
   c(x: A)
 }
 "#,
@@ -151,8 +151,8 @@ enum E(A: Type 1) : Type 0 {
 fn rejects_negative_occurrence_in_constructor_index() {
     assert_rejected(
         r#"
-enum Bad(F: Type 1) : Type 1 {
-  mk(g: F) : Bad(fn(x: Bad(F)) -> Type 0)
+enum Bad[F: Type 1] : Type 1 {
+  mk(g: F) : Bad[fn(x: Bad[F]) -> Type 0]
 }
 "#,
         "result index",
@@ -163,9 +163,9 @@ enum Bad(F: Type 1) : Type 1 {
 fn accepts_indexed_vec() {
     elaborate_ok(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 "#,
     );
@@ -175,15 +175,15 @@ enum Vec(A: Type, n: Nat) {
 fn accepts_indexed_length() {
     elaborate_ok(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
-fn length(n: Nat, v: Vec(Nat, n)): Nat {
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
     vnil => zero
-    vcons(m, x, xs) => succ(length(m, xs))
+    vcons(m, x, xs) => succ(length(xs))
   }
 }
 "#,
@@ -194,9 +194,9 @@ fn length(n: Nat, v: Vec(Nat, n)): Nat {
 fn accepts_indexed_append() {
     elaborate_ok(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -206,10 +206,10 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m)) {
+fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
     vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(k, m, tail, ys))
+    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
   }
 }
 "#,
@@ -220,15 +220,15 @@ fn append(n: Nat, m: Nat, xs: Vec(Nat, n), ys: Vec(Nat, m)): Vec(Nat, add(n, m))
 fn accepts_fin_elimination() {
     elaborate_ok(
         r#"
-enum Fin(n: Nat) {
-  fzero(m: Nat) : Fin(succ(m))
-  fsucc(m: Nat, f: Fin(m)) : Fin(succ(m))
+enum Fin[n: Nat] {
+  fzero(m: Nat) : Fin[succ(m)]
+  fsucc(m: Nat, f: Fin[m]) : Fin[succ(m)]
 }
 
-fn fin_to_nat(n: Nat, f: Fin(n)): Nat {
+fn fin_to_nat[n: Nat](f: Fin[n]): Nat {
   match f {
     fzero(m) => zero
-    fsucc(m, g) => succ(fin_to_nat(m, g))
+    fsucc(m, g) => succ(fin_to_nat(g))
   }
 }
 "#,
@@ -239,12 +239,12 @@ fn fin_to_nat(n: Nat, f: Fin(n)): Nat {
 fn accepts_impossible_branch_with_unchecked_body() {
     elaborate_ok(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
-fn head(n: Nat, v: Vec(Nat, succ(n))): Nat {
+fn head[T: Type, n: Nat](v: Vec[T, succ(n)]): T {
   match v {
     vnil => False
     vcons(m, x, xs) => x
@@ -267,7 +267,7 @@ fn classify(n: Nat): Nat {
   }
 }
 
-fn heads(xs: List(Nat)): Nat {
+fn heads(xs: List[Nat]): Nat {
   match xs {
     nil => zero
     cons(zero, rest) => zero
@@ -280,22 +280,22 @@ fn heads(xs: List(Nat)): Nat {
 }
 
 #[test]
-fn accepts_elided_leading_arguments() {
+fn accepts_implicit_arguments() {
     elaborate_ok(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
-fn length(n: Nat, v: Vec(Nat, n)): Nat {
+fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
     vnil => zero
     vcons(m, x, xs) => succ(length(xs))
   }
 }
 
-fn v2(): Vec(Nat, 2) {
+fn v2(): Vec[Nat, 2] {
   vcons(1, 20, vcons(0, 30, vnil))
 }
 
@@ -307,10 +307,10 @@ fn main(): Nat {
 }
 
 #[test]
-fn rejects_uninferable_elided_argument() {
+fn rejects_uninferable_implicit_argument() {
     assert_rejected(
         r#"
-fn constant(T: Type, n: Nat): Nat {
+fn constant[T: Type](n: Nat): Nat {
   n
 }
 
@@ -318,7 +318,81 @@ fn bad(): Nat {
   constant(3)
 }
 "#,
-        "cannot infer omitted argument",
+        "cannot infer implicit argument",
+    );
+}
+
+#[test]
+fn rejects_empty_implicit_parameter_list() {
+    let err = parse_source(
+        r#"
+fn bad[](): Nat {
+  0
+}
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        err.message
+            .contains("implicit parameter list cannot be empty"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
+fn rejects_enum_parameters_in_parentheses() {
+    assert_rejected(
+        r#"
+fn bad(): List(Nat) {
+  nil
+}
+"#,
+        "written in `[]`",
+    );
+}
+
+#[test]
+fn rejects_implicit_argument_on_explicit_parameter() {
+    assert_rejected(
+        r#"
+fn id(x: Nat): Nat {
+  x
+}
+
+fn bad(): Nat {
+  id[Nat](4)
+}
+"#,
+        "no implicit parameter",
+    );
+}
+
+#[test]
+fn rejects_constructor_bracket_arguments() {
+    assert_rejected(
+        r#"
+fn bad(): List[Nat] {
+  cons[Nat](1, nil)
+}
+"#,
+        "constructor type arguments are inferred",
+    );
+}
+
+#[test]
+fn rejects_too_many_implicit_arguments() {
+    assert_rejected(
+        r#"
+fn id[T: Type](x: T): T {
+  x
+}
+
+fn bad(): Nat {
+  id[Nat, Nat](4)
+}
+"#,
+        "too many implicit arguments",
     );
 }
 
@@ -356,11 +430,11 @@ fn bad(n: Nat): Nat {
 fn rejects_cyclic_index_refinement() {
     assert_rejected(
         r#"
-enum T(a: Nat, b: Nat) {
-  c(m: Nat) : T(m, succ(m))
+enum T[a: Nat, b: Nat] {
+  c(m: Nat) : T[m, succ(m)]
 }
 
-fn bad(n: Nat, x: T(succ(n), n)): Nat {
+fn bad[n: Nat](x: T[succ(n), n]): Nat {
   match x {
     c(m) => zero
   }
@@ -381,12 +455,12 @@ fn pred(n: Nat): Nat {
   }
 }
 
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
-fn bad(n: Nat, v: Vec(Nat, pred(n))): Nat {
+fn bad[n: Nat](v: Vec[Nat, pred(n)]): Nat {
   match v {
     vnil => zero
     vcons(m, x, xs) => zero
@@ -401,12 +475,12 @@ fn bad(n: Nat, v: Vec(Nat, pred(n))): Nat {
 fn rejects_missing_reachable_indexed_constructor() {
     assert_rejected(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
-fn bad(v: Vec(Nat, zero)): Nat {
+fn bad(v: Vec[Nat, zero]): Nat {
   match v {
     vcons(m, x, xs) => x
   }
@@ -420,12 +494,12 @@ fn bad(v: Vec(Nat, zero)): Nat {
 fn rejects_indexed_constructor_with_wrong_index() {
     assert_rejected(
         r#"
-enum Vec(A: Type, n: Nat) {
-  vnil : Vec(A, zero)
-  vcons(m: Nat, x: A, xs: Vec(A, m)) : Vec(A, succ(m))
+enum Vec[A: Type, n: Nat] {
+  vnil : Vec[A, zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
 }
 
-fn bad(): Vec(Nat, 1) {
+fn bad(): Vec[Nat, 1] {
   vnil
 }
 "#,

@@ -42,6 +42,11 @@ t, A, B ::=
 The core has **no let-binding**. Surface blocks and variable patterns elaborate
 to `(fn(x: A) => body)(value)`.
 
+A `Pi` term also carries a binder name and an `implicit` boolean. Both are
+metadata: conversion and type checking ignore them. The flag records whether
+the surface binder was written in `[]` so that the elaborator can insert the
+corresponding arguments at call sites.
+
 Branches in a `match` are records:
 
 ```text
@@ -290,7 +295,7 @@ corresponding `s*`. Refinement is deliberately first-order:
   occur in an index (everything except `Prop`-typed evidence and equality
   proofs) together with the constructor's fields.
 - A flexible variable may be solved by any index term, including one that
-  mentions constructor fields. For example, matching `Vec(A, n)` against
+  mentions constructor fields. For example, matching `Vec[A, n]` against
   `vcons` solves the context index `n := succ(m)`.
 - A constructor clash (`zero` against `succ(n)`, two different constructors, or
   two different enum names) means the branch is **impossible**.
@@ -341,9 +346,9 @@ constructor order. If a constructor is reachable and its arm is missing, the
 match is rejected as non-exhaustive.
 
 Refinement is still first-order and conservative. A context index is refined
-only when the equations determine it: matching `Vec(A, n)` works because the
+only when the equations determine it: matching `Vec[A, n]` works because the
 branches force `n := zero` and `n := succ(m)`. An index whose head is stuck, for
-example `Vec(A, pred(n))` where `pred` is an ordinary recursive function, cannot
+example `Vec[A, pred(n)]` where `pred` is an ordinary recursive function, cannot
 be related to `zero` or `succ(...)`, so the match is rejected. `Prop`-typed
 evidence is never solved, because it cannot occur in an index and solving it
 would amount to proof search.
@@ -374,7 +379,8 @@ There is no mutual recursion and no well-founded recursion in Stage 0.
 `conv` is definitional equality on forced values. It is exact:
 
 - `Type u = Type v` iff `u = v`; `Prop = Prop`.
-- Pi types compare domains and codomains under a fresh variable.
+- Pi types compare domains and codomains under a fresh variable; binder names
+  and the `implicit` metadata flag are ignored.
 - Lambdas compare extensionally.
 - Enums and constructors compare name, tag, and arguments exactly.
 - Equality types compare all three components.
@@ -412,7 +418,8 @@ Trusted (must be audited):
 Untrusted (bugs cause rejection or wrong code generation, not a false proof):
 
 - lexer, parser, surface AST;
-- elaborator, argument elision, index inference, and surface `J` construction;
+- elaborator, implicit-argument insertion, index inference, and surface `J`
+  construction;
 - pretty printer and REPL;
 - WASM code generation;
 - the CLI.
