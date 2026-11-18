@@ -1,0 +1,7 @@
+fn loop(n: Nat): Nat {
+  loop(n)
+}
+
+fn main(): Nat {
+  loop(0)
+}

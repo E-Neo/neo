@@ -1391,6 +1391,17 @@ fn resolve_wit() -> Result<(Resolve, WorldId)> {
 
 /// Compile the elaborated program to a WASI 0.2 component.
 pub fn build_component(globals: &Globals, output: &Path) -> Result<()> {
+    let component = build_component_bytes(globals)?;
+    std::fs::write(output, component)
+        .map_err(|e| Error::new(format!("cannot write `{}`: {}", output.display(), e)))?;
+    Ok(())
+}
+
+/// Compile the elaborated program to component bytes without writing a file.
+///
+/// This is the byte-level entry point used by the bootstrap oracle, which
+/// hashes and compares builds.
+pub fn build_component_bytes(globals: &Globals) -> Result<Vec<u8>> {
     // The prelude defines no `main`; only the user's program is compiled.
     let cg = Codegen::new(globals);
     let core = cg.build()?;
@@ -1400,14 +1411,10 @@ pub fn build_component(globals: &Globals, output: &Path) -> Result<()> {
     embed_component_metadata(&mut bytes, &resolve, world, StringEncoding::UTF8, true)
         .map_err(|e| Error::new(format!("failed to embed component metadata: {}", e)))?;
 
-    let component = ComponentEncoder::default()
+    ComponentEncoder::default()
         .module(&bytes)
         .map_err(|e| Error::new(format!("failed to parse core module: {}", e)))?
         .validate(true)
         .encode()
-        .map_err(|e| Error::new(format!("failed to encode component: {:#}", e)))?;
-
-    std::fs::write(output, component)
-        .map_err(|e| Error::new(format!("cannot write `{}`: {}", output.display(), e)))?;
-    Ok(())
+        .map_err(|e| Error::new(format!("failed to encode component: {:#}", e)))
 }

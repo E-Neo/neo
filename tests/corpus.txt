@@ -1,0 +1,18 @@
+examples/argument_elision.neo	ok	Nat	5533	0xe7e0dc31d0fde82a
+examples/bool.neo	ok	Bool	3185	0xdc93efadc5f60e06
+examples/closures.neo	ok	Nat	3469	0x6d577fd08e7ea9ff
+examples/enums.neo	ok	Nat	3658	0x108da2b1f6052128
+examples/hello.neo	ok	Nat	3014	0x59abe0f8d071dd3b
+examples/indexed_append.neo	ok	Nat	5515	0xa978bbc4d20028e0
+examples/indexed_match.neo	ok	Nat	3419	0x569485f10db4fb09
+examples/indexed_vec.neo	ok	Nat	4613	0x6721975617d43740
+examples/list.neo	ok	List(Nat)	3625	0x970e1961bf642667
+examples/nat.neo	ok	Nat	3608	0x9f8f5ecb2ef4fe80
+examples/pattern_matching.neo	ok	Nat	3701	0xb8879149365076bc
+examples/proofs.neo	ok	Nat	3260	0xa4a09ef9067eaf2b
+examples/strings.neo	ok	String	31665	0x0f2d195348c6bafb
+examples/u32.neo	ok	U32	3066	0x2153023cecb64249
+tests/corpus/nested_inductive.neo	reject	`Bad` is not strictly positive in this constructor field (nested inductives are not supported)	-	-
+tests/corpus/non_decreasing.neo	reject	kernel rejected `loop`: recursive call to `loop` is not structurally decreasing; no argument is a strict subterm of a parameter	-	-
+tests/corpus/u32_literal_too_large.neo	reject	u32 literal is too large	-	-
+tests/corpus/u32_mixed_literals.neo	reject	type mismatch: expected `U32`, found `Nat`	-	-

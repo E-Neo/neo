@@ -1,0 +1,7 @@
+enum Bad {
+  mk(f: fn(Bad) -> Nat)
+}
+
+fn main(): Nat {
+  0
+}

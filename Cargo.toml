@@ -3,6 +3,7 @@ name = "neo"
 description = "A dependently typed language with a small trusted proof kernel targeting WASI 0.2"
 version.workspace = true
 edition.workspace = true
+default-run = "neo"
 
 [lib]
 name = "neo"
@@ -10,6 +11,10 @@ name = "neo"
 [[bin]]
 name = "neo"
 path = "src/main.rs"
+
+[[bin]]
+name = "neo-internal"
+path = "src/bin/neo_internal.rs"
 
 [dependencies]
 neo-common.workspace = true
