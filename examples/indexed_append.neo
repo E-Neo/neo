@@ -33,5 +33,5 @@ fn append[T: Type, n: Nat, m: Nat](
 }
 
 fn main(): Nat {
-  length(append(vcons(1, 10, vcons(0, 20, vnil)), vcons(0, 30, vnil)))
+  length(append(vcons(1, (10 : Nat), vcons(0, (20 : Nat), vnil)), vcons(0, (30 : Nat), vnil)))
 }

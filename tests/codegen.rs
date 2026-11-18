@@ -181,7 +181,7 @@ fn supports_first_class_constructors() {
     check(
         r#"
 fn main(): Nat {
-  f = succ
+  let f = succ
   f(4)
 }
 "#,
@@ -202,7 +202,7 @@ fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
 }
 
 fn main(): List[Nat] {
-  append(cons(1, cons(2, nil)), cons(3, nil))
+  append(cons((1 : Nat), cons((2 : Nat), nil)), cons((3 : Nat), nil))
 }
 "#,
         "append",
@@ -221,13 +221,13 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn sym[T: Type](x: T, y: T, p: x == y): y == x {
+fn sym[T: Type](x: T, y: T, p: x = y): y = x {
   match p {
     refl => refl
   }
 }
 
-fn add_zero(a: Nat): add(a, zero) == a {
+fn add_zero(a: Nat): add(a, zero) = a {
   match a {
     zero => refl
     succ(p) => match sym(add(p, zero), p, add_zero(p)) {
@@ -237,7 +237,7 @@ fn add_zero(a: Nat): add(a, zero) == a {
 }
 
 fn main(): Nat {
-  q = add_zero(3)
+  let q = add_zero(3)
   7
 }
 "#,
@@ -286,5 +286,31 @@ fn main(): Bool {
 "#,
         "u32-cmp",
         "true\n",
+    );
+}
+
+#[test]
+fn builds_nat_operators() {
+    check(
+        r#"
+fn main(): Nat {
+  ((12 : Nat) & 10) + ((1 : Nat) << 4) + ((20 : Nat) / 6) + ((20 : Nat) % 6)
+}
+"#,
+        "nat-operators",
+        "29\n",
+    );
+}
+
+#[test]
+fn builds_u32_infix_operators() {
+    check(
+        r#"
+fn main(): U32 {
+  (20 / 6) + (20 % 6) + (1 << 4) + (12 & 10)
+}
+"#,
+        "u32-infix-operators",
+        "29\n",
     );
 }

@@ -60,7 +60,7 @@ fn rejects_recursive_alias() {
     assert_rejected(
         r#"
 fn loop(n: Nat): Nat {
-  g = loop
+  let g = loop
   g(n)
 }
 "#,
@@ -102,7 +102,7 @@ fn f(n: Nat): Nat {
   match n {
     zero => zero
     succ(p) => {
-      q = p
+      let q = p
       f(q)
     }
   }
@@ -127,7 +127,7 @@ fn bad(): Type 0 { apply1(id0) }
 fn rejects_equal_pi_types_with_different_domains() {
     assert_rejected(
         r#"
-fn bad(): (fn(x: Type 0) -> Type 1) == (fn(x: Type 1) -> Type 1) {
+fn bad(): (fn(x: Type 0) -> Type 1) = (fn(x: Type 1) -> Type 1) {
   refl
 }
 "#,

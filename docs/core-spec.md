@@ -42,8 +42,8 @@ t, A, B ::=
   | J(A, x, y, p, m, r)     equality elimination
 ```
 
-The core has **no let-binding**. Surface blocks and variable patterns elaborate
-to `(fn(x: A) => body)(value)`.
+The core has **no let-binding**. Surface `let` bindings, blocks, and variable
+patterns elaborate to `(fn(x: A) => body)(value)`.
 
 A `Pi` term also carries a binder name and an `implicit` boolean. Both are
 metadata: conversion and type checking ignore them. The flag records whether
@@ -470,6 +470,9 @@ Untrusted (bugs cause rejection or wrong code generation, not a false proof):
 - lexer, parser, surface AST;
 - elaborator, implicit-argument insertion, index inference, and surface `J`
   construction;
+- surface `let`, `=`, `==`/`!=`, ascription, and infix operators;
+- the `nat_*` prelude functions. They are ordinary checked Neo code, not
+  primitives;
 - pretty printer and REPL;
 - WASM code generation;
 - the CLI.
@@ -491,6 +494,8 @@ These are deliberate Stage 0 limits, not soundness holes:
 - No universe polymorphism: `Type u` levels are concrete.
 - `U32` is eliminated only by its fixed operations; there is no general
   recursor over machine words and no `Nat`/`U32` conversion.
+- `Nat` arithmetic is unary and is intended for proofs and small indices; use
+  `U32` for machine-sized computation.
 - Large elimination from `Prop` is only allowed under singleton elimination.
 - `Prop -> Prop` families are conservatively sorted in `Type 0`.
 

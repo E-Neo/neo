@@ -243,16 +243,23 @@ impl Parser {
             if self.at(&Tok::Eof) {
                 return Err(Error::at(span, "unterminated block"));
             }
-            let is_binding =
-                matches!(self.peek().tok, Tok::Ident(_)) && matches!(self.peek2().tok, Tok::Eq);
-            if is_binding {
+            if self.at(&Tok::Let) {
                 let bspan = self.peek().span;
-                let name = self.expect_ident("expected binding name")?;
-                self.expect(&Tok::Eq, "expected `=`")?;
+                self.advance();
+                let name = self.expect_ident("expected a binding name after `let`")?;
+                let ty = if self.at(&Tok::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    Some(self.parse_annotation()?)
+                } else {
+                    None
+                };
+                self.expect(&Tok::Eq, "expected `=` after the binding pattern")?;
                 self.skip_newlines();
                 let value = self.parse_expr()?;
                 bindings.push(Binding {
                     name,
+                    ty,
                     value,
                     span: bspan,
                 });
@@ -287,7 +294,20 @@ impl Parser {
         if self.at(&Tok::Fn) {
             return self.parse_fn_expr();
         }
-        self.parse_eq()
+        self.parse_equality()
+    }
+
+    /// Types in `let` annotations are parsed below `=`, so the binding
+    /// separator stays unambiguous. Function and equality types therefore need
+    /// parentheses in annotations.
+    fn parse_annotation(&mut self) -> Result<Expr> {
+        if self.at(&Tok::Fn) {
+            return Err(Error::at(
+                self.peek().span,
+                "parenthesize a function-type annotation",
+            ));
+        }
+        self.parse_cmp()
     }
 
     fn parse_fn_expr(&mut self) -> Result<Expr> {
@@ -364,16 +384,169 @@ impl Parser {
         Ok(binders)
     }
 
-    fn parse_eq(&mut self) -> Result<Expr> {
+    fn parse_equality(&mut self) -> Result<Expr> {
+        let lhs = self.parse_cmp()?;
+        if !self.at(&Tok::Eq) {
+            return Ok(lhs);
+        }
+        let span = self.peek().span;
+        self.advance();
+        self.skip_newlines();
+        let rhs = self.parse_cmp()?;
+        if self.at(&Tok::Eq) {
+            return Err(Error::at(
+                self.peek().span,
+                "equality is not associative; parenthesize",
+            ));
+        }
+        Ok(Expr::Eq(Box::new(lhs), Box::new(rhs), span))
+    }
+
+    fn parse_cmp(&mut self) -> Result<Expr> {
+        let lhs = self.parse_bitor()?;
+        let op = match self.peek().tok {
+            Tok::Lt => BinOp::Lt,
+            Tok::Le => BinOp::Le,
+            Tok::Gt => BinOp::Gt,
+            Tok::Ge => BinOp::Ge,
+            Tok::EqEq => BinOp::Eq,
+            Tok::Ne => BinOp::Ne,
+            _ => return Ok(lhs),
+        };
+        let span = self.peek().span;
+        self.advance();
+        self.skip_newlines();
+        let rhs = self.parse_bitor()?;
+        if matches!(
+            self.peek().tok,
+            Tok::Lt | Tok::Le | Tok::Gt | Tok::Ge | Tok::EqEq | Tok::Ne
+        ) {
+            return Err(Error::at(
+                self.peek().span,
+                "comparison operators are not associative; parenthesize",
+            ));
+        }
+        Ok(Expr::BinOp {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            span,
+        })
+    }
+
+    fn parse_bitor(&mut self) -> Result<Expr> {
+        let mut lhs = self.parse_bitxor()?;
+        while self.at(&Tok::Pipe) {
+            let span = self.peek().span;
+            self.advance();
+            self.skip_newlines();
+            let rhs = self.parse_bitxor()?;
+            lhs = Expr::BinOp {
+                op: BinOp::Or,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_bitxor(&mut self) -> Result<Expr> {
+        let mut lhs = self.parse_bitand()?;
+        while self.at(&Tok::Caret) {
+            let span = self.peek().span;
+            self.advance();
+            self.skip_newlines();
+            let rhs = self.parse_bitand()?;
+            lhs = Expr::BinOp {
+                op: BinOp::Xor,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_bitand(&mut self) -> Result<Expr> {
+        let mut lhs = self.parse_shift()?;
+        while self.at(&Tok::Amp) {
+            let span = self.peek().span;
+            self.advance();
+            self.skip_newlines();
+            let rhs = self.parse_shift()?;
+            lhs = Expr::BinOp {
+                op: BinOp::And,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr> {
+        let mut lhs = self.parse_add()?;
+        loop {
+            let op = match self.peek().tok {
+                Tok::Shl => BinOp::Shl,
+                Tok::Shr => BinOp::Shr,
+                _ => return Ok(lhs),
+            };
+            let span = self.peek().span;
+            self.advance();
+            self.skip_newlines();
+            let rhs = self.parse_add()?;
+            lhs = Expr::BinOp {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        }
+    }
+
+    fn parse_add(&mut self) -> Result<Expr> {
+        let mut lhs = self.parse_mul()?;
+        loop {
+            let op = match self.peek().tok {
+                Tok::Plus => BinOp::Add,
+                Tok::Minus => BinOp::Sub,
+                _ => return Ok(lhs),
+            };
+            let span = self.peek().span;
+            self.advance();
+            self.skip_newlines();
+            let rhs = self.parse_mul()?;
+            lhs = Expr::BinOp {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        }
+    }
+
+    fn parse_mul(&mut self) -> Result<Expr> {
         let mut lhs = self.parse_app()?;
-        while self.at(&Tok::EqEq) {
+        loop {
+            let op = match self.peek().tok {
+                Tok::Star => BinOp::Mul,
+                Tok::Slash => BinOp::Div,
+                Tok::Percent => BinOp::Rem,
+                _ => return Ok(lhs),
+            };
             let span = self.peek().span;
             self.advance();
             self.skip_newlines();
             let rhs = self.parse_app()?;
-            lhs = Expr::Eq(Box::new(lhs), Box::new(rhs), span);
+            lhs = Expr::BinOp {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
         }
-        Ok(lhs)
     }
 
     fn parse_app(&mut self) -> Result<Expr> {
@@ -443,15 +616,10 @@ impl Parser {
                     Ok(Expr::Var(name, span))
                 }
             }
-            Tok::Nat(n) => {
+            Tok::Numeral(n, suffix) => {
                 let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Nat(n, span))
-            }
-            Tok::U32(n) => {
-                let span = self.peek().span;
-                self.advance();
-                Ok(Expr::U32Lit(n, span))
+                Ok(Expr::Numeral(n, suffix, span))
             }
             Tok::Str(s) => {
                 let span = self.peek().span;
@@ -461,7 +629,13 @@ impl Parser {
             Tok::Type => {
                 let span = self.peek().span;
                 self.advance();
-                let level = if let Tok::Nat(n) = self.peek().tok {
+                let level = if let Tok::Numeral(n, suffix) = self.peek().tok {
+                    if suffix.is_some() {
+                        return Err(Error::at(
+                            self.peek().span,
+                            "a universe level cannot have a suffix",
+                        ));
+                    }
                     self.advance();
                     n as u32
                 } else {
@@ -478,8 +652,16 @@ impl Parser {
                 let span = self.peek().span;
                 self.advance();
                 let e = self.parse_expr()?;
-                self.expect(&Tok::RParen, "expected `)`")?;
-                Ok(Expr::Paren(Box::new(e), span))
+                if self.at(&Tok::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    let ty = self.parse_expr()?;
+                    self.expect(&Tok::RParen, "expected `)` after ascription")?;
+                    Ok(Expr::Ascribe(Box::new(e), Box::new(ty), span))
+                } else {
+                    self.expect(&Tok::RParen, "expected `)`")?;
+                    Ok(Expr::Paren(Box::new(e), span))
+                }
             }
             Tok::LBrace => {
                 let b = self.parse_block()?;

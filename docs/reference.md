@@ -117,7 +117,7 @@ There are no block comments. There are no semicolons.
 Newlines are significant. They separate:
 
 - enum constructors,
-- block bindings,
+- `let` bindings,
 - match arms.
 
 A newline **inside parentheses or brackets** is ignored, so argument lists,
@@ -151,7 +151,7 @@ The single token `_` is the wildcard, not an identifier.
 ### Keywords
 
 ```
-enum   fn   match   Type   Prop
+enum   fn   let   match   Type   Prop
 ```
 
 `refl` is recognised specially in expressions. Everything else — including
@@ -166,16 +166,41 @@ Numeric literals are unsigned decimal integers:
 0   5   42   1000
 ```
 
-A plain literal is syntactic sugar for a `Nat` built from `zero` and `succ`.
-A literal with the `u32` suffix has the primitive type `U32`:
+A numeral has no intrinsic type. It takes its type from the expected type:
+
+- in a `Nat` position it elaborates to a `Nat` built from `zero` and `succ`;
+- in a `U32` position it elaborates to a machine word;
+- in any other position it is rejected.
+
+```neo
+fn a(): Nat { 42 }
+fn b(): U32 { 42 }
+fn c(): Bool { 42 }   // error
+```
+
+There is no default. A numeral in a position with no expected type is rejected:
+
+```neo
+fn id[T: Type](x: T): T { x }
+fn main(): Nat { id(42) }          // error
+fn main(): U32 { id(42u32) }       // ok
+fn main(): Nat { id[Nat](42) }     // ok
+fn main(): Nat { id((42 : Nat)) }  // ok
+```
+
+A literal with the `u32` suffix pins the type to `U32`:
 
 ```neo
 0u32   42u32   4294967295u32
 ```
 
-The value must fit in 32 bits; `4294967296u32` is a lexing error. The suffix
-must not run into a following identifier, so `1u32x` is the numeral `1` followed
-by the name `u32x`.
+The value must fit in 32 bits; `4294967296u32` is an error. The suffix must
+not run into a following identifier, so `1u32x` is the numeral `1` followed by
+the name `u32x`. A suffixed literal checked against a different type is an
+error.
+
+A `Nat` literal above 1,000,000 is rejected because it would build an enormous
+unary value. Use a `u32` literal for machine-sized numbers.
 
 There are no negative, floating-point, hexadecimal, or character literals.
 
@@ -199,11 +224,19 @@ values. It is printed as text by both the interpreter and `neo build`.
 
 ```
 (  )  [  ]  {  }  ,  :  =  ==  ->  =>
++  -  *  /  %  &  |  ^  <<  >>  <  <=  >  >=  !=
 ```
 
-`[` and `]` delimit implicit parameter and argument lists. `->` is
-function-type arrow; `=>` introduces a lambda body or match arm. `-` is not
-valid outside `->`.
+`[` and `]` delimit implicit parameter and argument lists. `->` is the
+function-type arrow; `=>` introduces a lambda body or match arm.
+
+`=` is both the `let` binding separator and the equality proposition. `==` and
+`!=` are boolean equality. `//` starts a line comment; `/` is division when it
+is not followed by another `/`. `-` is binary subtraction only; there is no
+unary minus.
+
+Operators are non-associative at the comparison level. See
+[§7](#numbers-and-operators) for precedence and overloading.
 
 ---
 
@@ -225,7 +258,7 @@ Rules:
 - The only recursion available is a function calling **itself**. Mutual
   recursion is not supported.
 - Definitions (`enum`, `fn`) cannot be nested. Function bodies are blocks,
-  which may contain bindings and expressions.
+  which may contain `let` bindings and expressions.
 
 For example, `add` must precede `mul`:
 
@@ -302,16 +335,16 @@ U32
 
 It has no constructors and cannot be matched. A `U32` is eliminated only by
 the primitive operations listed under
-[primitive operations](#primitive-operations). `U32` lives in `Type 0`.
+[Numbers and operators](#numbers-and-operators). `U32` lives in `Type 0`.
 
 ### Equality types
 
 ```neo
-zero == zero
-add(2, 3) == 5
+zero = zero
+add(2, 3) = 5
 ```
 
-`==` forms a proposition. Both sides must have the same type. See
+`=` forms a proposition. Both sides must have the same type. See
 [section 9](#9-equality-and-proofs).
 
 ### Universe rules
@@ -324,8 +357,9 @@ add(2, 3) == 5
   expected when `u <= v`.
 - `Prop` is not a subtype of `Type 0`; `Prop` is a **term** of `Type 0`.
 
-There is no annotation syntax like `(e : T)`. Expected types come from
-declarations, function parameters, constructors, and the surrounding context.
+An ascription `(e : T)` checks `e` against `T`. It is the standard way to
+direct a numeral or a proof whose type is not determined by the surrounding
+context.
 
 ---
 
@@ -388,7 +422,7 @@ this is an error:
 
 ```neo
 fn bad(): Nat {
-  m = some(5)     // cannot infer the type arguments of `some`
+  let m = some(zero)     // cannot infer the type arguments of `some`
   0
 }
 ```
@@ -401,7 +435,7 @@ fn five(): Maybe[Nat] {
 }
 
 fn main(): Nat {
-  m = five()
+  let m = five()
   0
 }
 ```
@@ -471,7 +505,7 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
 ```
 
 The scrutinee `Vec[Nat, succ(n)]` cannot be built by `vnil`, so the `vnil` arm
-may be omitted. In the `vcons` branch, the equation `succ(m) == succ(n)`
+may be omitted. In the `vcons` branch, the equation `succ(m) = succ(n)`
 refines the field `m` to `n`, so `xs` has type `Vec[Nat, n]`. An arm written for
 an impossible constructor is accepted but never checked, and the generated code
 omits it.
@@ -502,9 +536,9 @@ fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, 
 }
 ```
 
-In the `vnil` branch of `length`, the equation `n == zero` refines `n`; in the
+In the `vnil` branch of `length`, the equation `n = zero` refines `n`; in the
 `vcons` branch it refines `n` to `succ(m)`. In `append`, the `vcons` branch
-learns `n == succ(k)`, so the constructed vector has index
+learns `n = succ(k)`, so the constructed vector has index
 `succ(add(k, m))`, convertible to `add(succ(k), m)`.
 
 Indexed families are still limited:
@@ -595,8 +629,8 @@ arguments.
 
 ### Blocks and bindings
 
-A block is `{ ... }`. It may start with any number of bindings, each on its
-own line, followed by exactly one tail expression:
+A block is `{ ... }`. It may start with any number of `let` bindings, each on
+its own line, followed by exactly one tail expression:
 
 ```neo
 fn add(a: Nat, b: Nat): Nat {
@@ -606,32 +640,36 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-// `add` is now in scope.
 fn main(): Nat {
-  x = 2
-  y = 3
+  let x: Nat = 2
+  let y: Nat = 3
   add(x, y)
 }
 ```
 
-- `name = expression` introduces a binding. There is no `let`.
-- Bindings are sequential and may shadow earlier names.
-- Bindings cannot be annotated; their types are inferred.
-- The value of the block is the value of its final expression.
+- `let name = expression` introduces a binding.
+- `let name: T = expression` adds an annotation.
+- Bindings are immutable, sequential, and may shadow earlier names.
+- An unannotated binding infers its type. Its value must not be an ambiguous
+  numeral: `let x = 42` is rejected; write `let x: Nat = 42` or
+  `let x = 42u32`.
+- A binding annotation is parsed at comparison precedence, so a function type
+  or equality type in an annotation must be parenthesized:
+  `let f: (fn(x: Nat) -> Nat) = g` and `let p: (zero = zero) = refl`.
+- The value of a block is the value of its final expression.
 - A block is itself an expression, so it can appear anywhere an expression is
   allowed.
 
-Because bindings are inferred, a parameterised constructor in a binding needs
-a helper function with a known return type:
+A parameterised constructor needs a known result type. Annotate the binding:
 
 ```neo
 fn main(): Nat {
-  m = cons(5, nil)   // error: cannot infer the type arguments of `cons`
+  let m: List[Nat] = cons(5, nil)
   0
 }
 ```
 
-This works instead:
+Alternatively, use a helper function with a known return type:
 
 ```neo
 fn five(): List[Nat] {
@@ -639,7 +677,7 @@ fn five(): List[Nat] {
 }
 
 fn main(): Nat {
-  m = five()
+  let m = five()
   0
 }
 ```
@@ -651,7 +689,7 @@ Application uses parentheses and commas. Implicit arguments use brackets:
 ```neo
 add(2, 3)
 f(x, y, z)
-id(4)               // T inferred from the argument
+id[Nat](4)          // T supplied explicitly
 id[Nat](4)          // T supplied explicitly
 ```
 
@@ -695,8 +733,8 @@ Rules:
 - Implicit parameters are elaboration sugar. Core terms still contain every
   argument, so the kernel and code generator are unchanged.
 
-There is no infix arithmetic. Define functions such as `add` and `mul`
-yourself.
+Infix operators and their overload rules are described in
+[Numbers and operators](#numbers-and-operators).
 
 ### Function types
 
@@ -752,31 +790,76 @@ Parentheses group expressions:
 (fn(x: Nat) => succ(x))(3)
 ```
 
-### Numeric literals
+### Numbers and operators
 
-A plain numeral is a `Nat`:
+`Nat` is the unbounded inductive type used for proofs and indices. `U32` is the
+32-bit machine word type used for computation. They are not interchangeable,
+and there is no automatic conversion. A numeral takes its type from the
+expected type, as described in [§3](#numeric-literals).
+
+The infix operators are:
+
+| Operators | Operand type | Result |
+| --- | --- | --- |
+| `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|` | `Nat` or `U32` | same as the operands |
+| `< <= > >=` | `Nat` or `U32` | `Bool` |
+| `== !=` | `Nat`, `U32`, `Bool`, `String`, or `Unit` | `Bool` |
+
+Precedence, tightest first:
+
+| Level | Operators | Associativity |
+| --- | --- | --- |
+| 1 | application `f(x)`, `T[...]` | left |
+| 2 | `* / %` | left |
+| 3 | `+ -` | left |
+| 4 | `<< >>` | left |
+| 5 | `&` | left |
+| 6 | `^` | left |
+| 7 | `\|` | left |
+| 8 | `< <= > >= == !=` | non-associative |
+| 9 | `=` equality type | non-associative |
+
+Arithmetic, bitwise, shift, and comparison operators accept operands of the
+same type, either `Nat` or `U32`. The type is chosen from the expected type or
+from a non-numeral operand:
 
 ```neo
-fn main(): Nat {
-  42
-}
+fn a(): Nat { 1 + 2 }          // nat_add
+fn b(): U32 { 1 + 2 }          // u32_add
+fn c(): U32 { 1u32 + 2 }       // u32_add
+fn d(): U32 { 1 + 2u32 }       // u32_add
 ```
 
-A numeral with the `u32` suffix has type `U32`:
+If both operands are bare numerals and there is no expected numeric type, the
+operator is rejected:
 
 ```neo
-fn main(): U32 {
-  42u32
-}
+fn main(): Bool { 1 < 2 }     // error: cannot infer the numeric type
+fn main(): Bool { 1u32 < 2 }  // ok
 ```
 
-The two types are not interchangeable: `u32_add(1, 2)` is rejected because its
-arguments are `Nat`s, and a `U32` where a `Nat` is expected is rejected too.
+`==` and `!=` are boolean equality. They are not the equality proposition; that
+is `=`. The operand type selects the implementation. Equality is defined for
+`Nat`, `U32`, `Bool`, `String`, and `Unit`; other types need a named function.
 
-### Primitive operations
+Comparisons are non-associative, so `a < b < c` is an error.
 
-`U32` is eliminated by a fixed set of fully applied binary operations. They are
-names, not infix operators, and they cannot be used as first-class values.
+The semantics differ by type:
+
+| Operation | `Nat` | `U32` |
+| --- | --- | --- |
+| `-` | truncated at zero | wraps modulo `2^32` |
+| `/`, `%` | zero divisor yields `0` | zero divisor yields `0` |
+| `<<`, `>>` | repeated doubling/halving | shift count uses its low five bits |
+| `&`, `\|`, `^` | bit-by-bit on the unary value | machine bitwise |
+| `+`, `*` | unbounded | wraps modulo `2^32` |
+
+`Nat` operators are ordinary prelude functions, checked for termination like
+any other program. They are suitable for proofs and small indices; use `U32`
+for machine-sized computation.
+
+The named `u32_*` operations remain available and are still fully applied
+binary operations:
 
 | Operation | Type | Meaning |
 | --- | --- | --- |
@@ -815,8 +898,8 @@ fn pick(): Nat {
 to obtain a `Bool`. A `U32` may still be an enum parameter or an index, as in
 `Vec[T, n]` with `n: U32`.
 
-These operation names, and `U32`, are reserved: a program cannot declare a
-function, enum, or constructor with one of those names.
+The `u32_*` names, `U32`, and `Nat` are reserved, and the `nat_*` prelude
+operators are already defined: a program cannot redeclare any of them.
 
 ---
 
@@ -930,11 +1013,11 @@ rejected instead of being assumed.
 
 ### Matching on equality proofs
 
-A match on a proof of `x == y` is special. It takes exactly one arm, whose
+A match on a proof of `x = y` is special. It takes exactly one arm, whose
 pattern is `refl` or `_`:
 
 ```neo
-fn sym[T: Type](x: T, y: T, p: x == y): y == x {
+fn sym[T: Type](x: T, y: T, p: x = y): y = x {
   match p {
     refl => refl
   }
@@ -952,7 +1035,7 @@ Abstraction is capture-avoiding, so it works under binders. For example, an
 expected type that mentions `x` inside a function type is abstracted too:
 
 ```neo
-fn h(x: Nat, p: x == zero): fn(y: Nat) -> zero == x {
+fn h(x: Nat, p: x = zero): fn(y: Nat) -> zero = x {
   match p {
     refl => fn(y: Nat) => refl
   }
@@ -968,11 +1051,11 @@ not found; that case needs an explicit helper.
 
 ## 9. Equality and proofs
 
-`==` is a built-in homogeneous equality proposition:
+`=` is a built-in homogeneous equality proposition:
 
 ```neo
-zero == zero
-add(2, 3) == 5
+zero = zero
+add(2, 3) = 5
 ```
 
 The type of the left side determines the type of the right side; both must be
@@ -980,11 +1063,11 @@ the same type.
 
 ### `refl`
 
-`refl` proves `x == y` when `x` and `y` are definitionally equal. It is only
+`refl` proves `x = y` when `x` and `y` are definitionally equal. It is only
 valid where the expected type is a known equality:
 
 ```neo
-fn refl_zero(): zero == zero {
+fn refl_zero(): zero = zero {
   refl
 }
 ```
@@ -998,7 +1081,7 @@ Writing `refl` in an inference position is an error:
 If the sides are not convertible:
 
 ```
-`refl` cannot prove `zero == succ(zero)` (sides are not equal)
+`refl` cannot prove `zero = succ(zero)` (sides are not equal)
 ```
 
 ### Proving with recursive matches
@@ -1014,7 +1097,7 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn add_zero(a: Nat): add(a, zero) == a {
+fn add_zero(a: Nat): add(a, zero) = a {
   match a {
     zero => refl
     succ(p) => match sym(add(p, zero), p, add_zero(p)) {
@@ -1036,7 +1119,7 @@ There are no tactics, no `theorem` keyword, and no `forall`. A theorem is a
   value into a computational type is rejected (large elimination).
 - The exception is the *singleton* rule. A `Prop` enum with no constructors
   (`False`), or with exactly one constructor whose fields are all propositions
-  (for example `x == y` with its `refl` constructor), may be eliminated into any
+  (for example `x = y` with its `refl` constructor), may be eliminated into any
   type. This is what makes equality proofs usable as ordinary values.
 - `False`, which has no constructors, is eliminated with a zero-arm match.
   The expected result type must be known.
@@ -1048,7 +1131,7 @@ and `J` compile to their `refl` case. A proof can be bound and ignored:
 
 ```neo
 fn main(): Nat {
-  proof = add_zero(3)
+  let proof = add_zero(3)
   7
 }
 ```
@@ -1269,17 +1352,45 @@ enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
 }
 ```
 
-The prelude also defines these string functions:
+The prelude also defines these numeric and string functions:
 
 ```neo
+fn bool_not(b: Bool): Bool
+fn bool_eq(a: Bool, b: Bool): Bool
+fn bool_ne(a: Bool, b: Bool): Bool
+
+fn nat_add(a: Nat, b: Nat): Nat
+fn nat_sub(a: Nat, b: Nat): Nat
+fn nat_mul(a: Nat, b: Nat): Nat
+fn nat_div(a: Nat, b: Nat): Nat
+fn nat_rem(a: Nat, b: Nat): Nat
+fn nat_eq(a: Nat, b: Nat): Bool
+fn nat_ne(a: Nat, b: Nat): Bool
+fn nat_lt(a: Nat, b: Nat): Bool
+fn nat_le(a: Nat, b: Nat): Bool
+fn nat_gt(a: Nat, b: Nat): Bool
+fn nat_ge(a: Nat, b: Nat): Bool
+fn nat_and(a: Nat, b: Nat): Nat
+fn nat_or(a: Nat, b: Nat): Nat
+fn nat_xor(a: Nat, b: Nat): Nat
+fn nat_shl(a: Nat, b: Nat): Nat
+fn nat_shr(a: Nat, b: Nat): Nat
+fn nat_div2(a: Nat): Nat
+fn nat_mod2(a: Nat): Nat
+
+fn unit_eq(a: Unit, b: Unit): Bool
+fn unit_ne(a: Unit, b: Unit): Bool
+
 fn str_length(s: String): Nat
 fn str_concat(a: String, b: String): String
 fn str_eq(a: String, b: String): Bool
+fn str_ne(a: String, b: String): Bool
 ```
 
 Notes:
 
-- `Nat` numerals desugar to `zero` and `succ`; `u32` numerals are primitive.
+- A numeral in a `Nat` position desugars to `zero` and `succ`; in a `U32`
+  position it is a primitive literal. The `u32` suffix pins `U32`.
 - String literals desugar to `str_nil` and `str_cons`; each byte is a `Nat`.
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
@@ -1287,8 +1398,8 @@ Notes:
   conjunction function; name it `both` instead.
 - `U32` and the `u32_*` operations are primitive and are not declared in this
   list.
-- There is no built-in arithmetic for `Nat`. Define `add`, `mul`, and so on, or
-  use the `u32_*` operations on machine words.
+- `Nat` arithmetic is provided by the `nat_*` prelude functions and the infix
+  operators; `U32` uses the primitive `u32_*` operations.
 
 ---
 
@@ -1318,7 +1429,7 @@ user-defined `Maybe[Nat]`, and proposition enums with printable fields such as
 
 - function types;
 - `Type` and `Prop`;
-- equality types such as `x == y`;
+- equality types such as `x = y`;
 - enums with a field whose type is a type family applied to an earlier field,
   such as `Vec[T, m]` in the indexed `Vec` example.
 
@@ -1427,7 +1538,7 @@ Display limits: the REPL prints data values (constructors, `Nat`, `Type`,
 `Prop`). It cannot display:
 
 - function values or function types;
-- equality proofs (for example, a proof of `2 == 2` cannot be displayed);
+- equality proofs (for example, a proof of `2 = 2` cannot be displayed);
 - bare type constructors other than `Nat`, e.g. `List[Nat]`.
 
 REPL errors are printed and the session continues. The REPL does not require a
@@ -1458,25 +1569,33 @@ fields       ::= [ field { "," field } ]
 field        ::= [ IDENT ":" ] expr
 
 block        ::= "{" { NEWLINE } { binding NEWLINE } expr { NEWLINE } "}"
-binding      ::= IDENT "=" expr
+binding      ::= "let" IDENT [ ":" ann ] "=" expr
+ann          ::= cmp_expr
 
 expr         ::= fn_expr | eq_expr
 
-fn_expr      ::= "fn" [ "[" binders "]" ] "(" binders ")" ( "->" expr | "=>" expr )
-binders      ::= [ binder { "," binder } ]
-binder       ::= [ IDENT ":" ] expr
+eq_expr      ::= cmp_expr [ "=" cmp_expr ]
 
-eq_expr      ::= app { "==" app }
+cmp_expr     ::= bitor_expr [ cmp_op bitor_expr ]
+cmp_op       ::= "==" | "!=" | "<" | "<=" | ">" | ">="
+
+bitor_expr   ::= bitxor_expr { "|" bitxor_expr }
+bitxor_expr  ::= bitand_expr { "^" bitand_expr }
+bitand_expr  ::= shift_expr { "&" shift_expr }
+shift_expr   ::= add_expr { ( "<<" | ">>" ) add_expr }
+add_expr     ::= mul_expr { ( "+" | "-" ) mul_expr }
+mul_expr     ::= app { ( "*" | "/" | "%" ) app }
+
 app          ::= atom { ( "[" args "]" | "(" args ")" ) }
 args         ::= [ expr { "," expr } ]
 
 atom         ::= IDENT
-               | NAT
-               | U32LIT
+               | NUMERAL
                | STRING
-               | "Type" [ NAT ]
+               | "Type" [ NUMERAL ]
                | "Prop"
                | "(" expr ")"
+               | "(" expr ":" expr ")"
                | block
                | match_expr
                | fn_expr
@@ -1492,8 +1611,8 @@ pattern      ::= "_"
 Notes:
 
 - `IDENT` excludes the keywords and `_`.
-- `NAT` is a decimal numeral with type `Nat`; `U32LIT` is a decimal numeral with
-  the `u32` suffix and type `U32`.
+- `NUMERAL` is a decimal numeral with an optional `u32` suffix. Its type comes
+  from the expected type; the suffix pins `U32`.
 - A final constructor or match arm may be followed by `}` instead of a
   newline.
 - A bare `refl` name is parsed as the `refl` expression.
@@ -1527,6 +1646,16 @@ Common messages:
 | `unknown string escape ...` | Use `\n`, `\t`, `\r`, `\\`, or `\"`. |
 | `string literals must contain only ASCII characters` | Strings are ASCII in Stage 0. |
 | `unknown name ...` | Name is undeclared or declared later. |
+| `cannot infer the type of this numeral; ...` | A bare numeral has no expected type. Add an annotation, an ascription, or the `u32` suffix. |
+| `literal suffix u32 conflicts with expected type ...` | A `u32` literal was checked against a non-`U32` type. |
+| `literal does not fit in U32` | The value is above `2^32 - 1`. |
+| `Nat literal is too large ...` | `Nat` literals are limited to 1,000,000; use `u32`. |
+| `numeric literal cannot have type ...` | A numeral was checked against a non-numeric type. |
+| `cannot infer the numeric type of ...; annotate an operand` | Both operator operands are bare numerals and there is no expected type. |
+| `boolean equality is not defined for type ...` | `==`/`!=` only cover `Nat`, `U32`, `Bool`, `String`, and `Unit`. |
+| `comparison operators are not associative; parenthesize` | Write `(a < b) == c` or split the expression. |
+| `equality is not associative; parenthesize` | Write `(a = b) = c` only if that is intended. |
+| `parenthesize a function-type annotation` | Write `let f: (fn(x: T) -> U) = g`. |
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
 | `cannot infer implicit argument of type ...; pass it explicitly with [...]` | An implicit argument is not determined by the rest of the call. |
@@ -1564,8 +1693,6 @@ design:
   inferred at calls; see [implicit parameters](#implicit-parameters);
 - modules, imports, namespaces, or multiple files;
 - characters, floats, and general I/O;
-- infix operators. Arithmetic is written with the `u32_*` primitive operations
-  (for `U32`) or with user-defined functions (for `Nat`);
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
 - higher-order or non-first-order dependent pattern matching: indices are
@@ -1574,8 +1701,8 @@ design:
   such as `pred(n)` is rejected;
 - proof irrelevance in the conversion checker;
 - custom printing and user-defined entry points;
-- `def`, `let`, `<-`, mutable variables, `proc`, `theorem`, `forall`, `lambda`,
-  `case`, and `induction`. Use `fn`, block bindings, `fn(...) => ...`, and
+- `def`, `<-`, mutable variables, `proc`, `theorem`, `forall`, `lambda`,
+  `case`, and `induction`. Use `fn`, `let` bindings, `fn(...) => ...`, and
   `match` instead.
 
 `main` result types with a field like `Vec[T, m]` that stays dependent on an
@@ -1719,7 +1846,7 @@ With `main` returning `area(rect(3, 4))`, the output is `12`.
 `examples/proofs.neo` (which also defines `add` and `sym`):
 
 ```neo
-fn add_zero(a: Nat): add(a, zero) == a {
+fn add_zero(a: Nat): add(a, zero) = a {
   match a {
     zero => refl
     succ(p) => match sym(add(p, zero), p, add_zero(p)) {
@@ -1729,7 +1856,7 @@ fn add_zero(a: Nat): add(a, zero) == a {
 }
 
 fn main(): Nat {
-  proof = add_zero(3)
+  let proof = add_zero(3)
   7
 }
 ```
@@ -1805,7 +1932,9 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
 
 The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
 The `m` field is refined to `n`, which gives `xs` the type `Vec[Nat, n]`. With
-`main` returning `head(vcons(1, 4, vcons(0, 3, vnil)))`, the output is `4`.
+`main` returning `head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil)))`, the
+output is `4`. The ascriptions are needed because `head`'s type parameters are
+inferred, so the elements have no expected type of their own.
 
 `examples/pattern_matching.neo` shows nested patterns and multiple arms for one
 constructor:
@@ -1878,13 +2007,13 @@ hello, world!
 | Other syntax | Neo |
 | --- | --- |
 | `def f(x) = e` | `fn f(x: T): U { e }` |
-| `let x = e; body` | `{ x = e`<br>`body }` |
+| `let x = e; body` | `{ let x = e`<br>`body }` |
 | `\x -> e` or `lambda x: e` | `fn(x: T) => e` |
 | `case e of ...` | `match e { ... }` |
 | `forall (x: T), P x` | `fn(x: T) -> P(x)` |
 | `theorem name: P := proof` | `fn name(): P { proof }` |
 | `induction n` | recursive `match n { ... }` |
 | `if b then x else y` | `match b {`<br>`true => x`<br>`false => y`<br>`}` |
-| `f(x); g(y)` | one expression per tail; use bindings |
+| `f(x); g(y)` | one expression per tail; use `let` bindings |
 
-There are no semicolons, no `let`, no mutable variables, and no tactics.
+There are no semicolons, no mutable variables, and no tactics.

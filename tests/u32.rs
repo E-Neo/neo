@@ -157,12 +157,12 @@ fn main(): Nat {
 }
 
 #[test]
-fn rejects_nat_literals_where_u32_is_expected() {
+fn accepts_plain_literals_where_u32_is_expected() {
+    assert_eq!(u32_main("u32_add(1, 2)"), 3);
     assert_rejected(
-        "fn main(): U32 { u32_add(1, 2) }",
-        "expected `U32`, found `Nat`",
+        "fn main(): Nat { 1u32 }",
+        "literal suffix `u32` conflicts with expected type `Nat`",
     );
-    assert_rejected("fn main(): Nat { 1u32 }", "expected `Nat`, found `U32`");
 }
 
 #[test]

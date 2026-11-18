@@ -1,0 +1,18 @@
+// Infix operators, `let` bindings, and both numeric types.
+//
+// `Nat` arithmetic is unbounded and unary; it is intended for proofs and
+// small indices. `U32` arithmetic is machine-sized and wraps.
+fn main(): Nat {
+  let a: Nat = 20
+  let b: Nat = 6
+  let q: Nat = a / b
+  let r: Nat = a % b
+  let bits: Nat = (a & b) + (a | b) + (a ^ b)
+  let shift: Nat = (1 << 5) + (64 >> 3)
+  let word: U32 = (20 / 6) + (20 % 6)
+  let word_ok: Nat = match word == 5 {
+    true => 1
+    false => 0
+  }
+  q + r + bits + shift + word_ok
+}

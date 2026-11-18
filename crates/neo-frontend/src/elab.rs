@@ -363,11 +363,7 @@ fn elab_type(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<RcTm> {
 pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm, V)> {
     match expr {
         Expr::Var(name, span) => elab_var(globals, ctx, name, *span),
-        Expr::Nat(n, span) => {
-            let tm = nat_literal(globals, *n, *span)?;
-            Ok((tm, vind("Nat", Vec::new())))
-        }
-        Expr::U32Lit(n, _) => Ok((prim_lit(*n), vprimty(PrimTy::U32))),
+        Expr::Numeral(n, suffix, span) => elab_numeral_infer(*n, *suffix, *span),
         Expr::Str(s, span) => string_literal(globals, s, *span),
         Expr::Type(u, _) => Ok((rc(Tm::Type(*u)), vtype(u + 1))),
         Expr::Prop(_) => Ok((rc(Tm::Prop), vtype(0))),
@@ -393,6 +389,7 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
             }
             elab_app(globals, ctx, f, implicit, args, *span)
         }
+        Expr::BinOp { op, lhs, rhs, span } => elab_binop_infer(globals, ctx, *op, lhs, rhs, *span),
         Expr::Match(scrut, arms, span) => {
             let (tm, ty) = elab_match(globals, ctx, scrut, arms, None, *span)?;
             Ok((tm, ty))
@@ -402,6 +399,12 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
             *span,
             "`refl` needs an expected equality type; use it where the type is known",
         )),
+        Expr::Ascribe(e, ty, _) => {
+            let tm_ty = elab_type(globals, ctx, ty)?;
+            let v = eval(globals, &ctx.env, &tm_ty);
+            let tm = elab_check(globals, ctx, e, &v)?;
+            Ok((tm, v))
+        }
         Expr::Block(b) => elab_block_infer(globals, ctx, b),
         Expr::Paren(e, _) => elab_infer(globals, ctx, e),
     }
@@ -1175,8 +1178,19 @@ fn elab_bindings(
 ) -> Result<Vec<(String, RcTm, RcTm)>> {
     let mut saved = Vec::new();
     for b in &block.bindings {
-        let (value_tm, value_ty) = elab_infer(globals, ctx, &b.value)?;
-        let dom = quote(globals, ctx.level(), &value_ty);
+        let (value_tm, value_ty, dom) = match &b.ty {
+            Some(ty_expr) => {
+                let dom = elab_type(globals, ctx, ty_expr)?;
+                let value_ty = eval(globals, &ctx.env, &dom);
+                let value_tm = elab_check(globals, ctx, &b.value, &value_ty)?;
+                (value_tm, value_ty, dom)
+            }
+            None => {
+                let (value_tm, value_ty) = elab_infer(globals, ctx, &b.value)?;
+                let dom = quote(globals, ctx.level(), &value_ty);
+                (value_tm, value_ty, dom)
+            }
+        };
         saved.push((b.name.clone(), dom, value_tm));
         ctx.push(b.name.clone(), value_ty);
     }
@@ -1187,6 +1201,9 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
     match expr {
         Expr::FnLam(binders, body, span) => {
             elab_lam_check(globals, ctx, binders, body, expected, *span)
+        }
+        Expr::Numeral(n, suffix, span) => {
+            elab_numeral_check(globals, ctx, *n, *suffix, *span, expected)
         }
         Expr::Refl(span) => elab_refl(globals, ctx, expected, *span),
         Expr::Var(n, span) => {
@@ -1216,9 +1233,27 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
             }
             elab_app_check(globals, ctx, f, implicit, args, expected, *span)
         }
+        Expr::BinOp { op, lhs, rhs, span } => {
+            elab_binop_check(globals, ctx, *op, lhs, rhs, *span, expected)
+        }
         Expr::Match(scrut, arms, span) => {
             let (tm, _ty) = elab_match(globals, ctx, scrut, arms, Some(expected), *span)?;
             Ok(tm)
+        }
+        Expr::Ascribe(e, ty, _) => {
+            let tm_ty = elab_type(globals, ctx, ty)?;
+            let v = eval(globals, &ctx.env, &tm_ty);
+            let tm = elab_check(globals, ctx, e, &v)?;
+            if conv_ty(globals, ctx.level(), &v, expected) {
+                Ok(tm)
+            } else {
+                let found = crate::pretty::show_val(globals, ctx.level(), &v);
+                let want = crate::pretty::show_val(globals, ctx.level(), expected);
+                Err(Error::at(
+                    expr.span(),
+                    format!("type mismatch: expected `{}`, found `{}`", want, found),
+                ))
+            }
         }
         Expr::Block(b) => elab_block_check(globals, ctx, b, expected),
         Expr::Paren(e, _) => elab_check(globals, ctx, e, expected),
@@ -1508,7 +1543,382 @@ fn elab_lam_check(
     Ok(tm)
 }
 
+const MAX_NAT_LITERAL: u64 = 1_000_000;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NumTy {
+    Nat,
+    U32,
+}
+
+impl NumTy {
+    fn val(self) -> V {
+        match self {
+            NumTy::Nat => vind("Nat", Vec::new()),
+            NumTy::U32 => vprimty(PrimTy::U32),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EqTy {
+    Nat,
+    U32,
+    Bool,
+    String,
+    Unit,
+}
+
+fn vbool() -> V {
+    vind("Bool", Vec::new())
+}
+
+fn classify_num_ty(globals: &Globals, ty: &V) -> Option<NumTy> {
+    let ty = force(globals, ty.clone());
+    match &*ty {
+        Val::Ind(name, args) if name == "Nat" && args.is_empty() => Some(NumTy::Nat),
+        Val::PrimTy(PrimTy::U32) => Some(NumTy::U32),
+        _ => None,
+    }
+}
+
+fn classify_eq_ty(globals: &Globals, ty: &V) -> Option<EqTy> {
+    let ty = force(globals, ty.clone());
+    match &*ty {
+        Val::Ind(name, args) if args.is_empty() => match name.as_str() {
+            "Nat" => Some(EqTy::Nat),
+            "Bool" => Some(EqTy::Bool),
+            "String" => Some(EqTy::String),
+            "Unit" => Some(EqTy::Unit),
+            _ => None,
+        },
+        Val::PrimTy(PrimTy::U32) => Some(EqTy::U32),
+        _ => None,
+    }
+}
+
+fn is_ambiguous_numeral(expr: &Expr) -> bool {
+    match expr {
+        Expr::Numeral(_, None, _) => true,
+        Expr::Paren(e, _) => is_ambiguous_numeral(e),
+        _ => false,
+    }
+}
+
+fn elab_numeral_infer(n: u64, suffix: Option<NumSuffix>, span: Span) -> Result<(RcTm, V)> {
+    match suffix {
+        Some(NumSuffix::U32) => {
+            let word = u32::try_from(n).map_err(|_| Error::at(span, "u32 literal is too large"))?;
+            Ok((prim_lit(word), vprimty(PrimTy::U32)))
+        }
+        None => Err(Error::at(
+            span,
+            "cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix",
+        )),
+    }
+}
+
+fn elab_numeral_check(
+    globals: &Globals,
+    ctx: &Ctx,
+    n: u64,
+    suffix: Option<NumSuffix>,
+    span: Span,
+    expected: &V,
+) -> Result<RcTm> {
+    if let Some(NumSuffix::U32) = suffix {
+        let word = u32::try_from(n).map_err(|_| Error::at(span, "u32 literal is too large"))?;
+        let tm = prim_lit(word);
+        if conv_ty(globals, ctx.level(), &vprimty(PrimTy::U32), expected) {
+            return Ok(tm);
+        }
+        let want = crate::pretty::show_val(globals, ctx.level(), expected);
+        return Err(Error::at(
+            span,
+            format!(
+                "literal suffix `u32` conflicts with expected type `{}`",
+                want
+            ),
+        ));
+    }
+    let expected = force(globals, expected.clone());
+    match &*expected {
+        Val::Ind(name, args) if name == "Nat" && args.is_empty() => nat_literal(globals, n, span),
+        Val::PrimTy(PrimTy::U32) => {
+            let word =
+                u32::try_from(n).map_err(|_| Error::at(span, "literal does not fit in `U32`"))?;
+            Ok(prim_lit(word))
+        }
+        Val::Neutral(_) => Err(Error::at(
+            span,
+            "cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix",
+        )),
+        _ => {
+            let want = crate::pretty::show_val(globals, ctx.level(), &expected);
+            Err(Error::at(
+                span,
+                format!("numeric literal cannot have type `{}`", want),
+            ))
+        }
+    }
+}
+
+fn num_ty_or_error(globals: &Globals, ctx: &Ctx, span: Span, op: BinOp, ty: &V) -> Result<NumTy> {
+    classify_num_ty(globals, ty).ok_or_else(|| {
+        let found = crate::pretty::show_val(globals, ctx.level(), ty);
+        Error::at(
+            span,
+            format!(
+                "operator `{}` requires `Nat` or `U32`, found `{}`",
+                op.symbol(),
+                found
+            ),
+        )
+    })
+}
+
+fn elab_numeric_operands(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: Span,
+    hint: Option<&V>,
+) -> Result<(RcTm, RcTm, NumTy)> {
+    if let Some(ty) = hint
+        && let Some(num) = classify_num_ty(globals, ty)
+    {
+        let a = elab_check(globals, ctx, lhs, ty)?;
+        let b = elab_check(globals, ctx, rhs, ty)?;
+        return Ok((a, b, num));
+    }
+    if !is_ambiguous_numeral(lhs) {
+        let (a, ty) = elab_infer(globals, ctx, lhs)?;
+        let num = num_ty_or_error(globals, ctx, span, op, &ty)?;
+        let b = elab_check(globals, ctx, rhs, &ty)?;
+        return Ok((a, b, num));
+    }
+    if !is_ambiguous_numeral(rhs) {
+        let (b, ty) = elab_infer(globals, ctx, rhs)?;
+        let num = num_ty_or_error(globals, ctx, span, op, &ty)?;
+        let a = elab_check(globals, ctx, lhs, &ty)?;
+        return Ok((a, b, num));
+    }
+    Err(Error::at(
+        span,
+        format!(
+            "cannot infer the numeric type of `{}`; annotate an operand",
+            op.symbol()
+        ),
+    ))
+}
+
+fn prim_op_of(op: BinOp) -> PrimOp {
+    match op {
+        BinOp::Add => PrimOp::Add,
+        BinOp::Sub => PrimOp::Sub,
+        BinOp::Mul => PrimOp::Mul,
+        BinOp::Div => PrimOp::Div,
+        BinOp::Rem => PrimOp::Rem,
+        BinOp::And => PrimOp::And,
+        BinOp::Or => PrimOp::Or,
+        BinOp::Xor => PrimOp::Xor,
+        BinOp::Shl => PrimOp::Shl,
+        BinOp::Shr => PrimOp::Shr,
+        BinOp::Lt => PrimOp::Lt,
+        BinOp::Le => PrimOp::Le,
+        BinOp::Gt => PrimOp::Gt,
+        BinOp::Ge => PrimOp::Ge,
+        BinOp::Eq => PrimOp::Eq,
+        BinOp::Ne => PrimOp::Ne,
+    }
+}
+
+fn nat_op_name(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "nat_add",
+        BinOp::Sub => "nat_sub",
+        BinOp::Mul => "nat_mul",
+        BinOp::Div => "nat_div",
+        BinOp::Rem => "nat_rem",
+        BinOp::And => "nat_and",
+        BinOp::Or => "nat_or",
+        BinOp::Xor => "nat_xor",
+        BinOp::Shl => "nat_shl",
+        BinOp::Shr => "nat_shr",
+        BinOp::Lt => "nat_lt",
+        BinOp::Le => "nat_le",
+        BinOp::Gt => "nat_gt",
+        BinOp::Ge => "nat_ge",
+        BinOp::Eq => "nat_eq",
+        BinOp::Ne => "nat_ne",
+    }
+}
+
+fn prelude_call(globals: &Globals, name: &str, a: RcTm, b: RcTm, span: Span) -> Result<RcTm> {
+    if globals.get_ty(name).is_none() {
+        return Err(Error::at(
+            span,
+            format!("internal: missing prelude function `{}`", name),
+        ));
+    }
+    Ok(app(app(const_(name), a), b))
+}
+
+fn numeric_call(
+    globals: &Globals,
+    op: BinOp,
+    a: RcTm,
+    b: RcTm,
+    ty: NumTy,
+    span: Span,
+) -> Result<RcTm> {
+    match ty {
+        NumTy::U32 => Ok(prim_op(prim_op_of(op), a, b)),
+        NumTy::Nat => prelude_call(globals, nat_op_name(op), a, b, span),
+    }
+}
+
+fn eq_ty_or_error(globals: &Globals, ctx: &Ctx, span: Span, ty: &V) -> Result<EqTy> {
+    classify_eq_ty(globals, ty).ok_or_else(|| {
+        let found = crate::pretty::show_val(globals, ctx.level(), ty);
+        Error::at(
+            span,
+            format!("boolean equality is not defined for type `{}`", found),
+        )
+    })
+}
+
+fn equality_call(
+    globals: &Globals,
+    op: BinOp,
+    ty: EqTy,
+    a: RcTm,
+    b: RcTm,
+    span: Span,
+) -> Result<RcTm> {
+    let negated = op == BinOp::Ne;
+    let name = match (ty, negated) {
+        (EqTy::Nat, false) => "nat_eq",
+        (EqTy::Nat, true) => "nat_ne",
+        (EqTy::Bool, false) => "bool_eq",
+        (EqTy::Bool, true) => "bool_ne",
+        (EqTy::String, false) => "str_eq",
+        (EqTy::String, true) => "str_ne",
+        (EqTy::Unit, false) => "unit_eq",
+        (EqTy::Unit, true) => "unit_ne",
+        (EqTy::U32, false) => return Ok(prim_op(PrimOp::Eq, a, b)),
+        (EqTy::U32, true) => return Ok(prim_op(PrimOp::Ne, a, b)),
+    };
+    prelude_call(globals, name, a, b, span)
+}
+
+fn elab_equality_op(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: Span,
+) -> Result<RcTm> {
+    let (a, b, ty) = if !is_ambiguous_numeral(lhs) {
+        let (a, ty) = elab_infer(globals, ctx, lhs)?;
+        let b = elab_check(globals, ctx, rhs, &ty)?;
+        (a, b, ty)
+    } else if !is_ambiguous_numeral(rhs) {
+        let (b, ty) = elab_infer(globals, ctx, rhs)?;
+        let a = elab_check(globals, ctx, lhs, &ty)?;
+        (a, b, ty)
+    } else {
+        return Err(Error::at(
+            span,
+            "cannot infer the operand type of `==` or `!=`; annotate an operand",
+        ));
+    };
+    let eq_ty = eq_ty_or_error(globals, ctx, span, &ty)?;
+    equality_call(globals, op, eq_ty, a, b, span)
+}
+
+fn elab_binop_infer(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: Span,
+) -> Result<(RcTm, V)> {
+    if op.is_equality() {
+        let tm = elab_equality_op(globals, ctx, op, lhs, rhs, span)?;
+        return Ok((tm, vbool()));
+    }
+    let (a, b, num) = elab_numeric_operands(globals, ctx, op, lhs, rhs, span, None)?;
+    let tm = numeric_call(globals, op, a, b, num, span)?;
+    let ty = if op.is_comparison() {
+        vbool()
+    } else {
+        num.val()
+    };
+    Ok((tm, ty))
+}
+
+fn elab_binop_check(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: Span,
+    expected: &V,
+) -> Result<RcTm> {
+    if op.is_equality() {
+        let tm = elab_equality_op(globals, ctx, op, lhs, rhs, span)?;
+        return expect_ty(globals, ctx, span, tm, vbool(), expected);
+    }
+    let hint = if op.is_comparison() {
+        None
+    } else {
+        Some(expected)
+    };
+    let (a, b, num) = elab_numeric_operands(globals, ctx, op, lhs, rhs, span, hint)?;
+    let tm = numeric_call(globals, op, a, b, num, span)?;
+    let ty = if op.is_comparison() {
+        vbool()
+    } else {
+        num.val()
+    };
+    expect_ty(globals, ctx, span, tm, ty, expected)
+}
+
+fn expect_ty(
+    globals: &Globals,
+    ctx: &Ctx,
+    span: Span,
+    tm: RcTm,
+    found: V,
+    expected: &V,
+) -> Result<RcTm> {
+    if conv_ty(globals, ctx.level(), &found, expected) {
+        return Ok(tm);
+    }
+    let found = crate::pretty::show_val(globals, ctx.level(), &found);
+    let want = crate::pretty::show_val(globals, ctx.level(), expected);
+    Err(Error::at(
+        span,
+        format!("type mismatch: expected `{}`, found `{}`", want, found),
+    ))
+}
+
 fn nat_literal(globals: &Globals, n: u64, span: Span) -> Result<RcTm> {
+    if n > MAX_NAT_LITERAL {
+        return Err(Error::at(
+            span,
+            format!(
+                "`Nat` literal is too large (limit {}); use a `u32` literal",
+                MAX_NAT_LITERAL
+            ),
+        ));
+    }
     let info = globals
         .get_enum("Nat")
         .ok_or_else(|| Error::at(span, "numeric literals require the `Nat` type"))?;

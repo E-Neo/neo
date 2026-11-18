@@ -13,6 +13,10 @@ and milestones are in [`docs/bootstrap.md`](docs/bootstrap.md).
 Implemented:
 
 - `enum` and `fn` declarations, `match`, equality and `refl`;
+- immutable `let` bindings with optional annotations;
+- expected-type-directed numerals and `(e : T)` ascription;
+- infix arithmetic, bitwise, shift, comparison, and boolean equality over
+  `Nat` and `U32`;
 - dependent function types and implicit parameters in `[]`;
 - implicit type and index parameters inferred at call sites;
 - closures and first-class functions;
@@ -27,7 +31,7 @@ Implemented:
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
 and growable vectors (`Array[T, n]`, `Vec[T]`), primitive strings and bytes,
-modules, general I/O, and built-in `Nat` arithmetic. See the
+modules, and general I/O. See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 

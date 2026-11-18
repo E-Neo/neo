@@ -52,6 +52,65 @@ pub struct Param {
     pub implicit: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumSuffix {
+    U32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl BinOp {
+    pub fn is_comparison(self) -> bool {
+        matches!(
+            self,
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne
+        )
+    }
+
+    pub fn is_equality(self) -> bool {
+        matches!(self, BinOp::Eq | BinOp::Ne)
+    }
+
+    pub fn symbol(self) -> &'static str {
+        match self {
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Rem => "%",
+            BinOp::And => "&",
+            BinOp::Or => "|",
+            BinOp::Xor => "^",
+            BinOp::Shl => "<<",
+            BinOp::Shr => ">>",
+            BinOp::Lt => "<",
+            BinOp::Le => "<=",
+            BinOp::Gt => ">",
+            BinOp::Ge => ">=",
+            BinOp::Eq => "==",
+            BinOp::Ne => "!=",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Block {
     pub bindings: Vec<Binding>,
@@ -62,6 +121,7 @@ pub struct Block {
 #[derive(Clone, Debug)]
 pub struct Binding {
     pub name: String,
+    pub ty: Option<Expr>,
     pub value: Expr,
     pub span: Span,
 }
@@ -77,8 +137,7 @@ pub struct Binder {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Var(String, Span),
-    Nat(u64, Span),
-    U32Lit(u32, Span),
+    Numeral(u64, Option<NumSuffix>, Span),
     Str(String, Span),
     Type(u32, Span),
     Prop(Span),
@@ -90,9 +149,16 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
+    BinOp {
+        op: BinOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+        span: Span,
+    },
     Match(Box<Expr>, Vec<Arm>, Span),
     Eq(Box<Expr>, Box<Expr>, Span),
     Refl(Span),
+    Ascribe(Box<Expr>, Box<Expr>, Span),
     Block(Block),
     Paren(Box<Expr>, Span),
 }
@@ -101,17 +167,18 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Var(_, s)
-            | Expr::Nat(_, s)
-            | Expr::U32Lit(_, s)
+            | Expr::Numeral(_, _, s)
             | Expr::Str(_, s)
             | Expr::Type(_, s)
             | Expr::Prop(s)
             | Expr::FnType(_, _, s)
             | Expr::FnLam(_, _, s)
             | Expr::App { span: s, .. }
+            | Expr::BinOp { span: s, .. }
             | Expr::Match(_, _, s)
             | Expr::Eq(_, _, s)
             | Expr::Refl(s)
+            | Expr::Ascribe(_, _, s)
             | Expr::Paren(_, s) => *s,
             Expr::Block(b) => b.span,
         }

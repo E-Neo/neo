@@ -1,13 +1,14 @@
+use crate::surface::NumSuffix;
 use neo_common::error::{Error, Result, Span};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tok {
     Ident(String),
-    Nat(u64),
-    U32(u32),
+    Numeral(u64, Option<NumSuffix>),
     Str(String),
     Enum,
     Fn,
+    Let,
     Match,
     Type,
     Prop,
@@ -15,6 +16,21 @@ pub enum Tok {
     Arrow,
     FatArrow,
     Eq,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Amp,
+    Pipe,
+    Caret,
+    Shl,
+    Shr,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Ne,
     LParen,
     RParen,
     LBracket,
@@ -149,6 +165,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 "_" => Tok::Underscore,
                 "enum" => Tok::Enum,
                 "fn" => Tok::Fn,
+                "let" => Tok::Let,
                 "match" => Tok::Match,
                 "Type" => Tok::Type,
                 "Prop" => Tok::Prop,
@@ -183,7 +200,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                     advance(&mut i, &mut line, &mut col);
                 }
                 out.push(Token {
-                    tok: Tok::U32(n),
+                    tok: Tok::Numeral(n as u64, Some(NumSuffix::U32)),
                     span,
                 });
                 continue;
@@ -193,7 +210,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 .parse::<u64>()
                 .map_err(|_| Error::at(span, "numeric literal is too large"))?;
             out.push(Token {
-                tok: Tok::Nat(n),
+                tok: Tok::Numeral(n, None),
                 span,
             });
             continue;
@@ -289,7 +306,103 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                         span,
                     });
                 } else {
-                    return Err(Error::at(span, "unexpected character '-'"));
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token {
+                        tok: Tok::Minus,
+                        span,
+                    });
+                }
+            }
+            '+' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Plus,
+                    span,
+                });
+            }
+            '*' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Star,
+                    span,
+                });
+            }
+            '/' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Slash,
+                    span,
+                });
+            }
+            '%' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Percent,
+                    span,
+                });
+            }
+            '&' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Amp,
+                    span,
+                });
+            }
+            '|' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Pipe,
+                    span,
+                });
+            }
+            '^' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Caret,
+                    span,
+                });
+            }
+            '<' => {
+                if i + 1 < chars.len() && chars[i + 1] == '<' {
+                    advance(&mut i, &mut line, &mut col);
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token {
+                        tok: Tok::Shl,
+                        span,
+                    });
+                } else if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    advance(&mut i, &mut line, &mut col);
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token { tok: Tok::Le, span });
+                } else {
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token { tok: Tok::Lt, span });
+                }
+            }
+            '>' => {
+                if i + 1 < chars.len() && chars[i + 1] == '>' {
+                    advance(&mut i, &mut line, &mut col);
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token {
+                        tok: Tok::Shr,
+                        span,
+                    });
+                } else if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    advance(&mut i, &mut line, &mut col);
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token { tok: Tok::Ge, span });
+                } else {
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token { tok: Tok::Gt, span });
+                }
+            }
+            '!' => {
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    advance(&mut i, &mut line, &mut col);
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token { tok: Tok::Ne, span });
+                } else {
+                    return Err(Error::at(span, "unexpected character '!'"));
                 }
             }
             _ => {

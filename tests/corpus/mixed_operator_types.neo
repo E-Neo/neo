@@ -1,0 +1,5 @@
+fn main(): Nat {
+  let n: Nat = 1
+  let x = 1u32 + n
+  0
+}

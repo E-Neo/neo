@@ -46,6 +46,11 @@ commits and design notes.
 | D12 | **Parity strictness.** Acceptance, inferred types, and runtime output must match exactly. Diagnostic wording need not. |
 | D13 | **Performance budget.** Stage 1 self-compiles in under ~60 s and under ~1 GiB under `wasmtime`. Measured at M5 and M9; adjusted only with a recorded reason. |
 | D14 | **Determinism.** No `HashMap` iteration in emission, all name tables sorted, no clock or environment input, and CI double-builds each corpus program. |
+| D15 | **Bindings.** `let name = e` and `let name: T = e` are immutable block bindings. The earlier no-`let` rule is relaxed. A binding annotation is parsed at comparison precedence, so function and equality types in annotations are parenthesized. |
+| D16 | **Equality split.** `=` is the propositional equality type and the `let` separator. `==` and `!=` are boolean equality over `Nat`, `U32`, `Bool`, `String`, and `Unit`. |
+| D17 | **Directed numerals.** A numeral has no default type. The expected type selects `Nat` or `U32`; the `u32` suffix pins `U32`; inference without an expected type is rejected. `(e : T)` ascription is available. `Nat` literals above 1,000,000 are rejected. |
+| D18 | **Infix operators.** `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|`, `< <= > >=`, `== !=`, and `=` with the documented precedence. Arithmetic, bitwise, shift, and comparisons are overloaded over `Nat` and `U32`; `Nat` implementations are ordinary total prelude functions, `U32` implementations are the existing primitives. |
+| D19 | **No `USize`.** A bounded inductive machine type with proof-carrying `succ` and arithmetic was considered and rejected as too costly for the current milestone. `Nat` remains the inductive type for proofs and indices; `U32` remains the 32-bit machine type for computation. |
 
 ## 3. The `Neo-B` subset
 
@@ -77,6 +82,7 @@ Parity against Stage 0 is added by M1 and applies from then on.
 | M0 | This document and the decision record | Accepted | — |
 | M1 | `neo-internal` oracle and corpus manifest (verdict, type, build hash) | Runs on all examples; catches a seeded regression; double-build stable | ~600 Rust |
 | M2 | `U32`: kernel terms, literals, unboxed codegen, tests, docs | Corpus green, deterministic | ~800 Rust |
+| M2.5 | Surface syntax: `let`, `=`/`==`, directed numerals, infix operators, ascription | Corpus green; Nat and U32 operator tests | ~700 Rust + ~400 Neo |
 | M3 | Primitive `String`/`Bytes` and literal lowering | Corpus green; prelude migrated | ~900 Rust |
 | M4 | I/O and world growth, `Result`, `main(): U32` | File-reading program runs under `wasmtime` | ~700 Rust |
 | M5 | Arenas, free lists, `return_call`, benchmark | Self-compile-shaped workload in budget | ~700 Rust |

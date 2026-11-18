@@ -3,7 +3,7 @@
 // When the scrutinee index is constructor-headed, the checker can rule out
 // impossible constructors and refine branch fields. Here `vnil` is impossible
 // for `Vec[T, succ(n)]`, so the `vnil` arm can be omitted. In the `vcons`
-// arm, `succ(m) == succ(n)` refines `m` to `n`, making the tail have type
+// arm, `succ(m) = succ(n)` refines `m` to `n`, making the tail have type
 // `Vec[T, n]`.
 enum Vec[T: Type, n: Nat] {
   vnil : Vec[T, zero]
@@ -23,5 +23,5 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
 }
 
 fn main(): Nat {
-  head(vcons(1, 4, vcons(0, 3, vnil)))
+  head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil)))
 }

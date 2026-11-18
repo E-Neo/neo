@@ -8,11 +8,16 @@ examples/indexed_match.neo	ok	Nat	3419	0x569485f10db4fb09
 examples/indexed_vec.neo	ok	Nat	4613	0x6721975617d43740
 examples/list.neo	ok	List(Nat)	3625	0x970e1961bf642667
 examples/nat.neo	ok	Nat	3608	0x9f8f5ecb2ef4fe80
+examples/operators.neo	ok	Nat	11839	0x7fcbb3a8da74ae9f
 examples/pattern_matching.neo	ok	Nat	3701	0xb8879149365076bc
 examples/proofs.neo	ok	Nat	3260	0xa4a09ef9067eaf2b
 examples/strings.neo	ok	String	31665	0x0f2d195348c6bafb
 examples/u32.neo	ok	U32	3066	0x2153023cecb64249
+tests/corpus/ambiguous_numeral.neo	reject	cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix	-	-
+tests/corpus/chained_comparison.neo	reject	comparison operators are not associative; parenthesize	-	-
+tests/corpus/mixed_operator_types.neo	reject	type mismatch: expected `U32`, found `Nat`	-	-
+tests/corpus/nat_literal_too_large.neo	reject	`Nat` literal is too large (limit 1000000); use a `u32` literal	-	-
 tests/corpus/nested_inductive.neo	reject	`Bad` is not strictly positive in this constructor field (nested inductives are not supported)	-	-
 tests/corpus/non_decreasing.neo	reject	kernel rejected `loop`: recursive call to `loop` is not structurally decreasing; no argument is a strict subterm of a parameter	-	-
 tests/corpus/u32_literal_too_large.neo	reject	u32 literal is too large	-	-
-tests/corpus/u32_mixed_literals.neo	reject	type mismatch: expected `U32`, found `Nat`	-	-
+tests/corpus/u32_suffix_conflict.neo	reject	literal suffix `u32` conflicts with expected type `Nat`	-	-

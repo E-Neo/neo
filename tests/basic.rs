@@ -98,13 +98,13 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn sym[T: Type](x: T, y: T, p: x == y): y == x {
+fn sym[T: Type](x: T, y: T, p: x = y): y = x {
   match p {
     refl => refl
   }
 }
 
-fn add_zero(a: Nat): add(a, zero) == a {
+fn add_zero(a: Nat): add(a, zero) = a {
   match a {
     zero => refl
     succ(p) => match sym(add(p, zero), p, add_zero(p)) {
@@ -127,7 +127,7 @@ fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   }
 }
 
-fn append_assoc[T: Type](xs: List[T], ys: List[T], zs: List[T]): append(append(xs, ys), zs) == append(xs, append(ys, zs)) {
+fn append_assoc[T: Type](xs: List[T], ys: List[T], zs: List[T]): append(append(xs, ys), zs) = append(xs, append(ys, zs)) {
   match xs {
     nil => refl
     cons(h, t) => match append_assoc(t, ys, zs) {
@@ -225,7 +225,7 @@ fn bad(n: Nat): Nat {
 fn equality_motive_under_binder() {
     define(
         r#"
-fn h(x: Nat, p: x == zero): fn(y: Nat) -> zero == x {
+fn h(x: Nat, p: x = zero): fn(y: Nat) -> zero = x {
   match p {
     refl => fn(y: Nat) => refl
   }
@@ -238,7 +238,7 @@ fn h(x: Nat, p: x == zero): fn(y: Nat) -> zero == x {
 fn equality_motive_compound_rhs_under_binder() {
     define(
         r#"
-fn h(x: Nat, p: succ(x) == succ(zero)): fn(y: Nat) -> succ(zero) == succ(x) {
+fn h(x: Nat, p: succ(x) = succ(zero)): fn(y: Nat) -> succ(zero) = succ(x) {
   match p {
     refl => fn(y: Nat) => refl
   }
@@ -251,13 +251,13 @@ fn h(x: Nat, p: succ(x) == succ(zero)): fn(y: Nat) -> succ(zero) == succ(x) {
 fn transport_and_congruence() {
     define(
         r#"
-fn cast[A: Type, B: Type](p: A == B, a: A): B {
+fn cast[A: Type, B: Type](p: A = B, a: A): B {
   match p {
     refl => a
   }
 }
 
-fn cong[T: Type, U: Type](f: fn(T) -> U, x: T, y: T, p: x == y): f(x) == f(y) {
+fn cong[T: Type, U: Type](f: fn(T) -> U, x: T, y: T, p: x = y): f(x) = f(y) {
   match p {
     refl => refl
   }
@@ -270,7 +270,7 @@ fn cong[T: Type, U: Type](f: fn(T) -> U, x: T, y: T, p: x == y): f(x) == f(y) {
 fn rejects_unsound_equality_motive() {
     let err = elaborate_error(
         r#"
-fn bad(x: Nat, p: x == zero): zero == succ(x) {
+fn bad(x: Nat, p: x = zero): zero = succ(x) {
   match p {
     refl => refl
   }
@@ -300,7 +300,7 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
 }
 
 fn demo(): Nat {
-  match tail(vcons(0, 5, vnil)) {
+  match tail(vcons(0, (5 : Nat), vnil)) {
     vnil => 9
   }
 }
@@ -326,7 +326,7 @@ fn head[T: Type, n: Nat](v: Vec[T, succ(n)]): T {
 }
 
 fn demo(): Nat {
-  head(vcons(0, 7, vnil))
+  head(vcons(0, (7 : Nat), vnil))
 }
 "#,
     );
@@ -595,9 +595,9 @@ fn apply(f: fn(x: Nat) -> Nat, x: Nat): Nat {
 }
 
 fn main(): Nat {
-  local = fn[T: Type](x: T) => x
-  applied = apply(id, 3)
-  local(4)
+  let local = fn[T: Type](x: T) => x
+  let applied = apply(id, 3)
+  local[Nat](4)
 }
 "#,
     );
@@ -610,11 +610,11 @@ fn implicit_binders_survive_blocks_and_matches() {
     let globals = define(
         r#"
 fn main(): Nat {
-  from_block = { fn[T: Type](x: T) => x }
-  from_match = match true {
+  let from_block = { fn[T: Type](x: T) => x }
+  let from_match = match true {
     picked => fn[T: Type](x: T) => x
   }
-  from_block(from_match(6))
+  from_block(from_match[Nat](6))
 }
 "#,
     );
@@ -715,7 +715,7 @@ fn add(a: Nat, b: Nat): Nat {
 }
 
 fn inferred(n: Nat): Nat {
-  r = match n {
+  let r: Nat = match n {
     zero => 0
     succ(zero) => 1
     succ(succ(k)) => 2
