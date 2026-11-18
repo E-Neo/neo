@@ -8,6 +8,8 @@ pub fn conv(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
     match (&*a, &*b) {
         (Val::Type(u), Val::Type(v)) => u == v,
         (Val::Prop, Val::Prop) => true,
+        (Val::PrimTy(a), Val::PrimTy(b)) => a == b,
+        (Val::PrimLit(a), Val::PrimLit(b)) => a == b,
         (Val::Pi(da, ca, _), Val::Pi(db, cb, _)) => {
             if !conv(globals, level, da, db) {
                 return false;
@@ -98,6 +100,9 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
     match (a, b) {
         (Neutral::Var(i), Neutral::Var(j)) => i == j,
         (Neutral::Global(x), Neutral::Global(y)) => x == y,
+        (Neutral::PrimOp(o1, a1, b1), Neutral::PrimOp(o2, a2, b2)) => {
+            o1 == o2 && conv(globals, level, a1, a2) && conv(globals, level, b1, b2)
+        }
         (Neutral::App(f, x), Neutral::App(g, y)) => {
             conv_neutral(globals, level, f, g) && conv(globals, level, x, y)
         }

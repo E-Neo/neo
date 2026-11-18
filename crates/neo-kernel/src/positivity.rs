@@ -28,7 +28,10 @@ pub fn check_index(_globals: &Globals, enum_name: &str, tm: &RcTm) -> Result<()>
 
 fn contains(enum_name: &str, tm: &RcTm) -> bool {
     match &**tm {
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => false,
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
+            false
+        }
+        Tm::PrimOp(_, a, b) => contains(enum_name, a) || contains(enum_name, b),
         Tm::Pi { dom, cod, .. } => contains(enum_name, dom) || contains(enum_name, cod),
         Tm::Lam { dom, body, .. } => contains(enum_name, dom) || contains(enum_name, body),
         Tm::App(f, a) => contains(enum_name, f) || contains(enum_name, a),
@@ -67,7 +70,10 @@ fn contains(enum_name: &str, tm: &RcTm) -> bool {
 
 fn bad_occurrence(enum_name: &str, tm: &RcTm) -> bool {
     match &**tm {
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => false,
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
+            false
+        }
+        Tm::PrimOp(_, a, b) => contains(enum_name, a) || contains(enum_name, b),
         Tm::Pi { dom, cod, .. } => contains(enum_name, dom) || bad_occurrence(enum_name, cod),
         Tm::Lam { body, .. } => bad_occurrence(enum_name, body),
         // A direct occurrence, `Ind(enum, args)`, is positive as long as the

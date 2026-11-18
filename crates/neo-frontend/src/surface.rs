@@ -78,6 +78,7 @@ pub struct Binder {
 pub enum Expr {
     Var(String, Span),
     Nat(u64, Span),
+    U32Lit(u32, Span),
     Str(String, Span),
     Type(u32, Span),
     Prop(Span),
@@ -101,6 +102,7 @@ impl Expr {
         match self {
             Expr::Var(_, s)
             | Expr::Nat(_, s)
+            | Expr::U32Lit(_, s)
             | Expr::Str(_, s)
             | Expr::Type(_, s)
             | Expr::Prop(s)

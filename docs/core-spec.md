@@ -28,6 +28,9 @@ t, A, B ::=
   | c                       global function constant
   | Type u                  universe, u : Nat
   | Prop                    impredicative sort
+  | U32                     primitive type
+  | n^32                    primitive literal, n < 2^32
+  | op(t, u)                fully applied primitive operation
   | fn(x: A) -> B           dependent function type
   | fn(x: A) => t           lambda
   | t(u)                    application
@@ -204,6 +207,52 @@ Gamma |- C(a1, ..., an) : E(indices...)
 
 The kernel computes the type by walking the stored constructor telescope; it
 does not trust an index supplied by the elaborator.
+
+### 4.5 Primitive types and operations
+
+A primitive type is an opaque type constant with no constructors:
+
+```text
+Gamma |- U32 : Type 0
+```
+
+A literal inhabits the primitive type directly:
+
+```text
+n < 2^32
+----------------
+Gamma |- n^32 : U32
+```
+
+Operations are fully applied, binary, and have fixed signatures:
+
+```text
+Gamma |- a <= U32       Gamma |- b <= U32       op is arithmetic or bitwise
+----------------------------------------------------------------------------
+Gamma |- op(a, b) : U32
+
+Gamma |- a <= U32       Gamma |- b <= U32       cmp is a comparison
+---------------------------------------------------------------------
+Gamma |- cmp(a, b) : Bool
+```
+
+`Bool` is the prelude enum; comparisons reduce to its `false` and `true`
+constructors. Operations are not values: a bare operation name is not a term,
+so it can never escape into a position the evaluator does not reduce.
+
+Evaluation reduces an operation whose operands are both literals:
+
+```text
+op(n, m) --> apply(op, n, m)
+```
+
+`apply` is total. Arithmetic wraps modulo `2^32`, division and remainder by zero
+yield `0`, and shifts use the low five bits of the count. A comparison yields
+the corresponding `Bool` constructor.
+
+Conversion compares primitive types by name and literals by value. An
+operation with a non-literal operand stays neutral, and two neutral operations
+are convertible when their operator and operands are.
 
 ## 5. Positivity and enum well-formedness
 
@@ -411,6 +460,7 @@ Trusted (must be audited):
 - the core term representation and de Bruijn operations;
 - `eval`, `force`, and `quote`;
 - `conv` and `conv_ty`;
+- primitive operation semantics (`PrimOp::apply`);
 - the type checker and match refinement in `check.rs`;
 - positivity and enum re-validation;
 - the structural termination checker.
@@ -439,6 +489,8 @@ These are deliberate Stage 0 limits, not soundness holes:
   proposition are not automatically convertible.
 - No general well-founded recursion; only structural recursion.
 - No universe polymorphism: `Type u` levels are concrete.
+- `U32` is eliminated only by its fixed operations; there is no general
+  recursor over machine words and no `Nat`/`U32` conversion.
 - Large elimination from `Prop` is only allowed under singleton elimination.
 - `Prop -> Prop` families are conservatively sorted in `Type 0`.
 

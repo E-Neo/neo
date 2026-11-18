@@ -27,6 +27,14 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
         Tm::Type(0) => "Type 0".to_string(),
         Tm::Type(u) => format!("Type {}", u),
         Tm::Prop => "Prop".to_string(),
+        Tm::PrimTy(t) => t.name().to_string(),
+        Tm::PrimLit(n) => n.to_string(),
+        Tm::PrimOp(op, a, b) => format!(
+            "{}({}, {})",
+            op.name(),
+            term_at(globals, names, a),
+            term_at(globals, names, b)
+        ),
         Tm::Pi {
             name,
             dom,

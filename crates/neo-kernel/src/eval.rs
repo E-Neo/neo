@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::{Branch, RcTm};
+use crate::core::{Branch, PrimOp, PrimOutcome, RcTm};
 use crate::env::{GlobalDef, Globals};
 use crate::value::*;
 
@@ -19,6 +19,13 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
         },
         Type(u) => vtype(*u),
         Prop => vprop(),
+        PrimTy(t) => vprimty(*t),
+        PrimLit(n) => vprimlit(*n),
+        PrimOp(op, a, b) => {
+            let a = eval(globals, env, a);
+            let b = eval(globals, env, b);
+            reduce_prim(globals, *op, &a, &b)
+        }
         Pi {
             dom, cod, implicit, ..
         } => {
@@ -128,6 +135,24 @@ pub fn eval_closure(globals: &Globals, closure: &Closure, arg: V) -> V {
     let mut env = closure.env.clone();
     env.push(arg);
     eval(globals, &env, &closure.body)
+}
+
+/// Reduce a primitive operation on two values. Literal operands reduce to a
+/// literal or to a prelude `Bool` constructor; anything else stays neutral.
+pub fn reduce_prim(globals: &Globals, op: PrimOp, a: &V, b: &V) -> V {
+    let a = force(globals, a.clone());
+    let b = force(globals, b.clone());
+    if let (Val::PrimLit(x), Val::PrimLit(y)) = (&*a, &*b) {
+        match op.apply(*x, *y) {
+            PrimOutcome::U32(n) => return vprimlit(n),
+            PrimOutcome::Bool(flag) => {
+                if let Some((enum_name, index)) = globals.bool_ctor(flag) {
+                    return vctor(enum_name, index, Vec::new());
+                }
+            }
+        }
+    }
+    vprimop(op, a, b)
 }
 
 pub fn apply_pi(globals: &Globals, pi: V, arg: V) -> Option<V> {

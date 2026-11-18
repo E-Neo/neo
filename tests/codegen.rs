@@ -245,3 +245,46 @@ fn main(): Nat {
         "7\n",
     );
 }
+
+#[test]
+fn builds_u32_arithmetic() {
+    check(
+        r#"
+fn main(): U32 {
+  u32_add(u32_mul(6u32, 7u32), u32_sub(0u32, 1u32))
+}
+"#,
+        "u32",
+        "41\n",
+    );
+}
+
+#[test]
+fn builds_u32_division_by_zero() {
+    check(
+        r#"
+fn main(): U32 {
+  u32_add(u32_div(9u32, 0u32), u32_rem(9u32, 0u32))
+}
+"#,
+        "u32-divzero",
+        "0\n",
+    );
+}
+
+#[test]
+fn builds_u32_comparison() {
+    check(
+        r#"
+fn is_even(n: U32): Bool {
+  u32_eq(u32_rem(n, 2u32), 0u32)
+}
+
+fn main(): Bool {
+  is_even(40u32)
+}
+"#,
+        "u32-cmp",
+        "true\n",
+    );
+}

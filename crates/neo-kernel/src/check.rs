@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::conv::{conv, conv_ty};
-use crate::core::{Branch, RcTm, Tm};
+use crate::core::{Branch, PrimOp, PrimTy, RcTm, Tm};
 use crate::env::{CtorInfo, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
@@ -76,6 +76,14 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
         }
         Type(u) => Ok(vtype(u + 1)),
         Prop => Ok(vtype(0)),
+        PrimTy(_) => Ok(vtype(0)),
+        PrimLit(_) => Ok(vprimty(crate::core::PrimTy::U32)),
+        PrimOp(op, a, b) => {
+            let word = vprimty(crate::core::PrimTy::U32);
+            check(globals, ctx, a, &word)?;
+            check(globals, ctx, b, &word)?;
+            prim_result_ty(globals, *op)
+        }
         Pi { dom, cod, name, .. } => {
             let dom_sort = infer_sort(globals, ctx, dom)?;
             let dom_v = eval(globals, &ctx.env, dom);
@@ -516,6 +524,20 @@ fn unify_indices(
             }
         }
         (Val::Prop, Val::Prop) => UnifyOutcome::Ok,
+        (Val::PrimTy(a), Val::PrimTy(b)) => {
+            if a == b {
+                UnifyOutcome::Ok
+            } else {
+                UnifyOutcome::Impossible
+            }
+        }
+        (Val::PrimLit(a), Val::PrimLit(b)) => {
+            if a == b {
+                UnifyOutcome::Ok
+            } else {
+                UnifyOutcome::Impossible
+            }
+        }
         (Val::Eq(t1, l1, r1), Val::Eq(t2, l2, r2)) => unify_lists(
             globals,
             level,
@@ -528,6 +550,13 @@ fn unify_indices(
         (Val::Neutral(n1), Val::Neutral(n2)) => match (&**n1, &**n2) {
             (Neutral::Var(i), Neutral::Var(j)) if i == j => UnifyOutcome::Ok,
             (Neutral::Global(x), Neutral::Global(y)) if x == y => UnifyOutcome::Ok,
+            (Neutral::PrimOp(o1, a1, b1), Neutral::PrimOp(o2, a2, b2)) if o1 == o2 => {
+                match unify_indices(globals, level, flexible, solutions, a1, b1) {
+                    UnifyOutcome::Impossible => UnifyOutcome::Impossible,
+                    UnifyOutcome::Stuck => UnifyOutcome::Stuck,
+                    UnifyOutcome::Ok => unify_indices(globals, level, flexible, solutions, a2, b2),
+                }
+            }
             (Neutral::App(f1, a1), Neutral::App(f2, a2)) => {
                 let f = unify_indices(
                     globals,
@@ -602,6 +631,7 @@ fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
                 occurs(globals, var, &vneutral((**f).clone())) || occurs(globals, var, a)
             }
             Neutral::Global(_) => false,
+            Neutral::PrimOp(_, a, b) => occurs(globals, var, a) || occurs(globals, var, b),
             Neutral::Match { .. } | Neutral::J { .. } => true,
         },
         Val::Ind(_, args) | Val::Ctor(_, _, args) => args.iter().any(|a| occurs(globals, var, a)),
@@ -610,7 +640,7 @@ fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
         }
         Val::Refl(a) => occurs(globals, var, a),
         Val::Pi(..) | Val::Lam(_) => true,
-        Val::Type(_) | Val::Prop | Val::Glob(_) => false,
+        Val::Type(_) | Val::Prop | Val::PrimTy(_) | Val::PrimLit(_) | Val::Glob(_) => false,
     }
 }
 
@@ -654,6 +684,12 @@ fn infer_match(
     let scrut_ty = force(globals, scrut_ty);
     let (enum_name, params) = match &*scrut_ty {
         Val::Ind(name, args) => (name.clone(), args.clone()),
+        Val::PrimTy(t) => {
+            return Err(Error::new(format!(
+                "match: primitive type `{}` has no constructors",
+                t.name()
+            )));
+        }
         _ => return Err(Error::new("match: scrutinee is not an enum")),
     };
     let info = globals
@@ -820,6 +856,19 @@ pub fn check(globals: &Globals, ctx: &mut Ctx, tm: &RcTm, expected: &V) -> Resul
     }
 }
 
+/// The result type of a primitive operation. Comparisons return the prelude
+/// `Bool`; arithmetic returns `U32`.
+pub fn prim_result_ty(globals: &Globals, op: PrimOp) -> Result<V> {
+    if !op.is_comparison() {
+        return Ok(vprimty(PrimTy::U32));
+    }
+    let (enum_name, _) = globals
+        .bool_ctor(true)
+        .or_else(|| globals.bool_ctor(false))
+        .ok_or_else(|| Error::new("primitive comparisons require the prelude `Bool` type"))?;
+    Ok(vind(enum_name, Vec::new()))
+}
+
 pub fn infer_sort(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<Sort> {
     let ty = infer(globals, ctx, tm)?;
     sort_of_val_in(globals, ctx, &ty)
@@ -833,6 +882,7 @@ pub fn sort_of_val_in(globals: &Globals, ctx: &Ctx, v: &V) -> Result<Sort> {
     match &*v {
         Val::Type(u) => Ok(Sort::Type(*u)),
         Val::Prop => Ok(Sort::Prop),
+        Val::PrimTy(_) => Ok(Sort::Type(0)),
         Val::Ind(name, _) => globals
             .sort_of_enum(name)
             .ok_or_else(|| Error::new(format!("unknown enum `{}`", name))),

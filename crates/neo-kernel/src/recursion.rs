@@ -1,5 +1,5 @@
 use crate::check::{self, Ctx};
-use crate::core::{Branch, RcTm, Tm, app, ctor, eq, ind, lam, pi_with, rc};
+use crate::core::{Branch, RcTm, Tm, app, ctor, eq, ind, lam, pi_with, prim_op, rc};
 use crate::env::Globals;
 use crate::eval::eval;
 use neo_common::error::{Error, Result};
@@ -136,14 +136,18 @@ fn inline_lets(tm: &RcTm) -> RcTm {
             motive: inline_lets(motive),
             refl_case: inline_lets(refl_case),
         }),
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
+            tm.clone()
+        }
+        Tm::PrimOp(op, a, b) => prim_op(*op, inline_lets(a), inline_lets(b)),
     }
 }
 
 fn count_var(tm: &RcTm, index: usize, depth: usize) -> usize {
     match &**tm {
         Tm::Var(i) if *i == index + depth => 1,
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => 0,
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => 0,
+        Tm::PrimOp(_, a, b) => count_var(a, index, depth) + count_var(b, index, depth),
         Tm::Pi { dom, cod, .. } => count_var(dom, index, depth) + count_var(cod, index, depth + 1),
         Tm::Lam { dom, body, .. } => {
             count_var(dom, index, depth) + count_var(body, index, depth + 1)
@@ -236,7 +240,13 @@ fn check_occurrences(name: &str, arity: usize, tm: &RcTm) -> Result<()> {
                 )))
             }
         }
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => Ok(()),
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
+            Ok(())
+        }
+        Tm::PrimOp(_, a, b) => {
+            check_occurrences(name, arity, a)?;
+            check_occurrences(name, arity, b)
+        }
         Tm::Pi { dom, cod, .. } => {
             check_occurrences(name, arity, dom)?;
             check_occurrences(name, arity, cod)
@@ -404,7 +414,13 @@ fn check_decreasing_tm(
             }
             Ok(())
         }
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => Ok(()),
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
+            Ok(())
+        }
+        Tm::PrimOp(_, a, b) => {
+            check_decreasing_tm(name, arity, a, env, calls)?;
+            check_decreasing_tm(name, arity, b, env, calls)
+        }
         Tm::Pi { dom, cod, .. } => {
             check_decreasing_tm(name, arity, dom, env, calls)?;
             check_decreasing_tm(name, arity, cod, &push_unknown(env, arity), calls)

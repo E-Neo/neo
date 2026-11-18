@@ -448,6 +448,11 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Nat(n, span))
             }
+            Tok::U32(n) => {
+                let span = self.peek().span;
+                self.advance();
+                Ok(Expr::U32Lit(n, span))
+            }
             Tok::Str(s) => {
                 let span = self.peek().span;
                 self.advance();

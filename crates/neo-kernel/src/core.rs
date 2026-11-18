@@ -2,12 +2,143 @@ use std::rc::Rc;
 
 pub type RcTm = Rc<Tm>;
 
+/// A primitive type. Primitives are opaque: they have no constructors and are
+/// eliminated only by the primitive operations below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimTy {
+    U32,
+}
+
+impl PrimTy {
+    pub fn name(self) -> &'static str {
+        match self {
+            PrimTy::U32 => "U32",
+        }
+    }
+}
+
+/// The result of evaluating a primitive operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimOutcome {
+    U32(u32),
+    Bool(bool),
+}
+
+/// A primitive operation. Operations are binary and must be fully applied;
+/// they are not first-class values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl PrimOp {
+    pub const ALL: [PrimOp; 16] = [
+        PrimOp::Add,
+        PrimOp::Sub,
+        PrimOp::Mul,
+        PrimOp::Div,
+        PrimOp::Rem,
+        PrimOp::And,
+        PrimOp::Or,
+        PrimOp::Xor,
+        PrimOp::Shl,
+        PrimOp::Shr,
+        PrimOp::Lt,
+        PrimOp::Le,
+        PrimOp::Gt,
+        PrimOp::Ge,
+        PrimOp::Eq,
+        PrimOp::Ne,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            PrimOp::Add => "u32_add",
+            PrimOp::Sub => "u32_sub",
+            PrimOp::Mul => "u32_mul",
+            PrimOp::Div => "u32_div",
+            PrimOp::Rem => "u32_rem",
+            PrimOp::And => "u32_and",
+            PrimOp::Or => "u32_or",
+            PrimOp::Xor => "u32_xor",
+            PrimOp::Shl => "u32_shl",
+            PrimOp::Shr => "u32_shr",
+            PrimOp::Lt => "u32_lt",
+            PrimOp::Le => "u32_le",
+            PrimOp::Gt => "u32_gt",
+            PrimOp::Ge => "u32_ge",
+            PrimOp::Eq => "u32_eq",
+            PrimOp::Ne => "u32_ne",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<PrimOp> {
+        PrimOp::ALL.iter().copied().find(|op| op.name() == name)
+    }
+
+    /// Whether this operation produces a `Bool` instead of a `U32`.
+    pub fn is_comparison(self) -> bool {
+        matches!(
+            self,
+            PrimOp::Lt | PrimOp::Le | PrimOp::Gt | PrimOp::Ge | PrimOp::Eq | PrimOp::Ne
+        )
+    }
+
+    /// Execute the operation on two machine words.
+    ///
+    /// Arithmetic wraps, division and remainder by zero return zero, and shift
+    /// amounts use their low five bits. This matches the WebAssembly `i32`
+    /// semantics that the backend emits.
+    pub fn apply(self, a: u32, b: u32) -> PrimOutcome {
+        use PrimOutcome::{Bool, U32};
+        match self {
+            PrimOp::Add => U32(a.wrapping_add(b)),
+            PrimOp::Sub => U32(a.wrapping_sub(b)),
+            PrimOp::Mul => U32(a.wrapping_mul(b)),
+            PrimOp::Div => U32(a.checked_div(b).unwrap_or(0)),
+            PrimOp::Rem => U32(a.checked_rem(b).unwrap_or(0)),
+            PrimOp::And => U32(a & b),
+            PrimOp::Or => U32(a | b),
+            PrimOp::Xor => U32(a ^ b),
+            PrimOp::Shl => U32(a << (b & 31)),
+            PrimOp::Shr => U32(a >> (b & 31)),
+            PrimOp::Lt => Bool(a < b),
+            PrimOp::Le => Bool(a <= b),
+            PrimOp::Gt => Bool(a > b),
+            PrimOp::Ge => Bool(a >= b),
+            PrimOp::Eq => Bool(a == b),
+            PrimOp::Ne => Bool(a != b),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Tm {
     Var(usize),
     Const(String),
     Type(u32),
     Prop,
+    /// A primitive type former.
+    PrimTy(PrimTy),
+    /// A machine-word literal.
+    PrimLit(u32),
+    /// A fully applied primitive operation.
+    PrimOp(PrimOp, RcTm, RcTm),
     Pi {
         name: String,
         dom: RcTm,
@@ -56,6 +187,18 @@ pub fn rc(t: Tm) -> RcTm {
 
 pub fn var(i: usize) -> RcTm {
     rc(Tm::Var(i))
+}
+
+pub fn prim_ty(t: PrimTy) -> RcTm {
+    rc(Tm::PrimTy(t))
+}
+
+pub fn prim_lit(n: u32) -> RcTm {
+    rc(Tm::PrimLit(n))
+}
+
+pub fn prim_op(op: PrimOp, a: RcTm, b: RcTm) -> RcTm {
+    rc(Tm::PrimOp(op, a, b))
 }
 
 pub fn app(f: RcTm, a: RcTm) -> RcTm {
@@ -113,7 +256,8 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
                 tm.clone()
             }
         }
-        Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
+        Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => tm.clone(),
+        Tm::PrimOp(op, a, b) => prim_op(*op, shift(a, delta, cutoff), shift(b, delta, cutoff)),
         Tm::Pi {
             name,
             dom,
@@ -197,7 +341,12 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
                 tm.clone()
             }
         }
-        Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
+        Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => tm.clone(),
+        Tm::PrimOp(op, a, b) => prim_op(
+            *op,
+            subst_at(a, index, replacement, depth),
+            subst_at(b, index, replacement, depth),
+        ),
         Tm::Pi {
             name,
             dom,
@@ -285,7 +434,14 @@ fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> Rc
         return shift(replacement, depth as isize, 0);
     }
     match &**tm {
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => tm.clone(),
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
+            tm.clone()
+        }
+        Tm::PrimOp(op, a, b) => prim_op(
+            *op,
+            abstract_at(target, replacement, a, depth),
+            abstract_at(target, replacement, b, depth),
+        ),
         Tm::Pi {
             name,
             dom,
@@ -368,6 +524,11 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
         (Tm::Const(x), Tm::Const(y)) => x == y,
         (Tm::Type(u), Tm::Type(v)) => u == v,
         (Tm::Prop, Tm::Prop) => true,
+        (Tm::PrimTy(a), Tm::PrimTy(b)) => a == b,
+        (Tm::PrimLit(a), Tm::PrimLit(b)) => a == b,
+        (Tm::PrimOp(o1, a1, b1), Tm::PrimOp(o2, a2, b2)) => {
+            o1 == o2 && same_tm(a1, a2) && same_tm(b1, b2)
+        }
         (
             Tm::Pi {
                 dom: d1, cod: c1, ..

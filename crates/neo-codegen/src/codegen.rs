@@ -11,7 +11,7 @@ use wasm_encoder::{
 use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
 use wit_parser::{Resolve, UnresolvedPackageGroup, WorldId};
 
-use crate::core::{RcTm, Tm};
+use crate::core::{PrimOp, PrimTy, RcTm, Tm};
 use crate::env::Globals;
 use crate::eval::{apply_pi, eval, eval_closure, force};
 use crate::value::{V, Val, vvar};
@@ -616,6 +616,7 @@ impl<'g> Codegen<'g> {
     fn printer_for(&mut self, ty: &V) -> Result<usize> {
         let ty = force(self.globals, ty.clone());
         match &*ty {
+            Val::PrimTy(PrimTy::U32) => Ok(self.print_u32_id),
             Val::Ind(name, args) => match name.as_str() {
                 "Nat" => Ok(self.print_nat_id),
                 "Bool" => Ok(self.print_bool_id),
@@ -977,6 +978,9 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             Tm::Type(_) | Tm::Prop | Tm::Pi { .. } | Tm::Ind(..) | Tm::Eq(..) | Tm::Refl(_) => {
                 self.emit(I::I32Const(0));
             }
+            Tm::PrimTy(_) => self.emit(I::I32Const(0)),
+            Tm::PrimLit(n) => self.emit(I::I32Const(*n as i32)),
+            Tm::PrimOp(op, a, b) => self.compile_prim_op(*op, a, b)?,
             Tm::Const(name) => self.compile_const(name)?,
             Tm::Ctor(enum_name, index, args) => self.compile_ctor(enum_name, *index, args)?,
             Tm::App(f, a) => self.compile_app(f, a)?,
@@ -1052,6 +1056,95 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             self.emit(I::I32Store(mem(4 + 4 * j as u32)));
         }
         self.emit(I::LocalGet(ptr));
+        Ok(())
+    }
+
+    /// Compile a primitive operation. `U32` values are unboxed `i32`s, while a
+    /// comparison result is an ordinary `Bool` constructor and is therefore
+    /// allocated like any other enum value.
+    fn compile_prim_op(&mut self, op: PrimOp, a: &RcTm, b: &RcTm) -> Result<()> {
+        if op.is_comparison() {
+            self.compile(a)?;
+            self.compile(b)?;
+            self.emit(match op {
+                PrimOp::Lt => I::I32LtU,
+                PrimOp::Le => I::I32LeU,
+                PrimOp::Gt => I::I32GtU,
+                PrimOp::Ge => I::I32GeU,
+                PrimOp::Eq => I::I32Eq,
+                PrimOp::Ne => I::I32Ne,
+                _ => return Err(Error::new("internal: comparison not handled")),
+            });
+
+            let (_, false_index) = self.cg.globals.bool_ctor(false).ok_or_else(|| {
+                Error::new("primitive comparisons require the prelude `Bool` type")
+            })?;
+            let (_, true_index) = self.cg.globals.bool_ctor(true).ok_or_else(|| {
+                Error::new("primitive comparisons require the prelude `Bool` type")
+            })?;
+
+            // Turn the 0/1 comparison result into the constructor index.
+            let flag = self.local();
+            self.emit(I::LocalSet(flag));
+            self.emit(I::LocalGet(flag));
+            self.emit(I::If(BlockType::Result(ValType::I32)));
+            self.emit(I::I32Const(true_index as i32));
+            self.emit(I::Else);
+            self.emit(I::I32Const(false_index as i32));
+            self.emit(I::End);
+            let tag = self.local();
+            self.emit(I::LocalSet(tag));
+
+            self.emit(I::I32Const(4));
+            self.emit(I::Call(self.cg.alloc_fn()));
+            let ptr = self.local();
+            self.emit(I::LocalSet(ptr));
+            self.emit(I::LocalGet(ptr));
+            self.emit(I::LocalGet(tag));
+            self.emit(I::I32Store(mem(0)));
+            self.emit(I::LocalGet(ptr));
+            return Ok(());
+        }
+
+        match op {
+            PrimOp::Div | PrimOp::Rem => {
+                let lhs = self.local();
+                let rhs = self.local();
+                self.compile(a)?;
+                self.emit(I::LocalSet(lhs));
+                self.compile(b)?;
+                self.emit(I::LocalSet(rhs));
+                // Division by zero is total: it yields zero.
+                self.emit(I::LocalGet(rhs));
+                self.emit(I::I32Eqz);
+                self.emit(I::If(BlockType::Result(ValType::I32)));
+                self.emit(I::I32Const(0));
+                self.emit(I::Else);
+                self.emit(I::LocalGet(lhs));
+                self.emit(I::LocalGet(rhs));
+                self.emit(if matches!(op, PrimOp::Div) {
+                    I::I32DivU
+                } else {
+                    I::I32RemU
+                });
+                self.emit(I::End);
+            }
+            _ => {
+                self.compile(a)?;
+                self.compile(b)?;
+                self.emit(match op {
+                    PrimOp::Add => I::I32Add,
+                    PrimOp::Sub => I::I32Sub,
+                    PrimOp::Mul => I::I32Mul,
+                    PrimOp::And => I::I32And,
+                    PrimOp::Or => I::I32Or,
+                    PrimOp::Xor => I::I32Xor,
+                    PrimOp::Shl => I::I32Shl,
+                    PrimOp::Shr => I::I32ShrU,
+                    _ => return Err(Error::new("internal: primitive operation not handled")),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -1214,6 +1307,8 @@ fn value_key(v: &V) -> String {
     match &**v {
         Val::Type(u) => format!("Type{}", u),
         Val::Prop => "Prop".to_string(),
+        Val::PrimTy(t) => t.name().to_string(),
+        Val::PrimLit(n) => n.to_string(),
         Val::Ind(name, args) => type_key(name, args),
         Val::Ctor(name, index, args) => {
             let mut out = format!("{}#{}", name, index);
@@ -1236,6 +1331,9 @@ fn value_key(v: &V) -> String {
         Val::Neutral(n) => match &**n {
             crate::value::Neutral::Var(i) => format!("Var{}", i),
             crate::value::Neutral::Global(g) => format!("Global{}", g),
+            crate::value::Neutral::PrimOp(op, a, b) => {
+                format!("{}({},{})", op.name(), value_key(a), value_key(b))
+            }
             _ => "Neutral".to_string(),
         },
         Val::Pi(..) | Val::Lam(..) | Val::Glob(_) => "Opaque".to_string(),
@@ -1251,7 +1349,7 @@ fn contains_neutral(v: &V) -> bool {
         Val::Refl(a) => contains_neutral(a),
         Val::Pi(dom, _, _) => contains_neutral(dom),
         Val::Lam(_) => false,
-        Val::Type(_) | Val::Prop | Val::Glob(_) => false,
+        Val::Type(_) | Val::Prop | Val::PrimTy(_) | Val::PrimLit(_) | Val::Glob(_) => false,
     }
 }
 
@@ -1261,6 +1359,7 @@ fn neutral_has_var(n: &crate::value::Neutral) -> bool {
         crate::value::Neutral::App(f, a) => neutral_has_var(f) || contains_neutral(a),
         crate::value::Neutral::Match { scrut, .. } => contains_neutral(scrut),
         crate::value::Neutral::J { proof, .. } => contains_neutral(proof),
+        crate::value::Neutral::PrimOp(_, a, b) => contains_neutral(a) || contains_neutral(b),
         crate::value::Neutral::Global(_) => false,
     }
 }

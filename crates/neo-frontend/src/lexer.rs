@@ -4,6 +4,7 @@ use neo_common::error::{Error, Result, Span};
 pub enum Tok {
     Ident(String),
     Nat(u64),
+    U32(u32),
     Str(String),
     Enum,
     Fn,
@@ -163,6 +164,31 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 advance(&mut i, &mut line, &mut col);
             }
             let text: String = chars[start..i].iter().collect();
+
+            // A `u32` suffix selects the primitive word type. It must not run
+            // into another identifier character, so `1u32x` is a numeral
+            // followed by an identifier.
+            let suffix_end = i + 3;
+            let has_suffix = suffix_end <= chars.len()
+                && chars[i..suffix_end] == ['u', '3', '2']
+                && (suffix_end == chars.len()
+                    || !(chars[suffix_end].is_ascii_alphanumeric()
+                        || chars[suffix_end] == '_'
+                        || chars[suffix_end] == '\''));
+            if has_suffix {
+                let n = text
+                    .parse::<u32>()
+                    .map_err(|_| Error::at(span, "u32 literal is too large"))?;
+                for _ in 0..3 {
+                    advance(&mut i, &mut line, &mut col);
+                }
+                out.push(Token {
+                    tok: Tok::U32(n),
+                    span,
+                });
+                continue;
+            }
+
             let n = text
                 .parse::<u64>()
                 .map_err(|_| Error::at(span, "numeric literal is too large"))?;

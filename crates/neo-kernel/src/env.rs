@@ -192,4 +192,16 @@ impl Globals {
             .and_then(|e| e.ctors.get(index))
             .map(|c| c.arity())
     }
+
+    /// The prelude `Bool` constructor for a truth value.
+    ///
+    /// Primitive comparisons reduce to these constructors. If the prelude is
+    /// missing `Bool`, or names its constructors differently, comparisons stay
+    /// neutral instead of inventing a representation.
+    pub fn bool_ctor(&self, value: bool) -> Option<(String, usize)> {
+        let info = self.enums.get("Bool")?;
+        let name = if value { "true" } else { "false" };
+        let index = info.ctors.iter().position(|c| c.name == name)?;
+        Some((info.name.clone(), index))
+    }
 }

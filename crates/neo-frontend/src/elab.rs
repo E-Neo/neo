@@ -1,7 +1,8 @@
 use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
 use crate::core::{
-    Branch, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, pi_with, rc, shift, var,
+    Branch, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, pi_with,
+    prim_lit, prim_op, prim_ty, rc, shift, var,
 };
 use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
@@ -29,6 +30,18 @@ fn show_sort(sort: Sort) -> String {
     }
 }
 
+/// Names reserved by the primitive layer. Redeclaring one would silently change
+/// the meaning of existing programs, so declarations are rejected.
+fn reserved_name(name: &str) -> Option<String> {
+    if name == PrimTy::U32.name() {
+        return Some(format!("`{}` is a primitive type", name));
+    }
+    if PrimOp::from_name(name).is_some() {
+        return Some(format!("`{}` is a primitive operation", name));
+    }
+    None
+}
+
 fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
     let result = elab_enum_inner(globals, decl);
     if result.is_err() {
@@ -43,6 +56,9 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
             decl.span,
             format!("`{}` is already defined", decl.name),
         ));
+    }
+    if let Some(message) = reserved_name(&decl.name) {
+        return Err(Error::at(decl.span, message));
     }
 
     let sort = match &decl.sort {
@@ -109,6 +125,9 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
                 c.span,
                 format!("constructor `{}` is defined twice", c.name),
             ));
+        }
+        if let Some(message) = reserved_name(&c.name) {
+            return Err(Error::at(c.span, message));
         }
         let nf = c.fields.len();
         let mut ctx = Ctx::new();
@@ -277,6 +296,9 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
             format!("`{}` is already defined", decl.name),
         ));
     }
+    if let Some(message) = reserved_name(&decl.name) {
+        return Err(Error::at(decl.span, message));
+    }
 
     let info = build_fn_type(globals, decl)?;
     globals.add_fn_placeholder(&decl.name, info.ty.clone(), info.domains.len());
@@ -345,6 +367,7 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
             let tm = nat_literal(globals, *n, *span)?;
             Ok((tm, vind("Nat", Vec::new())))
         }
+        Expr::U32Lit(n, _) => Ok((prim_lit(*n), vprimty(PrimTy::U32))),
         Expr::Str(s, span) => string_literal(globals, s, *span),
         Expr::Type(u, _) => Ok((rc(Tm::Type(*u)), vtype(u + 1))),
         Expr::Prop(_) => Ok((rc(Tm::Prop), vtype(0))),
@@ -391,6 +414,18 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
             .cloned()
             .ok_or_else(|| Error::at(span, format!("unbound variable `{}`", name)))?;
         return Ok((var(idx), ty));
+    }
+    if name == PrimTy::U32.name() {
+        return Ok((prim_ty(PrimTy::U32), vtype(0)));
+    }
+    if let Some(op) = PrimOp::from_name(name) {
+        return Err(Error::at(
+            span,
+            format!(
+                "primitive `{}` must be fully applied to two `U32` arguments",
+                op.name()
+            ),
+        ));
     }
     if let Some(info) = globals.get_enum(name) {
         if info.param_tys.is_empty() {
@@ -501,6 +536,33 @@ fn elab_app_with(
             ));
         }
         return elab_enum_app(globals, ctx, name, implicit, span);
+    }
+
+    if let Expr::Var(name, _) = f
+        && ctx.lookup_index(name).is_none()
+        && let Some(op) = PrimOp::from_name(name)
+    {
+        if !implicit.is_empty() {
+            return Err(Error::at(
+                span,
+                format!("primitive `{}` takes no implicit arguments", op.name()),
+            ));
+        }
+        if args.len() != 2 {
+            return Err(Error::at(
+                span,
+                format!(
+                    "primitive `{}` takes 2 arguments, got {}",
+                    op.name(),
+                    args.len()
+                ),
+            ));
+        }
+        let word = vprimty(PrimTy::U32);
+        let a = elab_check(globals, ctx, &args[0], &word)?;
+        let b = elab_check(globals, ctx, &args[1], &word)?;
+        let ty = check::prim_result_ty(globals, op)?;
+        return Ok((prim_op(op, a, b), ty));
     }
 
     let (mut f_tm, mut f_ty) = elab_infer(globals, ctx, f)?;
@@ -920,7 +982,11 @@ fn collect_free_levels(tm: &RcTm, level: usize, depth: usize, out: &mut Vec<usiz
         Tm::Var(i) if *i >= depth => {
             out.push(level + depth - 1 - *i);
         }
-        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop => {}
+        Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {}
+        Tm::PrimOp(_, a, b) => {
+            collect_free_levels(a, level, depth, out);
+            collect_free_levels(b, level, depth, out);
+        }
         Tm::Pi { dom, cod, .. } | Tm::Lam { dom, body: cod, .. } => {
             collect_free_levels(dom, level, depth, out);
             collect_free_levels(cod, level, depth + 1, out);

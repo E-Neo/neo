@@ -39,7 +39,7 @@ fn examples_elaborate_and_evaluate() {
             eval(&globals, &Vec::new(), &neo::core::const_("main")),
         );
         assert!(
-            matches!(&*value, Val::Ctor(..)),
+            matches!(&*value, Val::Ctor(..) | Val::PrimLit(..)),
             "{}: `main` did not evaluate to a data value",
             path.display()
         );

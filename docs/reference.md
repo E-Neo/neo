@@ -166,8 +166,18 @@ Numeric literals are unsigned decimal integers:
 0   5   42   1000
 ```
 
-A literal is syntactic sugar for a `Nat` built from `zero` and `succ`. There
-are no negative, floating-point, hexadecimal, or character literals.
+A plain literal is syntactic sugar for a `Nat` built from `zero` and `succ`.
+A literal with the `u32` suffix has the primitive type `U32`:
+
+```neo
+0u32   42u32   4294967295u32
+```
+
+The value must fit in 32 bits; `4294967296u32` is a lexing error. The suffix
+must not run into a following identifier, so `1u32x` is the numeral `1` followed
+by the name `u32x`.
+
+There are no negative, floating-point, hexadecimal, or character literals.
 
 ### String literals
 
@@ -281,6 +291,18 @@ Vec[Nat, 2]
 Parameters of a type constructor are written in `[]`. A function may declare
 implicit parameters in `[]` and explicit parameters in `()`; calls omit the
 implicit ones by default. See [implicit parameters](#implicit-parameters).
+
+### Primitive types
+
+`U32` is a primitive, opaque 32-bit unsigned integer type:
+
+```neo
+U32
+```
+
+It has no constructors and cannot be matched. A `U32` is eliminated only by
+the primitive operations listed under
+[primitive operations](#primitive-operations). `U32` lives in `Type 0`.
 
 ### Equality types
 
@@ -732,13 +754,69 @@ Parentheses group expressions:
 
 ### Numeric literals
 
-A numeral is a `Nat`:
+A plain numeral is a `Nat`:
 
 ```neo
 fn main(): Nat {
   42
 }
 ```
+
+A numeral with the `u32` suffix has type `U32`:
+
+```neo
+fn main(): U32 {
+  42u32
+}
+```
+
+The two types are not interchangeable: `u32_add(1, 2)` is rejected because its
+arguments are `Nat`s, and a `U32` where a `Nat` is expected is rejected too.
+
+### Primitive operations
+
+`U32` is eliminated by a fixed set of fully applied binary operations. They are
+names, not infix operators, and they cannot be used as first-class values.
+
+| Operation | Type | Meaning |
+| --- | --- | --- |
+| `u32_add`, `u32_sub`, `u32_mul` | `fn(U32, U32) -> U32` | wrapping arithmetic |
+| `u32_div`, `u32_rem` | `fn(U32, U32) -> U32` | zero divisor yields `0` |
+| `u32_and`, `u32_or`, `u32_xor` | `fn(U32, U32) -> U32` | bitwise |
+| `u32_shl`, `u32_shr` | `fn(U32, U32) -> U32` | shift count uses its low 5 bits |
+| `u32_lt`, `u32_le`, `u32_gt`, `u32_ge` | `fn(U32, U32) -> Bool` | comparison |
+| `u32_eq`, `u32_ne` | `fn(U32, U32) -> Bool` | equality |
+
+```neo
+fn is_even(n: U32): Bool {
+  u32_eq(u32_rem(n, 2u32), 0u32)
+}
+```
+
+Semantics follow the WebAssembly `i32` operations:
+
+- `u32_add`, `u32_sub`, and `u32_mul` wrap modulo `2^32`;
+- `u32_div` and `u32_rem` are total: a zero divisor yields `0`;
+- `u32_shl` and `u32_shr` use the low five bits of the shift count.
+
+An operation reduces when both operands are literals, so a `match` on a
+comparison reduces during elaboration:
+
+```neo
+fn pick(): Nat {
+  match u32_lt(1u32, 2u32) {
+    true => 10
+    false => 20
+  }
+}
+```
+
+`U32` has no constructors, so `match` cannot eliminate it directly; compare it
+to obtain a `Bool`. A `U32` may still be an enum parameter or an index, as in
+`Vec[T, n]` with `n: U32`.
+
+These operation names, and `U32`, are reserved: a program cannot declare a
+function, enum, or constructor with one of those names.
 
 ---
 
@@ -1201,13 +1279,16 @@ fn str_eq(a: String, b: String): Bool
 
 Notes:
 
-- `Nat` numerals desugar to `zero` and `succ`.
+- `Nat` numerals desugar to `zero` and `succ`; `u32` numerals are primitive.
 - String literals desugar to `str_nil` and `str_cons`; each byte is a `Nat`.
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
   conjunction function; name it `both` instead.
-- There is no built-in arithmetic. Define `add`, `mul`, and so on.
+- `U32` and the `u32_*` operations are primitive and are not declared in this
+  list.
+- There is no built-in arithmetic for `Nat`. Define `add`, `mul`, and so on, or
+  use the `u32_*` operations on machine words.
 
 ---
 
@@ -1227,7 +1308,7 @@ Its result type must be printable.
 
 A type is printable when it is:
 
-- `Nat`, `Bool`, `Unit`, or `String`;
+- `Nat`, `Bool`, `Unit`, `String`, or `U32`;
 - an enum whose type arguments are printable and whose constructor field types
   are all printable.
 
@@ -1262,6 +1343,7 @@ pair(4, true)
 unit
 true
 42                                 // Nat numerals are printed in decimal
+42                                 // U32 values print the same, without the suffix
 trivial                            // True
 ```
 
@@ -1390,6 +1472,7 @@ args         ::= [ expr { "," expr } ]
 
 atom         ::= IDENT
                | NAT
+               | U32LIT
                | STRING
                | "Type" [ NAT ]
                | "Prop"
@@ -1409,6 +1492,8 @@ pattern      ::= "_"
 Notes:
 
 - `IDENT` excludes the keywords and `_`.
+- `NAT` is a decimal numeral with type `Nat`; `U32LIT` is a decimal numeral with
+  the `u32` suffix and type `U32`.
 - A final constructor or match arm may be followed by `}` instead of a
   newline.
 - A bare `refl` name is parsed as the `refl` expression.
@@ -1479,7 +1564,8 @@ design:
   inferred at calls; see [implicit parameters](#implicit-parameters);
 - modules, imports, namespaces, or multiple files;
 - characters, floats, and general I/O;
-- built-in arithmetic or other infix operators;
+- infix operators. Arithmetic is written with the `u32_*` primitive operations
+  (for `U32`) or with user-defined functions (for `Nat`);
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
 - higher-order or non-first-order dependent pattern matching: indices are

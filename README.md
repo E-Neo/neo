@@ -19,12 +19,14 @@ Implemented:
 - strict positivity checking;
 - a small prelude (`Nat`, `Bool`, `Unit`, `String`, `List`, `True`, `False`,
   `And`, `Or`, `Exists`);
+- a primitive 32-bit word type `U32` with total arithmetic, bitwise, and
+  comparison operations, compiled to unboxed WebAssembly `i32`s;
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
-and growable vectors (`Array[T, n]`, `Vec[T]`), modules, general I/O, and
-built-in arithmetic. See the
+and growable vectors (`Array[T, n]`, `Vec[T]`), primitive strings and bytes,
+modules, general I/O, and built-in `Nat` arithmetic. See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 

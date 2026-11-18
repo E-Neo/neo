@@ -111,7 +111,7 @@ fn build_command(args: &[String]) -> Result<()> {
 
 fn run_main(globals: &Globals) -> Result<()> {
     let ty = ensure_main(globals)?;
-    let value = force(
+    let value = whnf(
         globals,
         eval(globals, &Vec::new(), &neo::core::const_("main")),
     );
@@ -144,6 +144,7 @@ fn ensure_main(globals: &Globals) -> Result<V> {
 
 fn is_printable(globals: &Globals, ty: &V, visiting: &mut Vec<String>) -> bool {
     match &*force(globals, ty.clone()) {
+        Val::PrimTy(_) => true,
         Val::Ind(name, args) => {
             if matches!(name.as_str(), "Nat" | "Bool" | "Unit") {
                 return true;
@@ -236,9 +237,26 @@ fn print_string_value(globals: &Globals, v: &V) -> Option<String> {
     }
 }
 
+/// Reduce a value to weak head normal form, unfolding chains of zero-argument
+/// calls such as `main` calling a helper.
+fn whnf(globals: &Globals, v: V) -> V {
+    let mut current = force(globals, v);
+    loop {
+        let name = match &*current {
+            Val::Glob(name) => name.clone(),
+            _ => return current,
+        };
+        let next = force(globals, current);
+        if matches!(&*next, Val::Glob(n) if *n == name) {
+            return next;
+        }
+        current = next;
+    }
+}
+
 /// Render a fully evaluated value using the surface constructor names.
 fn print_value(globals: &Globals, v: &V) -> Option<String> {
-    let v = force(globals, v.clone());
+    let v = whnf(globals, v.clone());
     match &*v {
         Val::Ind(name, _) if name == "Nat" => Some(show_val(globals, 0, &v)),
         Val::Ctor(enum_name, index, args) => {
@@ -265,6 +283,8 @@ fn print_value(globals: &Globals, v: &V) -> Option<String> {
         }
         Val::Type(u) => Some(format!("Type {}", u)),
         Val::Prop => Some("Prop".to_string()),
+        Val::PrimTy(t) => Some(t.name().to_string()),
+        Val::PrimLit(n) => Some(n.to_string()),
         _ => None,
     }
 }
