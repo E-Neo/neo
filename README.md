@@ -5,7 +5,8 @@ proof kernel. It uses an ASCII, math-like syntax and compiles to WebAssembly
 components that run on WASI 0.2.
 
 This repository contains **Stage 0**: a Rust interpreter and WASI 0.2 backend.
-Later stages will self-host the compiler in Neo.
+Later stages will self-host the compiler in Neo. The bootstrap scope, decisions,
+and milestones are in [`docs/bootstrap.md`](docs/bootstrap.md).
 
 ## Status
 
