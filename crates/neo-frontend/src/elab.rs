@@ -1933,8 +1933,8 @@ fn compile_ctor_group(
     let expected_ty = match (motive_v, expected) {
         (Some(motive), Some(_)) => {
             let mut field_vals = Vec::with_capacity(ctor.num_fields);
-            for j in 0..ctor.num_fields {
-                match &refinement.field_solutions[j] {
+            for (j, solution) in refinement.field_solutions.iter().enumerate() {
+                match solution {
                     Some(solution) => field_vals.push(solution.clone()),
                     None => field_vals.push(vvar(inner + j)),
                 }
@@ -2280,8 +2280,8 @@ fn specialize_ctor<'a>(
     let level = branch.ctx.level();
 
     let mut field_vals = Vec::with_capacity(ctor.num_fields);
-    for j in 0..ctor.num_fields {
-        match &refinement.field_solutions[j] {
+    for (j, solution) in refinement.field_solutions.iter().enumerate() {
+        match solution {
             Some(solution) => field_vals.push(solution.clone()),
             None => field_vals.push(vvar(inner + j)),
         }
