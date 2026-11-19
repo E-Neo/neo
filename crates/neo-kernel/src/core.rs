@@ -121,6 +121,8 @@ pub enum PrimOp {
     BytesEq,
     BytesNe,
     BytesGet,
+    StrFromBytes,
+    BytesUtf8Check,
 }
 
 const U32_BINARY: [PrimTy; 2] = [PrimTy::U32, PrimTy::U32];
@@ -133,7 +135,7 @@ const BYTES_SLICE: [PrimTy; 3] = [PrimTy::Bytes, PrimTy::U32, PrimTy::U32];
 const BYTES_GET: [PrimTy; 2] = [PrimTy::Bytes, PrimTy::U32];
 
 impl PrimOp {
-    pub const ALL: [PrimOp; 28] = [
+    pub const ALL: [PrimOp; 30] = [
         PrimOp::Add,
         PrimOp::Sub,
         PrimOp::Mul,
@@ -162,6 +164,8 @@ impl PrimOp {
         PrimOp::BytesEq,
         PrimOp::BytesNe,
         PrimOp::BytesGet,
+        PrimOp::StrFromBytes,
+        PrimOp::BytesUtf8Check,
     ];
 
     pub fn name(self) -> &'static str {
@@ -194,6 +198,8 @@ impl PrimOp {
             PrimOp::BytesEq => "bytes_eq",
             PrimOp::BytesNe => "bytes_ne",
             PrimOp::BytesGet => "bytes_get",
+            PrimOp::StrFromBytes => "str_from_bytes",
+            PrimOp::BytesUtf8Check => "bytes_utf8_check",
         }
     }
 
@@ -241,6 +247,7 @@ impl PrimOp {
             PrimOp::BytesSlice => &BYTES_SLICE,
             PrimOp::BytesConcat | PrimOp::BytesEq | PrimOp::BytesNe => &BYTES_BINARY,
             PrimOp::BytesGet => &BYTES_GET,
+            PrimOp::StrFromBytes | PrimOp::BytesUtf8Check => &BYTES_UNARY,
             _ => &U32_BINARY,
         }
     }
@@ -257,8 +264,10 @@ impl PrimOp {
             | PrimOp::StrNe
             | PrimOp::BytesEq
             | PrimOp::BytesNe => PrimRet::Bool,
-            PrimOp::StrLength | PrimOp::BytesLength | PrimOp::BytesGet => PrimRet::U32,
-            PrimOp::StrSlice | PrimOp::StrConcat => PrimRet::Str,
+            PrimOp::StrLength | PrimOp::BytesLength | PrimOp::BytesGet | PrimOp::BytesUtf8Check => {
+                PrimRet::U32
+            }
+            PrimOp::StrSlice | PrimOp::StrConcat | PrimOp::StrFromBytes => PrimRet::Str,
             PrimOp::StrToBytes | PrimOp::BytesSlice | PrimOp::BytesConcat => PrimRet::Bytes,
             _ => PrimRet::U32,
         }
@@ -318,10 +327,13 @@ impl PrimOp {
             }
             PrimOp::StrEq | PrimOp::BytesEq => Bool(arg_bytes(args, 0) == arg_bytes(args, 1)),
             PrimOp::StrNe | PrimOp::BytesNe => Bool(arg_bytes(args, 0) != arg_bytes(args, 1)),
-            PrimOp::StrToBytes => Bytes(Rc::from(arg_bytes(args, 0))),
+            PrimOp::StrToBytes | PrimOp::StrFromBytes => Bytes(Rc::from(arg_bytes(args, 0))),
             PrimOp::BytesGet => {
                 let byte = arg_bytes(args, 0).get(y as usize).copied().unwrap_or(0);
                 U32(byte as u32)
+            }
+            PrimOp::BytesUtf8Check => {
+                U32(utf8_error(arg_bytes(args, 0)).map_or(0, |i| i as u32 + 1))
             }
         }
     }
@@ -339,6 +351,50 @@ fn arg_bytes(args: &[PrimLit], i: usize) -> &[u8] {
         Some(PrimLit::Str(bytes) | PrimLit::Bytes(bytes)) => bytes,
         _ => &[],
     }
+}
+
+/// The index of the first byte that starts an invalid UTF-8 sequence.
+///
+/// Validation is strict: overlong forms, surrogates, code points above
+/// `U+10FFFF`, and truncated sequences are all rejected. A truncated sequence
+/// reports the index where it starts, not where it ends.
+fn utf8_error(bytes: &[u8]) -> Option<usize> {
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        let b = bytes[i];
+        if b < 0x80 {
+            i += 1;
+            continue;
+        }
+        let n = match b {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return Some(i),
+        };
+        let (lo, hi) = match b {
+            0xe0 => (0xa0, 0xbf),
+            0xed => (0x80, 0x9f),
+            0xf0 => (0x90, 0xbf),
+            0xf4 => (0x80, 0x8f),
+            _ => (0x80, 0xbf),
+        };
+        if i + n > len {
+            return Some(i);
+        }
+        if !(lo..=hi).contains(&bytes[i + 1]) {
+            return Some(i);
+        }
+        if bytes[i + 2..i + n]
+            .iter()
+            .any(|&c| !(0x80..=0xbf).contains(&c))
+        {
+            return Some(i);
+        }
+        i += n;
+    }
+    None
 }
 
 fn clamp_range(len: usize, start: u32, end: u32) -> (usize, usize) {

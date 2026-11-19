@@ -116,6 +116,7 @@ struct Codegen<'g> {
     concat_id: usize,
     eq_id: usize,
     get_id: usize,
+    utf8_id: usize,
     print_bytes_id: usize,
     print_u32_id: usize,
     print_nat_id: usize,
@@ -153,6 +154,7 @@ impl<'g> Codegen<'g> {
             concat_id: 0,
             eq_id: 0,
             get_id: 0,
+            utf8_id: 0,
             print_bytes_id: 0,
             print_u32_id: 0,
             print_nat_id: 0,
@@ -447,12 +449,14 @@ impl<'g> Codegen<'g> {
         self.concat_id = self.new_func(&[ValType::I32; 2], &[ValType::I32]);
         self.eq_id = self.new_func(&[ValType::I32; 2], &[ValType::I32]);
         self.get_id = self.new_func(&[ValType::I32; 2], &[ValType::I32]);
+        self.utf8_id = self.new_func(&[ValType::I32], &[ValType::I32]);
 
         self.gen_memcpy();
         self.gen_slice();
         self.gen_concat();
         self.gen_eq();
         self.gen_get();
+        self.gen_utf8_check();
     }
 
     fn gen_memcpy(&mut self) {
@@ -686,6 +690,205 @@ impl<'g> Codegen<'g> {
         fc.emit(I::End);
         let body = fc.finish();
         let id = self.get_id;
+        self.set_body(id, body);
+    }
+
+    /// Validate a descriptor's bytes as UTF-8. Returns `0` when the bytes are
+    /// valid, otherwise the 1-based index of the first byte of the first
+    /// invalid sequence. Validation is strict: overlong forms, surrogates,
+    /// code points above `U+10FFFF`, and truncated sequences are rejected.
+    fn gen_utf8_check(&mut self) {
+        let mut fc = FnCompiler::new(self, 1);
+        let len = fc.local();
+        let data = fc.local();
+        let i = fc.local();
+        let b = fc.local();
+        let n = fc.local();
+        let lo = fc.local();
+        let hi = fc.local();
+        let j = fc.local();
+        let c = fc.local();
+
+        // len and data start.
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(len));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(data));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::LocalSet(i));
+
+        fc.emit(I::Loop(BlockType::Empty));
+        // End of input: valid.
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::LocalGet(len));
+        fc.emit(I::I32GeU);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::Return);
+        fc.emit(I::End);
+
+        // b = bytes[i]
+        fc.emit(I::LocalGet(data));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::LocalSet(b));
+
+        // ASCII fast path.
+        fc.emit(I::LocalGet(b));
+        fc.emit(I::I32Const(0x80));
+        fc.emit(I::I32LtU);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(i));
+        fc.emit(I::Br(1));
+        fc.emit(I::End);
+
+        // n defaults to 1 (invalid); lo/hi bound the second byte.
+        fc.emit(I::I32Const(1));
+        fc.emit(I::LocalSet(n));
+        fc.emit(I::I32Const(0x80));
+        fc.emit(I::LocalSet(lo));
+        fc.emit(I::I32Const(0xbf));
+        fc.emit(I::LocalSet(hi));
+
+        for (from, to, width) in [(0xc2, 0xdf, 2), (0xe0, 0xef, 3), (0xf0, 0xf4, 4)] {
+            fc.emit(I::LocalGet(b));
+            fc.emit(I::I32Const(from));
+            fc.emit(I::I32GeU);
+            fc.emit(I::LocalGet(b));
+            fc.emit(I::I32Const(to));
+            fc.emit(I::I32LeU);
+            fc.emit(I::I32And);
+            fc.emit(I::If(BlockType::Empty));
+            fc.emit(I::I32Const(width));
+            fc.emit(I::LocalSet(n));
+            fc.emit(I::End);
+        }
+
+        // No valid lead byte for this class.
+        fc.emit(I::LocalGet(n));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Eq);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::Return);
+        fc.emit(I::End);
+
+        // Narrow the second byte range for the constrained lead bytes.
+        for (lead, new_lo, new_hi) in [
+            (0xe0, Some(0xa0), None),
+            (0xed, None, Some(0x9f)),
+            (0xf0, Some(0x90), None),
+            (0xf4, None, Some(0x8f)),
+        ] {
+            fc.emit(I::LocalGet(b));
+            fc.emit(I::I32Const(lead));
+            fc.emit(I::I32Eq);
+            fc.emit(I::If(BlockType::Empty));
+            if let Some(v) = new_lo {
+                fc.emit(I::I32Const(v));
+                fc.emit(I::LocalSet(lo));
+            }
+            if let Some(v) = new_hi {
+                fc.emit(I::I32Const(v));
+                fc.emit(I::LocalSet(hi));
+            }
+            fc.emit(I::End);
+        }
+
+        // Truncated sequence.
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::LocalGet(n));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalGet(len));
+        fc.emit(I::I32GtU);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::Return);
+        fc.emit(I::End);
+
+        // Second byte.
+        fc.emit(I::LocalGet(data));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::LocalSet(c));
+        fc.emit(I::LocalGet(c));
+        fc.emit(I::LocalGet(lo));
+        fc.emit(I::I32LtU);
+        fc.emit(I::LocalGet(c));
+        fc.emit(I::LocalGet(hi));
+        fc.emit(I::I32GtU);
+        fc.emit(I::I32Or);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::Return);
+        fc.emit(I::End);
+
+        // Remaining continuation bytes.
+        fc.emit(I::I32Const(2));
+        fc.emit(I::LocalSet(j));
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(j));
+        fc.emit(I::LocalGet(n));
+        fc.emit(I::I32GeU);
+        fc.emit(I::BrIf(1));
+        fc.emit(I::LocalGet(data));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalGet(j));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::LocalSet(c));
+        fc.emit(I::LocalGet(c));
+        fc.emit(I::I32Const(0x80));
+        fc.emit(I::I32LtU);
+        fc.emit(I::LocalGet(c));
+        fc.emit(I::I32Const(0xbf));
+        fc.emit(I::I32GtU);
+        fc.emit(I::I32Or);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::Return);
+        fc.emit(I::End);
+        fc.emit(I::LocalGet(j));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(j));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+        fc.emit(I::End);
+
+        // Advance past the validated sequence.
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::LocalGet(n));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(i));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+
+        fc.emit(I::I32Const(0));
+        let body = fc.finish();
+        let id = self.utf8_id;
         self.set_body(id, body);
     }
 
@@ -1490,8 +1693,13 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
                 let concat = defined(self.cg.concat_id);
                 self.emit(I::Call(concat));
             }
-            PrimOp::StrToBytes => {
+            PrimOp::StrToBytes | PrimOp::StrFromBytes => {
                 self.compile(arg(0)?)?;
+            }
+            PrimOp::BytesUtf8Check => {
+                self.compile(arg(0)?)?;
+                let utf8 = defined(self.cg.utf8_id);
+                self.emit(I::Call(utf8));
             }
             PrimOp::BytesGet => {
                 self.compile(arg(0)?)?;

@@ -30,6 +30,8 @@ Implemented:
   calls with static dispatch, generic receivers, and user-defined methods;
 - primitive `String` (UTF-8) and `Bytes` with O(1) length and slicing,
   concatenation, equality, and printing, exposed as methods;
+- prelude `Option` and `Result` types, and checked `Bytes.to_str` with a
+  `Utf8Error` that reports the first invalid byte;
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component.
 

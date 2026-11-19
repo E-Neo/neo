@@ -397,3 +397,42 @@ fn main(): Nat {
         "3\n",
     );
 }
+
+#[test]
+fn builds_valid_utf8_conversion() {
+    check(
+        r#"
+fn main(): Result[String, Utf8Error] {
+  b"hello, \xe2\x82\xac".to_str()
+}
+"#,
+        "utf8-ok",
+        "ok(hello, €)\n",
+    );
+}
+
+#[test]
+fn builds_invalid_utf8_conversion() {
+    check(
+        r#"
+fn main(): Result[String, Utf8Error] {
+  b"ab\xff".to_str()
+}
+"#,
+        "utf8-err",
+        "err(invalid_utf8(2))\n",
+    );
+}
+
+#[test]
+fn builds_bytes_utf8_check() {
+    check(
+        r#"
+fn main(): U32 {
+  bytes_utf8_check(b"abc") + bytes_utf8_check(b"\xf4\x8f\xbf\xbf") * 10u32 + bytes_utf8_check(b"\xf4\x90\x80\x80")
+}
+"#,
+        "utf8-check",
+        "1\n",
+    );
+}

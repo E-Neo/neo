@@ -1,20 +1,21 @@
-examples/argument_elision.neo	ok	Nat	6011	0x9f192188e54463ab
-examples/bool.neo	ok	Bool	3663	0xfbdbe696484f0004
-examples/bytes.neo	ok	Bytes	3522	0xa4d935d0bbd9e26f
-examples/closures.neo	ok	Nat	3947	0x73da09c9a7f0222e
-examples/enums.neo	ok	Nat	4136	0x02285df34533f37b
-examples/hello.neo	ok	Nat	3498	0x70669ec75999d22e
-examples/indexed_append.neo	ok	Nat	5993	0x3439d2f4374134fd
-examples/indexed_match.neo	ok	Nat	3897	0x3e4393c495e0380c
-examples/indexed_vec.neo	ok	Nat	5091	0x0f6fcc9ab1085378
-examples/list.neo	ok	List(Nat)	4103	0xd06d65142e3ab3b5
-examples/methods.neo	ok	U32	3660	0x5fec20fe65fdc121
-examples/nat.neo	ok	Nat	4086	0x0dd2be846711373f
-examples/operators.neo	ok	Nat	12317	0x0307afbacf728b08
-examples/pattern_matching.neo	ok	Nat	4179	0x8069c8264eef947e
-examples/proofs.neo	ok	Nat	3738	0x1d1cec3a5c790418
-examples/strings.neo	ok	String	3705	0x16cc6f8884a5f3af
-examples/u32.neo	ok	U32	3544	0x06588e24dc0aca1f
+examples/argument_elision.neo	ok	Nat	6350	0xfbd49f0e231392a8
+examples/bool.neo	ok	Bool	4002	0xd59dc316acc68ed2
+examples/bytes.neo	ok	Bytes	3861	0xf9387f061c4113fd
+examples/closures.neo	ok	Nat	4286	0x1b735a411ee65ff7
+examples/enums.neo	ok	Nat	4475	0xbbf9cedcb1d0b40f
+examples/hello.neo	ok	Nat	3837	0x2d55797855694881
+examples/indexed_append.neo	ok	Nat	6332	0x4eff95fa21399978
+examples/indexed_match.neo	ok	Nat	4236	0x6b10b8e7d93c8a52
+examples/indexed_vec.neo	ok	Nat	5430	0x6bb161b9f24fa53b
+examples/list.neo	ok	List(Nat)	4442	0xd9342aa1f9e45788
+examples/methods.neo	ok	U32	3999	0xde38fa3577af464a
+examples/nat.neo	ok	Nat	4425	0x3e66f7f1e970483e
+examples/operators.neo	ok	Nat	12656	0x13b1c373b4e20936
+examples/pattern_matching.neo	ok	Nat	4518	0xba48d70bd11ae39b
+examples/proofs.neo	ok	Nat	4077	0x5fd29d76c56e06f7
+examples/strings.neo	ok	String	4044	0x35d4f0d82ae8a1c9
+examples/u32.neo	ok	U32	3883	0x003cfd4352718677
+examples/utf8.neo	ok	Result(String, Utf8Error)	4126	0x505b94a072baa752
 tests/corpus/ambiguous_numeral.neo	reject	cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix	-	-
 tests/corpus/bytes_literal_non_ascii.neo	reject	bytes literals must contain only ASCII characters; use `\\x` escapes	-	-
 tests/corpus/chained_comparison.neo	reject	comparison operators are not associative; parenthesize	-	-
@@ -33,3 +34,4 @@ tests/corpus/text_primitive_arity.neo	reject	primitive `str_length` takes 1 argu
 tests/corpus/u32_literal_too_large.neo	reject	u32 literal is too large	-	-
 tests/corpus/u32_suffix_conflict.neo	reject	literal suffix `u32` conflicts with expected type `Nat`	-	-
 tests/corpus/unknown_method.neo	reject	no method `length` on type `Nat`	-	-
+tests/corpus/utf8_wrong_argument.neo	reject	type mismatch: expected `Bytes`, found `String`	-	-

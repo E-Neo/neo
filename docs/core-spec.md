@@ -267,12 +267,14 @@ str_slice                     : String, U32, U32 -> String
 str_concat                    : String, String -> String
 str_eq, str_ne                : String, String -> Bool
 str_to_bytes                  : String -> Bytes
+str_from_bytes                : Bytes -> String
 
 bytes_length                  : Bytes -> U32
 bytes_slice                   : Bytes, U32, U32 -> Bytes
 bytes_concat                  : Bytes, Bytes -> Bytes
 bytes_eq, bytes_ne            : Bytes, Bytes -> Bool
 bytes_get                     : Bytes, U32 -> U32
+bytes_utf8_check              : Bytes -> U32
 ```
 
 `Bool` is the prelude enum; comparisons reduce to its `false` and `true`
@@ -293,9 +295,12 @@ yield `0`, and shifts use the low five bits of the count. A comparison yields
 the corresponding `Bool` constructor. Text operations treat values as byte
 sequences: lengths count bytes, slices clamp their bounds to the length (with
 `end < start` yielding empty), concatenation copies both inputs, equality
-compares bytes, and `bytes_get` returns `0` out of bounds. `str_to_bytes`
-returns the same bytes under the other type; there is no reverse conversion
-yet.
+compares bytes, and `bytes_get` returns `0` out of bounds. `str_to_bytes` and
+`str_from_bytes` reinterpret the same bytes under the other type without
+validation. `bytes_utf8_check` returns `0` for valid UTF-8 and otherwise the
+1-based index of the first byte of the first invalid sequence. Validation is
+strict: overlong forms, surrogates, code points above `U+10FFFF`, and truncated
+sequences are rejected.
 
 Conversion compares primitive types by name and literals by value. An
 operation with a non-literal argument stays neutral, and two neutral operations

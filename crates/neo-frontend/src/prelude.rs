@@ -43,6 +43,20 @@ enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
   exists(x: T, P(x))
 }
 
+enum Option[T: Type] {
+  none
+  some(T)
+}
+
+enum Result[T: Type, E: Type] {
+  ok(T)
+  err(E)
+}
+
+enum Utf8Error {
+  invalid_utf8(U32)
+}
+
 fn bool_not(b: Bool): Bool {
   match b {
     true => false
@@ -321,6 +335,14 @@ fn Bytes.concat(self: Bytes, other: Bytes): Bytes {
 
 fn Bytes.get(self: Bytes, index: U32): U32 {
   bytes_get(self, index)
+}
+
+fn Bytes.to_str(self: Bytes): Result[String, Utf8Error] {
+  let code = bytes_utf8_check(self)
+  match code == 0u32 {
+    true => ok(str_from_bytes(self))
+    false => err(invalid_utf8(code - 1u32))
+  }
 }
 
 "#;

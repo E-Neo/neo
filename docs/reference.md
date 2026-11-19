@@ -992,6 +992,7 @@ operations:
 | `b.slice(start, end)` | `fn(Bytes, U32, U32) -> Bytes` | O(1) view from `start` to `end` |
 | `b.concat(t)` | `fn(Bytes, Bytes) -> Bytes` | allocate and copy both |
 | `b.get(index)` | `fn(Bytes, U32) -> U32` | byte at an index, `0` out of bounds |
+| `b.to_str()` | `fn(Bytes) -> Result[String, Utf8Error]` | validate UTF-8 and view the bytes as a `String` |
 
 ```neo
 fn shout(s: String): String {
@@ -1002,9 +1003,31 @@ fn shout(s: String): String {
 Slicing is total: a start or end past the length is clamped to the length, and
 `end < start` yields the empty slice. `slice` does not copy; `concat` allocates
 a fresh buffer. A `String` is expected to contain UTF-8, so string slices
-should start and end on character boundaries; the runtime does not validate
-this. There is no `to_str` on `Bytes` yet; it needs a `Result` to report
-invalid UTF-8.
+should start and end on character boundaries; a `String` is not validated when
+it is created or sliced.
+
+`b.to_str()` is the checked conversion from `Bytes` to `String`. It validates
+strict UTF-8 (rejecting overlong forms, surrogates, code points above
+`U+10FFFF`, and truncated sequences) and returns
+`Result[String, Utf8Error]`:
+
+```neo
+fn parse(bytes: Bytes): Result[String, Utf8Error] {
+  bytes.to_str()
+}
+```
+
+An error carries the byte index where the first invalid sequence starts:
+
+```neo
+match b"a\xff".to_str() {
+  ok(text) => text
+  err(invalid_utf8(index)) => ...
+}
+```
+
+The index is `0`-based, so the example reports `1`. A truncated sequence
+reports its first byte.
 
 `==` and `!=` compare text with the internal `str_eq`/`str_ne` and
 `bytes_eq`/`bytes_ne` operations. The `str_*` and `bytes_*` operations remain
@@ -1456,6 +1479,20 @@ enum Or[P: Prop, Q: Prop] : Prop {
 enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
   exists(x: T, P(x))
 }
+
+enum Option[T: Type] {
+  none
+  some(T)
+}
+
+enum Result[T: Type, E: Type] {
+  ok(T)
+  err(E)
+}
+
+enum Utf8Error {
+  invalid_utf8(U32)
+}
 ```
 
 The prelude also defines these numeric, boolean, and unit functions:
@@ -1496,6 +1533,7 @@ fn Bytes.length(self: Bytes): U32
 fn Bytes.slice(self: Bytes, start: U32, end: U32): Bytes
 fn Bytes.concat(self: Bytes, other: Bytes): Bytes
 fn Bytes.get(self: Bytes, index: U32): U32
+fn Bytes.to_str(self: Bytes): Result[String, Utf8Error]
 ```
 
 Notes:
@@ -1505,6 +1543,8 @@ Notes:
 - `String` and `Bytes` literals and operations are primitive; their public
   surface is the method set in [text methods](#text-methods).
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
+- `Option` and `Result` are ordinary enums. `main` may return either; both
+  backends print constructors as `some(3)`, `ok("x")`, or `err(invalid_utf8(2))`.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
   conjunction function; name it `both` instead.
@@ -1834,7 +1874,6 @@ design:
 - modules, imports, namespaces, or multiple files; `::` is reserved for future
   module qualification;
 - characters, floats, and general I/O;
-- `Bytes.to_str` with UTF-8 validation; it needs `Result` first;
 - character-aware string slicing: `slice` indexes bytes;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
