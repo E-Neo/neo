@@ -49,6 +49,11 @@ t, A, B ::=
 The core has **no let-binding**. Surface `let` bindings, blocks, and variable
 patterns elaborate to `(fn(x: A) => body)(value)`.
 
+The core also has no method concept. A surface method declaration
+`fn Type.name(...)` is an ordinary global constant named `Type.name`, and
+`e.name(args)` elaborates to that constant applied to `e` followed by the
+remaining arguments. Dispatch by receiver type happens only in the elaborator.
+
 A `Pi` term also carries a binder name and an `implicit` boolean. Both are
 metadata: conversion and type checking ignore them. The flag records whether
 the surface binder was written in `[]` so that the elaborator can insert the
@@ -272,7 +277,9 @@ bytes_get                     : Bytes, U32 -> U32
 
 `Bool` is the prelude enum; comparisons reduce to its `false` and `true`
 constructors. Operations are not values: a bare operation name is not a term,
-so it can never escape into a position the evaluator does not reduce.
+so it can never escape into a position the evaluator does not reduce. The
+`u32_*` names shown above are core operation names; the surface spells those
+operations with infix operators and does not expose the names.
 
 Evaluation reduces an operation whose arguments are all literals of the
 expected types:

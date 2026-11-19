@@ -289,46 +289,111 @@ fn build_fn_type(globals: &Globals, decl: &FnDecl) -> Result<FnTypeInfo> {
     Ok(FnTypeInfo { ty, domains, ret })
 }
 
-fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
-    if globals.defs.contains_key(&decl.name) || globals.enums.contains_key(&decl.name) {
+fn fn_global_name(decl: &FnDecl) -> String {
+    match &decl.namespace {
+        Some(ns) => format!("{}.{}", ns, decl.name),
+        None => decl.name.clone(),
+    }
+}
+
+fn surface_type_head(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Var(name, _) => Some(name),
+        Expr::App { f, .. } => surface_type_head(f),
+        Expr::Paren(e, _) => surface_type_head(e),
+        _ => None,
+    }
+}
+
+fn check_method_decl(globals: &Globals, decl: &FnDecl, name: &str) -> Result<()> {
+    let Some(ns) = &decl.namespace else {
+        return Ok(());
+    };
+    let known = PrimTy::from_name(ns).is_some() || globals.get_enum(ns).is_some();
+    if !known {
         return Err(Error::at(
             decl.span,
-            format!("`{}` is already defined", decl.name),
+            format!(
+                "`{}` is not a type, so `{}` cannot be declared as a method",
+                ns, name
+            ),
         ));
     }
-    if let Some(message) = reserved_name(&decl.name) {
+    let Some(first) = decl.params.iter().find(|p| !p.implicit) else {
+        return Err(Error::at(
+            decl.span,
+            format!("method `{}` needs a receiver parameter", name),
+        ));
+    };
+    match surface_type_head(&first.ty) {
+        Some(head) if head == ns => Ok(()),
+        _ => Err(Error::at(
+            first.span,
+            format!("the first parameter of `{}` must have type `{}`", name, ns),
+        )),
+    }
+}
+
+/// Operators are the only surface spelling of their primitive operations.
+/// Using the kernel name directly is an error that names the operator.
+fn internal_primitive_error(op: PrimOp, span: Span) -> Option<Error> {
+    if !op.is_internal() {
+        return None;
+    }
+    let symbol = op.operator().unwrap_or("");
+    Some(Error::at(
+        span,
+        format!("`{}` is internal; use the `{}` operator", op.name(), symbol),
+    ))
+}
+
+fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
+    let name = fn_global_name(decl);
+    check_method_decl(globals, decl, &name)?;
+    if globals.defs.contains_key(&name) || globals.enums.contains_key(&name) {
+        return Err(Error::at(
+            decl.span,
+            format!("`{}` is already defined", name),
+        ));
+    }
+    if let Some(message) = reserved_name(&name) {
         return Err(Error::at(decl.span, message));
     }
 
     let info = build_fn_type(globals, decl)?;
-    globals.add_fn_placeholder(&decl.name, info.ty.clone(), info.domains.len());
+    let num_explicit = info
+        .domains
+        .iter()
+        .filter(|(_, _, implicit)| !implicit)
+        .count();
+    globals.add_fn_placeholder(&name, info.ty.clone(), info.domains.len(), num_explicit);
 
-    let result = elab_fn_body(globals, decl, &info);
+    let result = elab_fn_body(globals, decl, &name, &info);
     if result.is_err() {
         // Do not leave a bodyless placeholder behind after a failed definition.
-        globals.defs.remove(&decl.name);
+        globals.defs.remove(&name);
     }
     result
 }
 
-fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, info: &FnTypeInfo) -> Result<()> {
+fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, name: &str, info: &FnTypeInfo) -> Result<()> {
     let mut ctx = Ctx::new();
-    for (name, dom, _) in &info.domains {
+    for (pname, dom, _) in &info.domains {
         let dom_v = eval(globals, &ctx.env, dom);
-        ctx.push(name.clone(), dom_v);
+        ctx.push(pname.clone(), dom_v);
     }
     let ret_v = eval(globals, &ctx.env, &info.ret);
     let body_expr = Expr::Block(decl.body.clone());
     let mut body = elab_check(globals, &mut ctx, &body_expr, &ret_v)?;
-    for (name, dom, _) in info.domains.iter().rev() {
-        body = lam(name.clone(), dom.clone(), body);
+    for (pname, dom, _) in info.domains.iter().rev() {
+        body = lam(pname.clone(), dom.clone(), body);
     }
 
     let mut type_ctx = Ctx::new();
     check::infer_sort(globals, &mut type_ctx, &info.ty).map_err(|e| {
         Error::at(
             decl.span,
-            format!("kernel rejected the type of `{}`: {}", decl.name, e.message),
+            format!("kernel rejected the type of `{}`: {}", name, e.message),
         )
     })?;
     let ty_v = eval(globals, &Vec::new(), &info.ty);
@@ -336,20 +401,20 @@ fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, info: &FnTypeInfo) -> Resu
     check::check(globals, &mut body_ctx, &body, &ty_v).map_err(|e| {
         Error::at(
             decl.span,
-            format!("kernel rejected `{}`: {}", decl.name, e.message),
+            format!("kernel rejected `{}`: {}", name, e.message),
         )
     })?;
 
     // The authoritative termination check runs on the elaborated core term,
     // while the definition's own body is still opaque.
-    crate::recursion::check_def(globals, &decl.name, &body).map_err(|e| {
+    crate::recursion::check_def(globals, name, &body).map_err(|e| {
         Error::at(
             decl.span,
-            format!("kernel rejected `{}`: {}", decl.name, e.message),
+            format!("kernel rejected `{}`: {}", name, e.message),
         )
     })?;
 
-    globals.set_fn_body(&decl.name, body);
+    globals.set_fn_body(name, body);
     Ok(())
 }
 
@@ -396,6 +461,7 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
             }
             elab_app(globals, ctx, f, implicit, args, *span)
         }
+        Expr::Method { .. } => elab_method(globals, ctx, expr, None),
         Expr::BinOp { op, lhs, rhs, span } => elab_binop_infer(globals, ctx, *op, lhs, rhs, *span),
         Expr::Match(scrut, arms, span) => {
             let (tm, ty) = elab_match(globals, ctx, scrut, arms, None, *span)?;
@@ -429,6 +495,9 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
         return Ok((prim_ty(ty), vtype(0)));
     }
     if let Some(op) = PrimOp::from_name(name) {
+        if let Some(err) = internal_primitive_error(op, span) {
+            return Err(err);
+        }
         return Err(Error::at(
             span,
             format!(
@@ -553,6 +622,9 @@ fn elab_app_with(
         && ctx.lookup_index(name).is_none()
         && let Some(op) = PrimOp::from_name(name)
     {
+        if let Some(err) = internal_primitive_error(op, span) {
+            return Err(err);
+        }
         if !implicit.is_empty() {
             return Err(Error::at(
                 span,
@@ -628,6 +700,87 @@ fn elab_app_with(
             "application: the function has a non-function type",
         )),
     }
+}
+
+fn elab_method(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    expr: &Expr,
+    expected: Option<&V>,
+) -> Result<(RcTm, V)> {
+    let Expr::Method {
+        receiver,
+        name,
+        implicit,
+        args,
+        span,
+    } = expr
+    else {
+        return Err(Error::new("internal: expected a method call"));
+    };
+    let span = *span;
+    let method = method_global_name(globals, ctx, receiver, name, span)?;
+    let arity = globals
+        .get_fn_num_explicit(&method)
+        .ok_or_else(|| Error::at(span, format!("no method `{}` on type", name)))?;
+    let supplied = args.len() + 1;
+    if supplied != arity {
+        let expected_args = arity.saturating_sub(1);
+        let noun = if expected_args == 1 {
+            "argument"
+        } else {
+            "arguments"
+        };
+        return Err(Error::at(
+            span,
+            format!(
+                "method `{}` takes {} {} after the receiver, got {}",
+                method,
+                expected_args,
+                noun,
+                args.len()
+            ),
+        ));
+    }
+    let f = Expr::Var(method, span);
+    let mut call_args = Vec::with_capacity(args.len() + 1);
+    call_args.push((**receiver).clone());
+    call_args.extend_from_slice(args);
+    elab_app_with(globals, ctx, &f, implicit, &call_args, expected, span)
+}
+
+fn method_global_name(
+    globals: &Globals,
+    ctx: &Ctx,
+    receiver: &Expr,
+    name: &str,
+    span: Span,
+) -> Result<String> {
+    let mut probe = ctx.clone();
+    let (_, ty) = elab_infer(globals, &mut probe, receiver)?;
+    let ty = force(globals, ty);
+    let head = match &*ty {
+        Val::PrimTy(t) => t.name().to_string(),
+        Val::Ind(head, _) => head.clone(),
+        _ => {
+            let shown = crate::pretty::show_val(globals, ctx.level(), &ty);
+            return Err(Error::at(
+                span,
+                format!(
+                    "cannot select a method on type `{}`; the receiver type must be concrete",
+                    shown
+                ),
+            ));
+        }
+    };
+    let full = format!("{}.{}", head, name);
+    if globals.get_ty(&full).is_none() {
+        return Err(Error::at(
+            span,
+            format!("no method `{}` on type `{}`", name, head),
+        ));
+    }
+    Ok(full)
 }
 
 fn leading_implicit_count(globals: &Globals, base: usize, ty: &V) -> usize {
@@ -1251,6 +1404,7 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
             }
             elab_app_check(globals, ctx, f, implicit, args, expected, *span)
         }
+        Expr::Method { .. } => elab_method(globals, ctx, expr, Some(expected)).map(|(tm, _)| tm),
         Expr::BinOp { op, lhs, rhs, span } => {
             elab_binop_check(globals, ctx, *op, lhs, rhs, *span, expected)
         }

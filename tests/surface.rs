@@ -107,7 +107,7 @@ fn let_bindings_shadow() {
 fn numerals_follow_the_expected_type() {
     assert_eq!(u32_main("42"), 42);
     assert_eq!(nat_main("42"), 42);
-    assert_eq!(u32_main("u32_add(1, 2)"), 3);
+    assert_eq!(u32_main("1 + 2"), 3);
     assert_rejected(
         "fn main(): Nat { 1u32 }",
         "literal suffix `u32` conflicts with expected type `Nat`",

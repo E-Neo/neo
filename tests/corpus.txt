@@ -1,6 +1,6 @@
 examples/argument_elision.neo	ok	Nat	6011	0x9f192188e54463ab
 examples/bool.neo	ok	Bool	3663	0xfbdbe696484f0004
-examples/bytes.neo	ok	Bytes	3418	0xdbae4b7413a95640
+examples/bytes.neo	ok	Bytes	3522	0xa4d935d0bbd9e26f
 examples/closures.neo	ok	Nat	3947	0x73da09c9a7f0222e
 examples/enums.neo	ok	Nat	4136	0x02285df34533f37b
 examples/hello.neo	ok	Nat	3498	0x70669ec75999d22e
@@ -8,15 +8,22 @@ examples/indexed_append.neo	ok	Nat	5993	0x3439d2f4374134fd
 examples/indexed_match.neo	ok	Nat	3897	0x3e4393c495e0380c
 examples/indexed_vec.neo	ok	Nat	5091	0x0f6fcc9ab1085378
 examples/list.neo	ok	List(Nat)	4103	0xd06d65142e3ab3b5
+examples/methods.neo	ok	U32	3660	0x5fec20fe65fdc121
 examples/nat.neo	ok	Nat	4086	0x0dd2be846711373f
 examples/operators.neo	ok	Nat	12317	0x0307afbacf728b08
 examples/pattern_matching.neo	ok	Nat	4179	0x8069c8264eef947e
 examples/proofs.neo	ok	Nat	3738	0x1d1cec3a5c790418
-examples/strings.neo	ok	String	3432	0x14d602ab34378537
+examples/strings.neo	ok	String	3705	0x16cc6f8884a5f3af
 examples/u32.neo	ok	U32	3544	0x06588e24dc0aca1f
 tests/corpus/ambiguous_numeral.neo	reject	cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix	-	-
 tests/corpus/bytes_literal_non_ascii.neo	reject	bytes literals must contain only ASCII characters; use `\\x` escapes	-	-
 tests/corpus/chained_comparison.neo	reject	comparison operators are not associative; parenthesize	-	-
+tests/corpus/internal_u32_name.neo	reject	`u32_add` is internal; use the `+` operator	-	-
+tests/corpus/method_missing_arguments.neo	reject	a method call needs `(...)` arguments	-	-
+tests/corpus/method_not_a_type.neo	reject	`Nope` is not a type, so `Nope.length` cannot be declared as a method	-	-
+tests/corpus/method_on_type_variable.neo	reject	cannot select a method on type `x0`; the receiver type must be concrete	-	-
+tests/corpus/method_receiver_mismatch.neo	reject	the first parameter of `String.length` must have type `String`	-	-
+tests/corpus/method_wrong_arity.neo	reject	method `String.length` takes 0 arguments after the receiver, got 1	-	-
 tests/corpus/mixed_operator_types.neo	reject	type mismatch: expected `U32`, found `Nat`	-	-
 tests/corpus/nat_literal_too_large.neo	reject	`Nat` literal is too large (limit 1000000); use a `u32` literal	-	-
 tests/corpus/nested_inductive.neo	reject	`Bad` is not strictly positive in this constructor field (nested inductives are not supported)	-	-
@@ -25,3 +32,4 @@ tests/corpus/string_hex_high.neo	reject	`\\x` above `7f` is not valid UTF-8; use
 tests/corpus/text_primitive_arity.neo	reject	primitive `str_length` takes 1 argument, got 2	-	-
 tests/corpus/u32_literal_too_large.neo	reject	u32 literal is too large	-	-
 tests/corpus/u32_suffix_conflict.neo	reject	literal suffix `u32` conflicts with expected type `Nat`	-	-
+tests/corpus/unknown_method.neo	reject	no method `length` on type `Nat`	-	-

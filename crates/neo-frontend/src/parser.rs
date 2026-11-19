@@ -132,7 +132,14 @@ impl Parser {
     fn parse_fn(&mut self) -> Result<FnDecl> {
         let span = self.peek().span;
         self.expect(&Tok::Fn, "expected `fn`")?;
-        let name = self.expect_ident("expected function name")?;
+        let first = self.expect_ident("expected function name")?;
+        let (namespace, name) = if self.at(&Tok::Dot) {
+            self.advance();
+            let method = self.expect_ident("expected a method name after `.`")?;
+            (Some(first), method)
+        } else {
+            (None, first)
+        };
         let mut params = Vec::new();
         if self.at(&Tok::LBracket) {
             params.extend(self.parse_params(Tok::LBracket, Tok::RBracket, true)?);
@@ -144,6 +151,7 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_block()?;
         Ok(FnDecl {
+            namespace,
             name,
             params,
             ret,
@@ -551,30 +559,59 @@ impl Parser {
 
     fn parse_app(&mut self) -> Result<Expr> {
         let mut f = self.parse_atom()?;
-        while self.at(&Tok::LBracket) || self.at(&Tok::LParen) {
-            let span = self.peek().span;
-            if self.at(&Tok::LBracket) {
-                let implicit = self.parse_args(Tok::LBracket, Tok::RBracket, true)?;
-                let args = if self.at(&Tok::LParen) {
-                    self.parse_args(Tok::LParen, Tok::RParen, false)?
+        loop {
+            if self.at(&Tok::LBracket) || self.at(&Tok::LParen) {
+                let span = self.peek().span;
+                if self.at(&Tok::LBracket) {
+                    let implicit = self.parse_args(Tok::LBracket, Tok::RBracket, true)?;
+                    let args = if self.at(&Tok::LParen) {
+                        self.parse_args(Tok::LParen, Tok::RParen, false)?
+                    } else {
+                        Vec::new()
+                    };
+                    f = Expr::App {
+                        f: Box::new(f),
+                        implicit,
+                        args,
+                        span,
+                    };
+                } else {
+                    let args = self.parse_args(Tok::LParen, Tok::RParen, false)?;
+                    f = Expr::App {
+                        f: Box::new(f),
+                        implicit: Vec::new(),
+                        args,
+                        span,
+                    };
+                }
+                continue;
+            }
+            if self.at(&Tok::Dot) {
+                let span = self.peek().span;
+                self.advance();
+                let name = self.expect_ident("expected a method name after `.`")?;
+                let implicit = if self.at(&Tok::LBracket) {
+                    self.parse_args(Tok::LBracket, Tok::RBracket, true)?
                 } else {
                     Vec::new()
                 };
-                f = Expr::App {
-                    f: Box::new(f),
+                if !self.at(&Tok::LParen) {
+                    return Err(Error::at(
+                        self.peek().span,
+                        "a method call needs `(...)` arguments",
+                    ));
+                }
+                let args = self.parse_args(Tok::LParen, Tok::RParen, false)?;
+                f = Expr::Method {
+                    receiver: Box::new(f),
+                    name,
                     implicit,
                     args,
                     span,
                 };
-            } else {
-                let args = self.parse_args(Tok::LParen, Tok::RParen, false)?;
-                f = Expr::App {
-                    f: Box::new(f),
-                    implicit: Vec::new(),
-                    args,
-                    span,
-                };
+                continue;
             }
+            break;
         }
         Ok(f)
     }

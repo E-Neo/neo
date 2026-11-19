@@ -201,6 +201,35 @@ impl PrimOp {
         PrimOp::ALL.iter().copied().find(|op| op.name() == name)
     }
 
+    /// Whether this operation is an internal implementation of an operator.
+    /// Internal operations cannot be written by name in a program.
+    pub fn is_internal(self) -> bool {
+        self.operator().is_some()
+    }
+
+    /// The surface operator that implements this operation, if any.
+    pub fn operator(self) -> Option<&'static str> {
+        match self {
+            PrimOp::Add => Some("+"),
+            PrimOp::Sub => Some("-"),
+            PrimOp::Mul => Some("*"),
+            PrimOp::Div => Some("/"),
+            PrimOp::Rem => Some("%"),
+            PrimOp::And => Some("&"),
+            PrimOp::Or => Some("|"),
+            PrimOp::Xor => Some("^"),
+            PrimOp::Shl => Some("<<"),
+            PrimOp::Shr => Some(">>"),
+            PrimOp::Lt => Some("<"),
+            PrimOp::Le => Some("<="),
+            PrimOp::Gt => Some(">"),
+            PrimOp::Ge => Some(">="),
+            PrimOp::Eq => Some("=="),
+            PrimOp::Ne => Some("!="),
+            _ => None,
+        }
+    }
+
     /// The argument types of this operation, in order.
     pub fn domains(self) -> &'static [PrimTy] {
         match self {

@@ -1,0 +1,27 @@
+// Methods are functions namespaced by their receiver type. Different types may
+// declare the same method name; dispatch uses the receiver's type.
+fn Bool.not(self: Bool): Bool {
+  match self {
+    false => true
+    true => false
+  }
+}
+
+enum Shape {
+  circle(U32)
+  rect(U32, U32)
+}
+
+fn Shape.area(self: Shape): U32 {
+  match self {
+    circle(r) => r * r * 3u32
+    rect(w, h) => w * h
+  }
+}
+
+fn main(): U32 {
+  match false.not() {
+    true => rect(3u32, 4u32).area()
+    false => 0u32
+  }
+}

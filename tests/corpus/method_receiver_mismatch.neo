@@ -1,0 +1,7 @@
+fn String.length(self: Bytes): U32 {
+  0
+}
+
+fn main(): U32 {
+  0
+}

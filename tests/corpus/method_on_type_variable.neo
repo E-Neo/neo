@@ -1,0 +1,7 @@
+fn f[T: Type](x: T): U32 {
+  x.length()
+}
+
+fn main(): U32 {
+  0
+}

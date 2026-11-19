@@ -37,6 +37,8 @@ pub struct Field {
 
 #[derive(Clone, Debug)]
 pub struct FnDecl {
+    /// The type namespace for a method declaration such as `fn String.length`.
+    pub namespace: Option<String>,
     pub name: String,
     pub params: Vec<Param>,
     pub ret: Expr,
@@ -150,6 +152,13 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
+    Method {
+        receiver: Box<Expr>,
+        name: String,
+        implicit: Vec<Expr>,
+        args: Vec<Expr>,
+        span: Span,
+    },
     BinOp {
         op: BinOp,
         lhs: Box<Expr>,
@@ -176,6 +185,7 @@ impl Expr {
             | Expr::FnType(_, _, s)
             | Expr::FnLam(_, _, s)
             | Expr::App { span: s, .. }
+            | Expr::Method { span: s, .. }
             | Expr::BinOp { span: s, .. }
             | Expr::Match(_, _, s)
             | Expr::Eq(_, _, s)

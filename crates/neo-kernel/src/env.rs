@@ -56,6 +56,10 @@ pub enum GlobalDef {
         ty: RcTm,
         body: Option<RcTm>,
         num_params: usize,
+        /// The number of explicit parameters. Methods use this to require a
+        /// full argument list without confusing a function-valued result with
+        /// more declared parameters.
+        num_explicit: usize,
         /// A body may only be unfolded once it has passed the authoritative
         /// recursion and kernel checks. Unchecked bodies stay opaque.
         checked: bool,
@@ -79,13 +83,20 @@ impl Globals {
         Self::default()
     }
 
-    pub fn add_fn_placeholder(&mut self, name: impl Into<String>, ty: RcTm, num_params: usize) {
+    pub fn add_fn_placeholder(
+        &mut self,
+        name: impl Into<String>,
+        ty: RcTm,
+        num_params: usize,
+        num_explicit: usize,
+    ) {
         self.defs.insert(
             name.into(),
             GlobalDef::Fn {
                 ty,
                 body: None,
                 num_params,
+                num_explicit,
                 checked: false,
             },
         );
@@ -117,6 +128,13 @@ impl Globals {
     pub fn get_fn_num_params(&self, name: &str) -> Option<usize> {
         match self.defs.get(name) {
             Some(GlobalDef::Fn { num_params, .. }) => Some(*num_params),
+            _ => None,
+        }
+    }
+
+    pub fn get_fn_num_explicit(&self, name: &str) -> Option<usize> {
+        match self.defs.get(name) {
+            Some(GlobalDef::Fn { num_explicit, .. }) => Some(*num_explicit),
             _ => None,
         }
     }

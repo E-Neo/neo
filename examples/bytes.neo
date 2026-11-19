@@ -1,8 +1,7 @@
-// `Bytes` is an immutable byte sequence. `bytes_get`, `bytes_slice`, and
-// `bytes_concat` are total; slices clamp their bounds and an out-of-range
-// `bytes_get` yields `0`.
+// `Bytes` is an immutable byte sequence. Its methods are total: slices clamp
+// their bounds and an out-of-range `get` yields `0`.
 //
 // `main` prints a byte result as `b"..."` with two hex digits per byte.
 fn main(): Bytes {
-  bytes_concat(b"neo", b"\x00\xff")
+  b"neo".concat(b"\x00\xff")
 }

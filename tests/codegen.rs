@@ -251,7 +251,7 @@ fn builds_u32_arithmetic() {
     check(
         r#"
 fn main(): U32 {
-  u32_add(u32_mul(6u32, 7u32), u32_sub(0u32, 1u32))
+  6u32 * 7u32 + 0u32 - 1u32
 }
 "#,
         "u32",
@@ -264,7 +264,7 @@ fn builds_u32_division_by_zero() {
     check(
         r#"
 fn main(): U32 {
-  u32_add(u32_div(9u32, 0u32), u32_rem(9u32, 0u32))
+  9u32 / 0u32 + 9u32 % 0u32
 }
 "#,
         "u32-divzero",
@@ -277,7 +277,7 @@ fn builds_u32_comparison() {
     check(
         r#"
 fn is_even(n: U32): Bool {
-  u32_eq(u32_rem(n, 2u32), 0u32)
+  n % 2u32 == 0u32
 }
 
 fn main(): Bool {
@@ -354,5 +354,46 @@ fn main(): Bytes {
 "#,
         "bytes-print",
         "b\"\\x6e\\x65\\x6f\\x00\\xff\"\n",
+    );
+}
+
+#[test]
+fn builds_method_calls() {
+    check(
+        r#"
+fn List.length[T: Type](xs: List[T]): Nat {
+  match xs {
+    nil => zero
+    cons(_, rest) => succ(rest.length())
+  }
+}
+
+fn main(): String {
+  "hello".slice(0, 4).concat("!")
+}
+"#,
+        "methods",
+        "hell!\n",
+    );
+}
+
+#[test]
+fn builds_generic_method_calls() {
+    check(
+        r#"
+fn List.length[T: Type](xs: List[T]): Nat {
+  match xs {
+    nil => zero
+    cons(_, rest) => succ(rest.length())
+  }
+}
+
+fn main(): Nat {
+  let xs: List[Nat] = cons(1, cons(2, cons(3, nil)))
+  xs.length()
+}
+"#,
+        "generic-methods",
+        "3\n",
     );
 }

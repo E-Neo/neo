@@ -84,35 +84,35 @@ fn as_nat(globals: &Globals, v: &V) -> u64 {
 
 #[test]
 fn arithmetic_wraps_and_division_is_total() {
-    assert_eq!(u32_main("u32_add(20u32, 22u32)"), 42);
-    assert_eq!(u32_main("u32_sub(0u32, 1u32)"), u32::MAX);
-    assert_eq!(u32_main("u32_mul(65536u32, 65536u32)"), 0);
-    assert_eq!(u32_main("u32_div(7u32, 0u32)"), 0);
-    assert_eq!(u32_main("u32_rem(7u32, 0u32)"), 0);
-    assert_eq!(u32_main("u32_div(7u32, 2u32)"), 3);
-    assert_eq!(u32_main("u32_rem(7u32, 2u32)"), 1);
+    assert_eq!(u32_main("20u32 + 22u32"), 42);
+    assert_eq!(u32_main("0u32 - 1u32"), u32::MAX);
+    assert_eq!(u32_main("65536u32 * 65536u32"), 0);
+    assert_eq!(u32_main("7u32 / 0u32"), 0);
+    assert_eq!(u32_main("7u32 % 0u32"), 0);
+    assert_eq!(u32_main("7u32 / 2u32"), 3);
+    assert_eq!(u32_main("7u32 % 2u32"), 1);
 }
 
 #[test]
 fn bitwise_operations_use_machine_semantics() {
-    assert_eq!(u32_main("u32_and(12u32, 10u32)"), 8);
-    assert_eq!(u32_main("u32_or(12u32, 10u32)"), 14);
-    assert_eq!(u32_main("u32_xor(12u32, 10u32)"), 6);
-    assert_eq!(u32_main("u32_shl(1u32, 31u32)"), 1 << 31);
-    assert_eq!(u32_main("u32_shr(2147483648u32, 31u32)"), 1);
+    assert_eq!(u32_main("12u32 & 10u32"), 8);
+    assert_eq!(u32_main("12u32 | 10u32"), 14);
+    assert_eq!(u32_main("12u32 ^ 10u32"), 6);
+    assert_eq!(u32_main("1u32 << 31u32"), 1 << 31);
+    assert_eq!(u32_main("2147483648u32 >> 31u32"), 1);
     // Shift amounts use their low five bits, as in WebAssembly.
-    assert_eq!(u32_main("u32_shl(1u32, 32u32)"), 1);
+    assert_eq!(u32_main("1u32 << 32u32"), 1);
 }
 
 #[test]
 fn comparisons_return_bool() {
-    assert!(bool_main("u32_lt(1u32, 2u32)"));
-    assert!(!bool_main("u32_lt(2u32, 1u32)"));
-    assert!(bool_main("u32_le(2u32, 2u32)"));
-    assert!(bool_main("u32_gt(3u32, 2u32)"));
-    assert!(bool_main("u32_ge(2u32, 2u32)"));
-    assert!(bool_main("u32_eq(2u32, 2u32)"));
-    assert!(bool_main("u32_ne(2u32, 3u32)"));
+    assert!(bool_main("1u32 < 2u32"));
+    assert!(!bool_main("2u32 < 1u32"));
+    assert!(bool_main("2u32 <= 2u32"));
+    assert!(bool_main("3u32 > 2u32"));
+    assert!(bool_main("2u32 >= 2u32"));
+    assert!(bool_main("2u32 == 2u32"));
+    assert!(bool_main("2u32 != 3u32"));
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn comparisons_reduce_during_elaboration() {
     let globals = elaborate(
         r#"
 fn pick(): Nat {
-  match u32_lt(1u32, 2u32) {
+  match 1u32 < 2u32 {
     true => 10
     false => 20
   }
@@ -159,7 +159,7 @@ fn main(): Nat {
 
 #[test]
 fn accepts_plain_literals_where_u32_is_expected() {
-    assert_eq!(u32_main("u32_add(1, 2)"), 3);
+    assert_eq!(u32_main("1 + 2"), 3);
     assert_rejected(
         "fn main(): Nat { 1u32 }",
         "literal suffix `u32` conflicts with expected type `Nat`",
@@ -167,13 +167,12 @@ fn accepts_plain_literals_where_u32_is_expected() {
 }
 
 #[test]
-fn rejects_misapplied_primitives() {
-    assert_rejected("fn main(): U32 { u32_add(1u32) }", "takes 2 arguments");
+fn rejects_internal_primitive_names() {
     assert_rejected(
-        "fn main(): U32 { u32_add[1u32](1u32, 2u32) }",
-        "takes no implicit arguments",
+        "fn main(): U32 { u32_add(1u32, 2u32) }",
+        "`u32_add` is internal; use the `+` operator",
     );
-    assert_rejected("fn main(): U32 { u32_add }", "must be fully applied");
+    assert_rejected("fn main(): U32 { u32_add }", "use the `+` operator");
 }
 
 #[test]

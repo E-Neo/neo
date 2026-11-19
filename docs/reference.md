@@ -238,12 +238,13 @@ remain meaningful. `Bytes` is uninterpreted. `String` results print as text and
 ### Operators and punctuation
 
 ```
-(  )  [  ]  {  }  ,  :  =  ==  ->  =>
+(  )  [  ]  {  }  ,  .  :  =  ==  ->  =>
 +  -  *  /  %  &  |  ^  <<  >>  <  <=  >  >=  !=
 ```
 
 `[` and `]` delimit implicit parameter and argument lists. `->` is the
-function-type arrow; `=>` introduces a lambda body or match arm.
+function-type arrow; `=>` introduces a lambda body or match arm. `.` selects a
+method call or separates a method's type from its name.
 
 `=` is both the `let` binding separator and the equality proposition. `==` and
 `!=` are boolean equality. `//` starts a line comment; `/` is division when it
@@ -267,8 +268,9 @@ fn name[implicit, ...](parameter, ...): Result { ... }
 Rules:
 
 - Only `enum` and `fn` may appear at the top level.
-- Every name lives in one global namespace. Reusing a name is an error, and
-  prelude names are already taken.
+- Type and function names live in one global namespace. Reusing a name is an
+  error, and prelude names are already taken. A method's full name is
+  `Type.name`, so the same simple method name may exist on different types.
 - A name must be declared before it is used. Forward references are errors.
 - The only recursion available is a function calling **itself**. Mutual
   recursion is not supported.
@@ -359,11 +361,11 @@ String
 Bytes
 ```
 
-Neither has constructors, and neither can be matched. They are eliminated by
-the text operations listed under [text operations](#text-operations). A value
-is a descriptor for a byte buffer with O(1) length and slicing; concatenation
-and slicing allocate in the runtime heap. All three primitive types live in
-`Type 0`.
+Neither has constructors, and neither can be matched. They are used through
+the methods listed under [text methods](#text-methods). A value is a descriptor
+for a byte buffer with O(1) length and slicing; slicing allocates only a
+descriptor, while concatenation allocates a fresh buffer. All three primitive
+types live in `Type 0`.
 
 ### Equality types
 
@@ -725,6 +727,8 @@ id[Nat](4)          // T supplied explicitly
 - An empty argument list `f()` is accepted. It may instantiate the function's
   implicit parameters if the context determines them.
 - A function's `[]` parameters are implicit; its `()` parameters are explicit.
+- `e.f(args)` is a method call: it applies the function named `Type.f`, where
+  `Type` is the head of the receiver's type. See [methods](#methods).
 
 ### Implicit parameters
 
@@ -810,6 +814,55 @@ fn zero(): Nat {
 
 (`fn() => e` has no useful meaning and is not the way to write one.)
 
+### Methods
+
+A method is a function namespaced by the type of its receiver. Declare it with
+a dotted name; the first explicit parameter is the receiver and must have that
+type:
+
+```neo
+fn String.concat(self: String, other: String): String {
+  str_concat(self, other)
+}
+
+fn List.length[T: Type](xs: List[T]): Nat {
+  match xs {
+    nil => zero
+    cons(_, rest) => succ(rest.length())
+  }
+}
+```
+
+Call a method with `.`:
+
+```neo
+"abc".concat("def".slice(0, 1))
+xs.length()
+xs.length[Nat]()
+```
+
+- Implicit parameters such as `T` are declared before the receiver.
+- The receiver's type head selects the method, so `String.length`,
+  `Bytes.length`, and `List.length` can coexist. Dispatch is static.
+- The receiver's type must be known before the method is selected, so the
+  receiver is elaborated without an expected type. A bare type variable has no
+  methods; annotate it. A bare numeral needs an ascription such as
+  `(2 : Nat).inc()`, and a constructor call needs a `let` annotation such as
+  `let b: Box[Nat] = box(3)` before `b.get()`.
+- A method call must supply every explicit parameter, including an empty `()`.
+  Methods are not first-class values: `xs.length` is not an expression.
+- Calls chain left-associatively: `xs.concat(ys).length()`.
+- Inside a method body, `rest.length()` calls the same method recursively; the
+  usual termination checker applies.
+- Methods may be declared on `Nat`, `U32`, `Bool`, user enums, and primitive
+  types.
+- There is no unqualified overloading (`concat(a, b)` is not a method call),
+  no type classes or instances, and no user-defined operator overloading.
+
+Method declarations are checked before use: the namespace must be a type, the
+first explicit parameter must have that type, and `Type.name` cannot be
+declared twice.
+
 ### Parentheses
 
 Parentheses group expressions:
@@ -887,36 +940,28 @@ The semantics differ by type:
 any other program. They are suitable for proofs and small indices; use `U32`
 for machine-sized computation.
 
-The named `u32_*` operations remain available and are still fully applied
-binary operations:
-
-| Operation | Type | Meaning |
-| --- | --- | --- |
-| `u32_add`, `u32_sub`, `u32_mul` | `fn(U32, U32) -> U32` | wrapping arithmetic |
-| `u32_div`, `u32_rem` | `fn(U32, U32) -> U32` | zero divisor yields `0` |
-| `u32_and`, `u32_or`, `u32_xor` | `fn(U32, U32) -> U32` | bitwise |
-| `u32_shl`, `u32_shr` | `fn(U32, U32) -> U32` | shift count uses its low 5 bits |
-| `u32_lt`, `u32_le`, `u32_gt`, `u32_ge` | `fn(U32, U32) -> Bool` | comparison |
-| `u32_eq`, `u32_ne` | `fn(U32, U32) -> Bool` | equality |
+The operators are the surface for every `U32` operation. The underlying
+kernel operations are named `u32_add`, `u32_sub`, and so on, but those names
+are internal and cannot be written in a program.
 
 ```neo
 fn is_even(n: U32): Bool {
-  u32_eq(u32_rem(n, 2u32), 0u32)
+  n % 2u32 == 0u32
 }
 ```
 
 Semantics follow the WebAssembly `i32` operations:
 
-- `u32_add`, `u32_sub`, and `u32_mul` wrap modulo `2^32`;
-- `u32_div` and `u32_rem` are total: a zero divisor yields `0`;
-- `u32_shl` and `u32_shr` use the low five bits of the shift count.
+- `+`, `-`, and `*` wrap modulo `2^32`;
+- `/` and `%` are total: a zero divisor yields `0`;
+- `<<` and `>>` use the low five bits of the shift count.
 
 An operation reduces when both operands are literals, so a `match` on a
 comparison reduces during elaboration:
 
 ```neo
 fn pick(): Nat {
-  match u32_lt(1u32, 2u32) {
+  match 1u32 < 2u32 {
     true => 10
     false => 20
   }
@@ -927,43 +972,45 @@ fn pick(): Nat {
 to obtain a `Bool`. A `U32` may still be an enum parameter or an index, as in
 `Vec[T, n]` with `n: U32`.
 
-The `u32_*` names, `U32`, and `Nat` are reserved, and the `nat_*` prelude
-operators are already defined: a program cannot redeclare any of them.
+`U32` and `Nat` are reserved, the internal `u32_*` names are reserved, and the
+`nat_*` prelude operators are already defined: a program cannot redeclare any
+of them.
 
-### Text operations
+### Text methods
 
-`String` and `Bytes` are eliminated by a fixed set of fully applied primitive
-operations. Like the `u32_*` operations, they cannot be used as first-class
-values. `==` and `!=` use `str_eq`/`str_ne` and `bytes_eq`/`bytes_ne`.
+`String` and `Bytes` expose methods for length, slicing, concatenation, and
+conversion. The prelude declares them in terms of the low-level primitive
+operations:
 
-| Operation | Type | Meaning |
+| Method | Type | Meaning |
 | --- | --- | --- |
-| `str_length` | `fn(String) -> U32` | byte length |
-| `str_slice` | `fn(String, U32, U32) -> String` | O(1) view from `start` to `end` |
-| `str_concat` | `fn(String, String) -> String` | allocate and copy both |
-| `str_eq`, `str_ne` | `fn(String, String) -> Bool` | byte equality |
-| `str_to_bytes` | `fn(String) -> Bytes` | view the same bytes as `Bytes` |
-| `bytes_length` | `fn(Bytes) -> U32` | byte length |
-| `bytes_slice` | `fn(Bytes, U32, U32) -> Bytes` | O(1) view from `start` to `end` |
-| `bytes_concat` | `fn(Bytes, Bytes) -> Bytes` | allocate and copy both |
-| `bytes_eq`, `bytes_ne` | `fn(Bytes, Bytes) -> Bool` | byte equality |
-| `bytes_get` | `fn(Bytes, U32) -> U32` | byte at an index, `0` out of bounds |
+| `s.length()` | `fn(String) -> U32` | byte length |
+| `s.slice(start, end)` | `fn(String, U32, U32) -> String` | O(1) view from `start` to `end` |
+| `s.concat(t)` | `fn(String, String) -> String` | allocate and copy both |
+| `s.to_bytes()` | `fn(String) -> Bytes` | view the same bytes as `Bytes` |
+| `b.length()` | `fn(Bytes) -> U32` | byte length |
+| `b.slice(start, end)` | `fn(Bytes, U32, U32) -> Bytes` | O(1) view from `start` to `end` |
+| `b.concat(t)` | `fn(Bytes, Bytes) -> Bytes` | allocate and copy both |
+| `b.get(index)` | `fn(Bytes, U32) -> U32` | byte at an index, `0` out of bounds |
 
 ```neo
 fn shout(s: String): String {
-  str_concat(str_slice(s, 0, 1), "!")
+  s.slice(0, 1).concat("!")
 }
 ```
 
 Slicing is total: a start or end past the length is clamped to the length, and
-`end < start` yields the empty slice. `str_slice` and `bytes_slice` do not copy;
-`str_concat` and `bytes_concat` allocate a fresh buffer. A `String` is expected
-to contain UTF-8, so string slices should start and end on character
-boundaries; the runtime does not validate this. There is no `bytes_to_str`
-conversion yet; it needs a `Result` to report invalid UTF-8.
+`end < start` yields the empty slice. `slice` does not copy; `concat` allocates
+a fresh buffer. A `String` is expected to contain UTF-8, so string slices
+should start and end on character boundaries; the runtime does not validate
+this. There is no `to_str` on `Bytes` yet; it needs a `Result` to report
+invalid UTF-8.
 
-The `str_*` and `bytes_*` names and the primitive types `U32`, `String`, and
-`Bytes` are reserved.
+`==` and `!=` compare text with the internal `str_eq`/`str_ne` and
+`bytes_eq`/`bytes_ne` operations. The `str_*` and `bytes_*` operations remain
+available as low-level builtins for the prelude; ordinary programs should use
+the methods. The prelude declares no `U32` methods because every built-in
+operation has an operator; users may still declare methods on `U32`.
 
 ---
 
@@ -1439,22 +1486,33 @@ fn nat_mod2(a: Nat): Nat
 
 fn unit_eq(a: Unit, b: Unit): Bool
 fn unit_ne(a: Unit, b: Unit): Bool
+
+fn String.length(self: String): U32
+fn String.slice(self: String, start: U32, end: U32): String
+fn String.concat(self: String, other: String): String
+fn String.to_bytes(self: String): Bytes
+
+fn Bytes.length(self: Bytes): U32
+fn Bytes.slice(self: Bytes, start: U32, end: U32): Bytes
+fn Bytes.concat(self: Bytes, other: Bytes): Bytes
+fn Bytes.get(self: Bytes, index: U32): U32
 ```
 
 Notes:
 
 - A numeral in a `Nat` position desugars to `zero` and `succ`; in a `U32`
   position it is a primitive literal. The `u32` suffix pins `U32`.
-- `String` and `Bytes` literals and operations are primitive; see
-  [text operations](#text-operations).
+- `String` and `Bytes` literals and operations are primitive; their public
+  surface is the method set in [text methods](#text-methods).
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
   conjunction function; name it `both` instead.
-- `U32`, `String`, `Bytes`, the `u32_*` operations, and the `str_*`/`bytes_*`
-  operations are primitive and are not declared in this list.
+- `U32`, `String`, `Bytes`, the internal `u32_*` operations, and the low-level
+  `str_*`/`bytes_*` operations are primitive and are not declared in this list.
 - `Nat` arithmetic is provided by the `nat_*` prelude functions and the infix
-  operators; `U32` uses the primitive `u32_*` operations.
+  operators; `U32` uses the same operators over primitive machine words. The
+  `u32_*` names are internal and cannot be written in a program.
 
 ---
 
@@ -1617,7 +1675,7 @@ enum_decl    ::= "enum" IDENT [ "[" params "]" ]
                  "{" { NEWLINE } { ctor NEWLINE } "}"
 ctor         ::= IDENT [ "(" fields ")" ] [ ":" expr ]
 
-fn_decl      ::= "fn" IDENT [ "[" params "]" ] "(" params ")" ":" expr block
+fn_decl      ::= "fn" [ IDENT "." ] IDENT [ "[" params "]" ] "(" params ")" ":" expr block
 
 params       ::= [ param { "," param } ]
 param        ::= IDENT ":" expr
@@ -1643,7 +1701,10 @@ shift_expr   ::= add_expr { ( "<<" | ">>" ) add_expr }
 add_expr     ::= mul_expr { ( "+" | "-" ) mul_expr }
 mul_expr     ::= app { ( "*" | "/" | "%" ) app }
 
-app          ::= atom { ( "[" args "]" | "(" args ")" ) }
+app          ::= atom { postfix }
+postfix      ::= "[" args "]"
+               | "(" args ")"
+               | "." IDENT [ "[" args "]" ] "(" args ")"
 args         ::= [ expr { "," expr } ]
 
 atom         ::= IDENT
@@ -1681,6 +1742,11 @@ Notes:
 - `[` and `]` delimit implicit parameter and argument lists. An empty `[]`
   list is rejected.
 - Newlines inside `[...]` are ignored, just like newlines inside `(...)`.
+- The name in `fn Type.name` is a method declaration; its first explicit
+  parameter must have type `Type`.
+- A postfix `.name(args)` is a method call. It requires the argument list,
+  even when the method takes none: `s.length()`. It cannot be partially
+  applied or used as a value.
 
 ---
 
@@ -1719,6 +1785,13 @@ Common messages:
 | `equality is not associative; parenthesize` | Write `(a = b) = c` only if that is intended. |
 | `parenthesize a function-type annotation` | Write `let f: (fn(x: T) -> U) = g`. |
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
+| `no method ... on type ...` | The receiver's type has no method with that name. |
+| `cannot select a method on type ...` | The receiver's type is not concrete; annotate it. |
+| `method ... takes N arguments after the receiver, got M` | Supply every explicit argument, including `()`. |
+| `the first parameter of ... must have type ...` | A method's receiver must be the first explicit parameter and have the namespace type. |
+| `... is not a type, so ... cannot be declared as a method` | The part before `.` must be an enum or primitive type. |
+| `a method call needs (...) arguments` | Write `x.f()`, not `x.f`. |
+| `... is internal; use the ... operator` | The `u32_*` names are not surface syntax; use the operator. |
 | `primitive ... takes N arguments, got M` | A primitive operation must be fully applied. |
 | `match: the scrutinee is not an enum value ...` | `String`, `Bytes`, and `U32` cannot be matched; use their operations. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
@@ -1755,10 +1828,14 @@ design:
   the planned growable vector.)
 - traits or type classes. Implicit parameters are declared with `[]` and
   inferred at calls; see [implicit parameters](#implicit-parameters);
-- modules, imports, namespaces, or multiple files;
+- unqualified overloading (`concat(a, b)`), method values (`xs.length`), and
+  user-defined operator overloading. Methods are selected only by the
+  receiver's type head; see [methods](#methods);
+- modules, imports, namespaces, or multiple files; `::` is reserved for future
+  module qualification;
 - characters, floats, and general I/O;
-- `bytes_to_str` with UTF-8 validation; it needs `Result` first;
-- character-aware string slicing: `str_slice` indexes bytes;
+- `Bytes.to_str` with UTF-8 validation; it needs `Result` first;
+- character-aware string slicing: `slice` indexes bytes;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
 - higher-order or non-first-order dependent pattern matching: indices are
@@ -2055,7 +2132,7 @@ remaining arguments determine the arguments to `length`. Output: `3`.
 
 ```neo
 fn main(): String {
-  str_concat(str_slice("hello, world", 7, 12), "!")
+  "hello, world".slice(7, 12).concat("!")
 }
 ```
 
@@ -2070,7 +2147,7 @@ world!
 
 ```neo
 fn main(): Bytes {
-  bytes_concat(b"neo", b"\x00\xff")
+  b"neo".concat(b"\x00\xff")
 }
 ```
 
@@ -2079,6 +2156,33 @@ Byte results print as escaped bytes. Output:
 ```
 b"\x6e\x65\x6f\x00\xff"
 ```
+
+`examples/methods.neo` declares methods on `Bool` and a user enum:
+
+```neo
+fn Bool.not(self: Bool): Bool {
+  match self {
+    false => true
+    true => false
+  }
+}
+
+enum Shape {
+  circle(U32)
+  rect(U32, U32)
+}
+
+fn Shape.area(self: Shape): U32 {
+  match self {
+    circle(r) => r * r * 3u32
+    rect(w, h) => w * h
+  }
+}
+```
+
+`rect(3u32, 4u32).area()` is `12`. A method's name is qualified by its
+receiver type, so `String.length`, `Bytes.length`, and a user `List.length` may
+all exist at once.
 
 ---
 

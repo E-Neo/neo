@@ -5,9 +5,9 @@ is a compiler written in Neo that compiles itself, with a byte-identical
 fixpoint at Stage 3.
 
 This document records the scope, the decisions that shape it, and the order of
-work. Milestones **M0–M3** are implemented: the decision record, the
+work. Milestones **M0–M3.5** are implemented: the decision record, the
 deterministic corpus oracle, the primitive `U32` layer, the surface-syntax
-revision, and primitive `String`/`Bytes`.
+revision, primitive `String`/`Bytes`, and receiver-keyed methods.
 
 ## 1. Stages and gates
 
@@ -55,8 +55,12 @@ commits and design notes.
 | D20 | **Text and byte layout.** `String` and `Bytes` are primitives backed by a 12-byte descriptor `{data, start, len}`; a value is a single `i32` pointer. Compiled code has O(1) length and slicing (slicing allocates only a descriptor), and concatenation allocates a fresh buffer. Descriptors and buffers are bump-allocated and never freed. M5 revisits allocation. The interpreter models slices by copying. |
 | D21 | **Text indices are `U32`.** `str_length`, `bytes_length`, `bytes_get`, and both slices use `U32`; `Nat` stays for proofs. |
 | D22 | **Byte literals.** `b"..."` holds ASCII plus `\xNN`. String literals are UTF-8 and reject `\xNN` above `7f`; both backends print `Bytes` as `b"\xNN..."`. |
-| D23 | **String validity.** `String` is expected to contain UTF-8, but the runtime does not validate it and slicing is byte-based, so callers slice on character boundaries. `bytes_to_str` waits for `Result` at M4. |
+| D23 | **String validity.** `String` is expected to contain UTF-8, but the runtime does not validate it and slicing is byte-based, so callers slice on character boundaries. a `Bytes.to_str` method waits for `Result` at M4. |
 | D24 | **Literal interning.** Each distinct literal bytes sequence is stored once in the data segment with a static descriptor. Lookup is deterministic and does not iterate a hash map. |
+| D25 | **Receiver-keyed methods.** A method is declared `fn Type.name(...)` and stored as the global constant `Type.name`. The first explicit parameter is the receiver and must have the namespace type. Calls `e.name(args)` dispatch statically on the receiver's type head; generic receivers unify their parameters. Methods may be declared on enums and primitive types, and the same simple name may exist on several types. |
+| D26 | **No classes or method values.** Methods are not values: `xs.length` is invalid and a call must supply every explicit argument, including `()`. There is no unqualified overloading, no type classes or instances, and no user-defined operator overloading. `==`/`!=` remain fixed. |
+| D27 | **Modules use `::`.** Qualified module access is `M::f(x)`; `.` is reserved for method calls and method declarations. This removes the ambiguity between `M.f(x)` and a method on a value named `M`. |
+| D28 | **Internal primitives.** The `u32_*` operations are the kernel/operator implementation and cannot be written in a program; using one reports the corresponding operator. Text operations remain callable as low-level `str_*`/`bytes_*` builtins, with the prelude methods as the public surface. |
 
 ## 3. The `Neo-B` subset
 
@@ -90,6 +94,7 @@ Parity against Stage 0 is added by M1 and applies from then on.
 | M2 | `U32`: kernel terms, literals, unboxed codegen, tests, docs | Corpus green, deterministic | ~800 Rust |
 | M2.5 | Surface syntax: `let`, `=`/`==`, directed numerals, infix operators, ascription | Corpus green; Nat and U32 operator tests | ~700 Rust + ~400 Neo |
 | M3 | Primitive `String`/`Bytes` and literal lowering | Corpus green; prelude migrated | ~900 Rust |
+| M3.5 | Receiver-keyed methods; `u32_*` retired from the surface | Method tests green; corpus green | ~500 Rust + ~150 Neo |
 | M4 | I/O and world growth, `Result`, `main(): U32` | File-reading program runs under `wasmtime` | ~700 Rust |
 | M5 | Arenas, free lists, `return_call`, benchmark | Self-compile-shaped workload in budget | ~700 Rust |
 | M6 | Modules | Multi-module example builds and runs | ~600 Rust |

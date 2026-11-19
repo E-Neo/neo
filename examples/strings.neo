@@ -1,5 +1,6 @@
-// `String` is a primitive UTF-8 byte sequence with O(1) length and slicing.
+// `String` is a primitive UTF-8 byte sequence. The prelude provides its
+// methods: `length`, `slice`, `concat`, and `to_bytes`.
 // `main` prints string results as text in both the interpreter and `neo build`.
 fn main(): String {
-  str_concat(str_slice("hello, world", 7, 12), "!")
+  "hello, world".slice(7, 12).concat("!")
 }

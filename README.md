@@ -26,8 +26,10 @@ Implemented:
   `Or`, `Exists`);
 - a primitive 32-bit word type `U32` with total arithmetic, bitwise, and
   comparison operations, compiled to unboxed WebAssembly `i32`s;
+- receiver-keyed methods: `fn Type.name(...)` declarations, `x.name(args)`
+  calls with static dispatch, generic receivers, and user-defined methods;
 - primitive `String` (UTF-8) and `Bytes` with O(1) length and slicing,
-  concatenation, equality, and printing;
+  concatenation, equality, and printing, exposed as methods;
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component.
 

@@ -39,6 +39,7 @@ pub enum Tok {
     LBrace,
     RBrace,
     Comma,
+    Dot,
     Colon,
     Underscore,
     Newline,
@@ -228,6 +229,13 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 advance(&mut i, &mut line, &mut col);
                 out.push(Token {
                     tok: Tok::Comma,
+                    span,
+                });
+            }
+            '.' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Dot,
                     span,
                 });
             }

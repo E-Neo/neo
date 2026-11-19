@@ -291,6 +291,38 @@ fn unit_ne(a: Unit, b: Unit): Bool {
   false
 }
 
+fn String.length(self: String): U32 {
+  str_length(self)
+}
+
+fn String.slice(self: String, start: U32, end: U32): String {
+  str_slice(self, start, end)
+}
+
+fn String.concat(self: String, other: String): String {
+  str_concat(self, other)
+}
+
+fn String.to_bytes(self: String): Bytes {
+  str_to_bytes(self)
+}
+
+fn Bytes.length(self: Bytes): U32 {
+  bytes_length(self)
+}
+
+fn Bytes.slice(self: Bytes, start: U32, end: U32): Bytes {
+  bytes_slice(self, start, end)
+}
+
+fn Bytes.concat(self: Bytes, other: Bytes): Bytes {
+  bytes_concat(self, other)
+}
+
+fn Bytes.get(self: Bytes, index: U32): U32 {
+  bytes_get(self, index)
+}
+
 "#;
 
 /// Install the prelude declarations into a fresh global environment.
