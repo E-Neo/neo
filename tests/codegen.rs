@@ -314,3 +314,45 @@ fn main(): U32 {
         "29\n",
     );
 }
+
+#[test]
+fn builds_string_slicing_and_concatenation() {
+    check(
+        r#"
+fn main(): String {
+  str_concat(str_slice("hello, world", 7, 12), str_concat(" ", str_slice("héllo!", 0, 6)))
+}
+"#,
+        "string-slice",
+        "world héllo\n",
+    );
+}
+
+#[test]
+fn builds_bytes_operations() {
+    check(
+        r#"
+fn main(): U32 {
+  bytes_get(b"abc", 1) +
+  bytes_length(b"abcd") +
+  bytes_get(b"a", 9) +
+  bytes_length(bytes_concat(bytes_slice(b"hello", 1, 3), b"!"))
+}
+"#,
+        "bytes-ops",
+        "105\n",
+    );
+}
+
+#[test]
+fn builds_bytes_printing() {
+    check(
+        r#"
+fn main(): Bytes {
+  bytes_concat(b"neo", b"\x00\xff")
+}
+"#,
+        "bytes-print",
+        "b\"\\x6e\\x65\\x6f\\x00\\xff\"\n",
+    );
+}

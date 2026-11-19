@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::{Branch, PrimOp, PrimTy, RcTm};
+use crate::core::{Branch, PrimLit, PrimOp, PrimTy, RcTm};
 
 pub type V = Rc<Val>;
 pub type Env = Vec<V>;
@@ -17,7 +17,7 @@ pub enum Val {
     Type(u32),
     Prop,
     PrimTy(PrimTy),
-    PrimLit(u32),
+    PrimLit(PrimLit),
     Pi(V, Rc<Closure>, bool),
     Lam(Rc<Closure>),
     Neutral(Rc<Neutral>),
@@ -32,7 +32,7 @@ pub enum Val {
 pub enum Neutral {
     Var(usize),
     Global(String),
-    PrimOp(PrimOp, V, V),
+    PrimOp(PrimOp, Vec<V>),
     App(Rc<Neutral>, V),
     Match {
         env: Env,
@@ -63,12 +63,12 @@ pub fn vprimty(t: PrimTy) -> V {
     Rc::new(Val::PrimTy(t))
 }
 
-pub fn vprimlit(n: u32) -> V {
-    Rc::new(Val::PrimLit(n))
+pub fn vprimlit(lit: PrimLit) -> V {
+    Rc::new(Val::PrimLit(lit))
 }
 
-pub fn vprimop(op: PrimOp, a: V, b: V) -> V {
-    vneutral(Neutral::PrimOp(op, a, b))
+pub fn vprimop(op: PrimOp, args: Vec<V>) -> V {
+    vneutral(Neutral::PrimOp(op, args))
 }
 
 pub fn vpi(dom: V, closure: Closure, implicit: bool) -> V {

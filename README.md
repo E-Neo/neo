@@ -22,16 +22,18 @@ Implemented:
 - closures and first-class functions;
 - total recursive functions with a structural termination checker;
 - strict positivity checking;
-- a small prelude (`Nat`, `Bool`, `Unit`, `String`, `List`, `True`, `False`,
-  `And`, `Or`, `Exists`);
+- a small prelude (`Nat`, `Bool`, `Unit`, `List`, `True`, `False`, `And`,
+  `Or`, `Exists`);
 - a primitive 32-bit word type `U32` with total arithmetic, bitwise, and
   comparison operations, compiled to unboxed WebAssembly `i32`s;
+- primitive `String` (UTF-8) and `Bytes` with O(1) length and slicing,
+  concatenation, equality, and printing;
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
-and growable vectors (`Array[T, n]`, `Vec[T]`), primitive strings and bytes,
-modules, and general I/O. See the
+and growable vectors (`Array[T, n]`, `Vec[T]`), modules, and general I/O. See
+the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 

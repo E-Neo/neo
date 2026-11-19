@@ -5,8 +5,9 @@ is a compiler written in Neo that compiles itself, with a byte-identical
 fixpoint at Stage 3.
 
 This document records the scope, the decisions that shape it, and the order of
-work. Milestones **M0–M2** are implemented: the decision record, the
-deterministic corpus oracle, and the primitive `U32` layer.
+work. Milestones **M0–M3** are implemented: the decision record, the
+deterministic corpus oracle, the primitive `U32` layer, the surface-syntax
+revision, and primitive `String`/`Bytes`.
 
 ## 1. Stages and gates
 
@@ -51,6 +52,11 @@ commits and design notes.
 | D17 | **Directed numerals.** A numeral has no default type. The expected type selects `Nat` or `U32`; the `u32` suffix pins `U32`; inference without an expected type is rejected. `(e : T)` ascription is available. `Nat` literals above 1,000,000 are rejected. |
 | D18 | **Infix operators.** `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|`, `< <= > >=`, `== !=`, and `=` with the documented precedence. Arithmetic, bitwise, shift, and comparisons are overloaded over `Nat` and `U32`; `Nat` implementations are ordinary total prelude functions, `U32` implementations are the existing primitives. |
 | D19 | **No `USize`.** A bounded inductive machine type with proof-carrying `succ` and arithmetic was considered and rejected as too costly for the current milestone. `Nat` remains the inductive type for proofs and indices; `U32` remains the 32-bit machine type for computation. |
+| D20 | **Text and byte layout.** `String` and `Bytes` are primitives backed by a 12-byte descriptor `{data, start, len}`; a value is a single `i32` pointer. Compiled code has O(1) length and slicing (slicing allocates only a descriptor), and concatenation allocates a fresh buffer. Descriptors and buffers are bump-allocated and never freed. M5 revisits allocation. The interpreter models slices by copying. |
+| D21 | **Text indices are `U32`.** `str_length`, `bytes_length`, `bytes_get`, and both slices use `U32`; `Nat` stays for proofs. |
+| D22 | **Byte literals.** `b"..."` holds ASCII plus `\xNN`. String literals are UTF-8 and reject `\xNN` above `7f`; both backends print `Bytes` as `b"\xNN..."`. |
+| D23 | **String validity.** `String` is expected to contain UTF-8, but the runtime does not validate it and slicing is byte-based, so callers slice on character boundaries. `bytes_to_str` waits for `Result` at M4. |
+| D24 | **Literal interning.** Each distinct literal bytes sequence is stored once in the data segment with a static descriptor. Lookup is deterministic and does not iterate a hash map. |
 
 ## 3. The `Neo-B` subset
 

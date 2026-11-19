@@ -626,6 +626,11 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Str(s, span))
             }
+            Tok::Bytes(b) => {
+                let span = self.peek().span;
+                self.advance();
+                Ok(Expr::Bytes(b, span))
+            }
             Tok::Type => {
                 let span = self.peek().span;
                 self.advance();

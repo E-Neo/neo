@@ -5,7 +5,8 @@ use neo_common::error::{Error, Result, Span};
 pub enum Tok {
     Ident(String),
     Numeral(u64, Option<NumSuffix>),
-    Str(String),
+    Str(Vec<u8>),
+    Bytes(Vec<u8>),
     Enum,
     Fn,
     Let,
@@ -96,60 +97,20 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
             continue;
         }
 
-        if c == '"' {
-            advance(&mut i, &mut line, &mut col);
-            let mut text = String::new();
-            loop {
-                if i >= chars.len() {
-                    return Err(Error::at(span, "unterminated string literal"));
-                }
-                let ch = chars[i];
-                if ch == '"' {
-                    advance(&mut i, &mut line, &mut col);
-                    break;
-                }
-                if ch == '\n' {
-                    return Err(Error::at(
-                        Span::new(line, col),
-                        "string literals cannot contain a newline",
-                    ));
-                }
-                if ch == '\\' {
-                    advance(&mut i, &mut line, &mut col);
-                    if i >= chars.len() {
-                        return Err(Error::at(span, "unterminated string literal"));
-                    }
-                    let escaped = chars[i];
-                    let decoded = match escaped {
-                        'n' => '\n',
-                        't' => '\t',
-                        'r' => '\r',
-                        '\\' => '\\',
-                        '"' => '"',
-                        other => {
-                            return Err(Error::at(
-                                Span::new(line, col),
-                                format!("unknown string escape `\\{}`", other),
-                            ));
-                        }
-                    };
-                    text.push(decoded);
-                    advance(&mut i, &mut line, &mut col);
-                    continue;
-                }
-                if !ch.is_ascii() {
-                    return Err(Error::at(
-                        Span::new(line, col),
-                        "string literals must contain only ASCII characters",
-                    ));
-                }
-                text.push(ch);
+        if c == '"' || (c == 'b' && i + 1 < chars.len() && chars[i + 1] == '"') {
+            let kind = if c == 'b' {
                 advance(&mut i, &mut line, &mut col);
-            }
-            out.push(Token {
-                tok: Tok::Str(text),
-                span,
-            });
+                QuoteKind::Bytes
+            } else {
+                QuoteKind::Str
+            };
+            advance(&mut i, &mut line, &mut col);
+            let bytes = lex_quoted(&chars, &mut i, &mut line, &mut col, span, kind)?;
+            let tok = match kind {
+                QuoteKind::Str => Tok::Str(bytes),
+                QuoteKind::Bytes => Tok::Bytes(bytes),
+            };
+            out.push(Token { tok, span });
             continue;
         }
 
@@ -415,5 +376,103 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
         tok: Tok::Eof,
         span: Span::new(line, col),
     });
+    Ok(out)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QuoteKind {
+    Str,
+    Bytes,
+}
+
+/// Lex the body of a quoted literal. The opening quote has already been
+/// consumed. `Str` content is UTF-8; `Bytes` content is raw.
+fn lex_quoted(
+    chars: &[char],
+    i: &mut usize,
+    line: &mut usize,
+    col: &mut usize,
+    span: Span,
+    kind: QuoteKind,
+) -> Result<Vec<u8>> {
+    let advance = |i: &mut usize, line: &mut usize, col: &mut usize| {
+        if chars[*i] == '\n' {
+            *line += 1;
+            *col = 1;
+        } else {
+            *col += 1;
+        }
+        *i += 1;
+    };
+    let mut out = Vec::new();
+    loop {
+        if *i >= chars.len() {
+            return Err(Error::at(span, "unterminated string literal"));
+        }
+        let ch = chars[*i];
+        if ch == '"' {
+            advance(i, line, col);
+            break;
+        }
+        if ch == '\n' {
+            return Err(Error::at(
+                Span::new(*line, *col),
+                "string literals cannot contain a newline",
+            ));
+        }
+        if ch == '\\' {
+            advance(i, line, col);
+            if *i >= chars.len() {
+                return Err(Error::at(span, "unterminated string literal"));
+            }
+            let escaped = chars[*i];
+            match escaped {
+                'n' => out.push(b'\n'),
+                't' => out.push(b'\t'),
+                'r' => out.push(b'\r'),
+                '\\' => out.push(b'\\'),
+                '"' => out.push(b'"'),
+                'x' => {
+                    advance(i, line, col);
+                    let mut value = 0u8;
+                    for _ in 0..2 {
+                        let Some(digit) = chars.get(*i).and_then(|c| c.to_digit(16)) else {
+                            return Err(Error::at(
+                                Span::new(*line, *col),
+                                "expected two hex digits after `\\x`",
+                            ));
+                        };
+                        value = value * 16 + digit as u8;
+                        advance(i, line, col);
+                    }
+                    if kind == QuoteKind::Str && value > 0x7f {
+                        return Err(Error::at(
+                            Span::new(*line, *col),
+                            "`\\x` above `7f` is not valid UTF-8; use a bytes literal",
+                        ));
+                    }
+                    out.push(value);
+                    continue;
+                }
+                other => {
+                    return Err(Error::at(
+                        Span::new(*line, *col),
+                        format!("unknown string escape `\\{}`", other),
+                    ));
+                }
+            }
+            advance(i, line, col);
+            continue;
+        }
+        if kind == QuoteKind::Bytes && !ch.is_ascii() {
+            return Err(Error::at(
+                Span::new(*line, *col),
+                "bytes literals must contain only ASCII characters; use `\\x` escapes",
+            ));
+        }
+        let mut buf = [0u8; 4];
+        out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+        advance(i, line, col);
+    }
     Ok(out)
 }

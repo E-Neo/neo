@@ -11,7 +11,7 @@ pub fn quote(globals: &Globals, level: usize, v: &V) -> RcTm {
         Val::Type(u) => Rc::new(Tm::Type(*u)),
         Val::Prop => Rc::new(Tm::Prop),
         Val::PrimTy(t) => Rc::new(Tm::PrimTy(*t)),
-        Val::PrimLit(n) => Rc::new(Tm::PrimLit(*n)),
+        Val::PrimLit(lit) => Rc::new(Tm::PrimLit(lit.clone())),
         Val::Pi(dom, closure, implicit) => {
             let dom_tm = quote(globals, level, dom);
             let fresh = vvar(level);
@@ -65,10 +65,9 @@ fn quote_neutral(globals: &Globals, level: usize, n: &Neutral) -> RcTm {
             }
         }
         Neutral::Global(name) => Rc::new(Tm::Const(name.clone())),
-        Neutral::PrimOp(op, a, b) => Rc::new(Tm::PrimOp(
+        Neutral::PrimOp(op, args) => Rc::new(Tm::PrimOp(
             *op,
-            quote(globals, level, a),
-            quote(globals, level, b),
+            args.iter().map(|a| quote(globals, level, a)).collect(),
         )),
         Neutral::App(f, a) => Rc::new(Tm::App(
             quote_neutral(globals, level, f),
@@ -154,11 +153,12 @@ fn close_under(globals: &Globals, level: usize, env: &Env, tm: &RcTm, extra: usi
         Tm::Type(u) => Rc::new(Tm::Type(*u)),
         Tm::Prop => Rc::new(Tm::Prop),
         Tm::PrimTy(t) => Rc::new(Tm::PrimTy(*t)),
-        Tm::PrimLit(n) => Rc::new(Tm::PrimLit(*n)),
-        Tm::PrimOp(op, a, b) => Rc::new(Tm::PrimOp(
+        Tm::PrimLit(lit) => Rc::new(Tm::PrimLit(lit.clone())),
+        Tm::PrimOp(op, args) => Rc::new(Tm::PrimOp(
             *op,
-            close_under(globals, level, env, a, extra),
-            close_under(globals, level, env, b, extra),
+            args.iter()
+                .map(|a| close_under(globals, level, env, a, extra))
+                .collect(),
         )),
         Tm::Pi {
             name,

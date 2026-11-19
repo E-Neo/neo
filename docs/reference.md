@@ -204,21 +204,36 @@ unary value. Use a `u32` literal for machine-sized numbers.
 
 There are no negative, floating-point, hexadecimal, or character literals.
 
-### String literals
+### Text and byte literals
 
-A string literal is ASCII text in double quotes:
+A string literal is UTF-8 text in double quotes:
 
 ```neo
 "hello"
 "line one\nline two"
 "quote: \" and backslash: \\"
+"héllo"
 ```
 
-Supported escapes are `\n`, `\t`, `\r`, `\\`, and `\"`. String literals cannot
-contain an unescaped newline or non-ASCII characters.
+Supported escapes are `\n`, `\t`, `\r`, `\\`, `\"`, and `\xNN`. In a string
+literal, `\xNN` is limited to `00`–`7f` so the result stays valid UTF-8. String
+literals cannot contain an unescaped newline.
 
-A string literal elaborates to the prelude `String` type, a linked list of byte
-values. It is printed as text by both the interpreter and `neo build`.
+A bytes literal is `b"..."`. Its content must be ASCII, and `\xNN` may use any
+byte value:
+
+```neo
+b"neo"
+b"\x00\xff"
+```
+
+A string literal inhabits the primitive `String` type and a bytes literal
+inhabits the primitive `Bytes` type. Both are immutable byte sequences with
+O(1) length and slicing. `String` is expected to hold valid UTF-8; slicing is
+byte-based, so slices must start and end on UTF-8 character boundaries to
+remain meaningful. `Bytes` is uninterpreted. `String` results print as text and
+`Bytes` results print as `b"\xNN\xNN..."` by both the interpreter and
+`neo build`.
 
 ### Operators and punctuation
 
@@ -336,6 +351,19 @@ U32
 It has no constructors and cannot be matched. A `U32` is eliminated only by
 the primitive operations listed under
 [Numbers and operators](#numbers-and-operators). `U32` lives in `Type 0`.
+
+`String` and `Bytes` are primitive, opaque byte sequences:
+
+```neo
+String
+Bytes
+```
+
+Neither has constructors, and neither can be matched. They are eliminated by
+the text operations listed under [text operations](#text-operations). A value
+is a descriptor for a byte buffer with O(1) length and slicing; concatenation
+and slicing allocate in the runtime heap. All three primitive types live in
+`Type 0`.
 
 ### Equality types
 
@@ -803,7 +831,7 @@ The infix operators are:
 | --- | --- | --- |
 | `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|` | `Nat` or `U32` | same as the operands |
 | `< <= > >=` | `Nat` or `U32` | `Bool` |
-| `== !=` | `Nat`, `U32`, `Bool`, `String`, or `Unit` | `Bool` |
+| `== !=` | `Nat`, `U32`, `Bool`, `String`, `Bytes`, or `Unit` | `Bool` |
 
 Precedence, tightest first:
 
@@ -840,7 +868,8 @@ fn main(): Bool { 1u32 < 2 }  // ok
 
 `==` and `!=` are boolean equality. They are not the equality proposition; that
 is `=`. The operand type selects the implementation. Equality is defined for
-`Nat`, `U32`, `Bool`, `String`, and `Unit`; other types need a named function.
+`Nat`, `U32`, `Bool`, `String`, `Bytes`, and `Unit`; other types need a named
+function.
 
 Comparisons are non-associative, so `a < b < c` is an error.
 
@@ -900,6 +929,41 @@ to obtain a `Bool`. A `U32` may still be an enum parameter or an index, as in
 
 The `u32_*` names, `U32`, and `Nat` are reserved, and the `nat_*` prelude
 operators are already defined: a program cannot redeclare any of them.
+
+### Text operations
+
+`String` and `Bytes` are eliminated by a fixed set of fully applied primitive
+operations. Like the `u32_*` operations, they cannot be used as first-class
+values. `==` and `!=` use `str_eq`/`str_ne` and `bytes_eq`/`bytes_ne`.
+
+| Operation | Type | Meaning |
+| --- | --- | --- |
+| `str_length` | `fn(String) -> U32` | byte length |
+| `str_slice` | `fn(String, U32, U32) -> String` | O(1) view from `start` to `end` |
+| `str_concat` | `fn(String, String) -> String` | allocate and copy both |
+| `str_eq`, `str_ne` | `fn(String, String) -> Bool` | byte equality |
+| `str_to_bytes` | `fn(String) -> Bytes` | view the same bytes as `Bytes` |
+| `bytes_length` | `fn(Bytes) -> U32` | byte length |
+| `bytes_slice` | `fn(Bytes, U32, U32) -> Bytes` | O(1) view from `start` to `end` |
+| `bytes_concat` | `fn(Bytes, Bytes) -> Bytes` | allocate and copy both |
+| `bytes_eq`, `bytes_ne` | `fn(Bytes, Bytes) -> Bool` | byte equality |
+| `bytes_get` | `fn(Bytes, U32) -> U32` | byte at an index, `0` out of bounds |
+
+```neo
+fn shout(s: String): String {
+  str_concat(str_slice(s, 0, 1), "!")
+}
+```
+
+Slicing is total: a start or end past the length is clamped to the length, and
+`end < start` yields the empty slice. `str_slice` and `bytes_slice` do not copy;
+`str_concat` and `bytes_concat` allocate a fresh buffer. A `String` is expected
+to contain UTF-8, so string slices should start and end on character
+boundaries; the runtime does not validate this. There is no `bytes_to_str`
+conversion yet; it needs a `Result` to report invalid UTF-8.
+
+The `str_*` and `bytes_*` names and the primitive types `U32`, `String`, and
+`Bytes` are reserved.
 
 ---
 
@@ -1321,11 +1385,6 @@ enum Unit {
   unit
 }
 
-enum String {
-  str_nil
-  str_cons(Nat, String)
-}
-
 enum List[T: Type] {
   nil
   cons(T, List[T])
@@ -1352,7 +1411,7 @@ enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
 }
 ```
 
-The prelude also defines these numeric and string functions:
+The prelude also defines these numeric, boolean, and unit functions:
 
 ```neo
 fn bool_not(b: Bool): Bool
@@ -1380,24 +1439,20 @@ fn nat_mod2(a: Nat): Nat
 
 fn unit_eq(a: Unit, b: Unit): Bool
 fn unit_ne(a: Unit, b: Unit): Bool
-
-fn str_length(s: String): Nat
-fn str_concat(a: String, b: String): String
-fn str_eq(a: String, b: String): Bool
-fn str_ne(a: String, b: String): Bool
 ```
 
 Notes:
 
 - A numeral in a `Nat` position desugars to `zero` and `succ`; in a `U32`
   position it is a primitive literal. The `u32` suffix pins `U32`.
-- String literals desugar to `str_nil` and `str_cons`; each byte is a `Nat`.
+- `String` and `Bytes` literals and operations are primitive; see
+  [text operations](#text-operations).
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
   conjunction function; name it `both` instead.
-- `U32` and the `u32_*` operations are primitive and are not declared in this
-  list.
+- `U32`, `String`, `Bytes`, the `u32_*` operations, and the `str_*`/`bytes_*`
+  operations are primitive and are not declared in this list.
 - `Nat` arithmetic is provided by the `nat_*` prelude functions and the infix
   operators; `U32` uses the primitive `u32_*` operations.
 
@@ -1419,7 +1474,7 @@ Its result type must be printable.
 
 A type is printable when it is:
 
-- `Nat`, `Bool`, `Unit`, `String`, or `U32`;
+- `Nat`, `Bool`, `Unit`, `String`, `Bytes`, or `U32`;
 - an enum whose type arguments are printable and whose constructor field types
   are all printable.
 
@@ -1456,6 +1511,8 @@ true
 42                                 // Nat numerals are printed in decimal
 42                                 // U32 values print the same, without the suffix
 trivial                            // True
+"hello"                            // String prints as raw text
+b"\x00\xff"                        // Bytes print as escaped bytes
 ```
 
 Index fields declared as normal fields are printed too. The `Vec` example
@@ -1592,6 +1649,7 @@ args         ::= [ expr { "," expr } ]
 atom         ::= IDENT
                | NUMERAL
                | STRING
+               | BYTES
                | "Type" [ NUMERAL ]
                | "Prop"
                | "(" expr ")"
@@ -1613,6 +1671,8 @@ Notes:
 - `IDENT` excludes the keywords and `_`.
 - `NUMERAL` is a decimal numeral with an optional `u32` suffix. Its type comes
   from the expected type; the suffix pins `U32`.
+- `STRING` is a double-quoted UTF-8 literal (type `String`) and `BYTES` is a
+  `b"..."` byte literal (type `Bytes`).
 - A final constructor or match arm may be followed by `}` instead of a
   newline.
 - A bare `refl` name is parsed as the `refl` expression.
@@ -1643,8 +1703,10 @@ Common messages:
 | `expected a newline after a binding` | Bindings must be one per line. |
 | `unterminated string literal` | Add the closing `"`. |
 | `string literals cannot contain a newline` | Write `\n` instead. |
-| `unknown string escape ...` | Use `\n`, `\t`, `\r`, `\\`, or `\"`. |
-| `string literals must contain only ASCII characters` | Strings are ASCII in Stage 0. |
+| `unknown string escape ...` | Use `\n`, `\t`, `\r`, `\\`, `\"`, or `\xNN`. |
+| `expected two hex digits after \x` | Write exactly two hexadecimal digits. |
+| `\x above 7f is not valid UTF-8; use a bytes literal` | A `String` must stay valid UTF-8. |
+| `bytes literals must contain only ASCII characters; use \x escapes` | Non-ASCII bytes need `\xNN` in `b"..."`. |
 | `unknown name ...` | Name is undeclared or declared later. |
 | `cannot infer the type of this numeral; ...` | A bare numeral has no expected type. Add an annotation, an ascription, or the `u32` suffix. |
 | `literal suffix u32 conflicts with expected type ...` | A `u32` literal was checked against a non-`U32` type. |
@@ -1652,11 +1714,13 @@ Common messages:
 | `Nat literal is too large ...` | `Nat` literals are limited to 1,000,000; use `u32`. |
 | `numeric literal cannot have type ...` | A numeral was checked against a non-numeric type. |
 | `cannot infer the numeric type of ...; annotate an operand` | Both operator operands are bare numerals and there is no expected type. |
-| `boolean equality is not defined for type ...` | `==`/`!=` only cover `Nat`, `U32`, `Bool`, `String`, and `Unit`. |
+| `boolean equality is not defined for type ...` | `==`/`!=` only cover `Nat`, `U32`, `Bool`, `String`, `Bytes`, and `Unit`. |
 | `comparison operators are not associative; parenthesize` | Write `(a < b) == c` or split the expression. |
 | `equality is not associative; parenthesize` | Write `(a = b) = c` only if that is intended. |
 | `parenthesize a function-type annotation` | Write `let f: (fn(x: T) -> U) = g`. |
 | `type mismatch: expected ..., found ...` | Expression has the wrong type. |
+| `primitive ... takes N arguments, got M` | A primitive operation must be fully applied. |
+| `match: the scrutinee is not an enum value ...` | `String`, `Bytes`, and `U32` cannot be matched; use their operations. |
 | `cannot infer the type arguments of ...; use it where the expected type is known` | Parameterised constructor in an inference position. |
 | `cannot infer implicit argument of type ...; pass it explicitly with [...]` | An implicit argument is not determined by the rest of the call. |
 | `an implicit parameter list cannot be empty` / `an implicit argument list cannot be empty` | Remove the `[]` or add an entry. |
@@ -1693,6 +1757,8 @@ design:
   inferred at calls; see [implicit parameters](#implicit-parameters);
 - modules, imports, namespaces, or multiple files;
 - characters, floats, and general I/O;
+- `bytes_to_str` with UTF-8 validation; it needs `Result` first;
+- character-aware string slicing: `str_slice` indexes bytes;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;
 - higher-order or non-first-order dependent pattern matching: indices are
@@ -1985,19 +2051,33 @@ arguments. The outer calls need no annotations either: the types of `v1()` and
 `v2()` determine the arguments to `append`, and the expected `Nat` plus the
 remaining arguments determine the arguments to `length`. Output: `3`.
 
-`examples/strings.neo` prints a string:
+`examples/strings.neo` slices and concatenates strings:
 
 ```neo
 fn main(): String {
-  "hello, world!"
+  str_concat(str_slice("hello, world", 7, 12), "!")
 }
 ```
 
-The literal elaborates to the prelude `String` list. Both the interpreter and
-the generated WASI component print it as text, followed by a newline. Output:
+Both the interpreter and the generated WASI component print the result as
+text, followed by a newline. Output:
 
 ```
-hello, world!
+world!
+```
+
+`examples/bytes.neo` builds a byte sequence:
+
+```neo
+fn main(): Bytes {
+  bytes_concat(b"neo", b"\x00\xff")
+}
+```
+
+Byte results print as escaped bytes. Output:
+
+```
+b"\x6e\x65\x6f\x00\xff"
 ```
 
 ---

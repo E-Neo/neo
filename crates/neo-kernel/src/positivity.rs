@@ -31,7 +31,7 @@ fn contains(enum_name: &str, tm: &RcTm) -> bool {
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
             false
         }
-        Tm::PrimOp(_, a, b) => contains(enum_name, a) || contains(enum_name, b),
+        Tm::PrimOp(_, args) => args.iter().any(|a| contains(enum_name, a)),
         Tm::Pi { dom, cod, .. } => contains(enum_name, dom) || contains(enum_name, cod),
         Tm::Lam { dom, body, .. } => contains(enum_name, dom) || contains(enum_name, body),
         Tm::App(f, a) => contains(enum_name, f) || contains(enum_name, a),
@@ -73,7 +73,7 @@ fn bad_occurrence(enum_name: &str, tm: &RcTm) -> bool {
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
             false
         }
-        Tm::PrimOp(_, a, b) => contains(enum_name, a) || contains(enum_name, b),
+        Tm::PrimOp(_, args) => args.iter().any(|a| contains(enum_name, a)),
         Tm::Pi { dom, cod, .. } => contains(enum_name, dom) || bad_occurrence(enum_name, cod),
         Tm::Lam { body, .. } => bad_occurrence(enum_name, body),
         // A direct occurrence, `Ind(enum, args)`, is positive as long as the

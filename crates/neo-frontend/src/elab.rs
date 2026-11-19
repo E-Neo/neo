@@ -1,8 +1,8 @@
 use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
 use crate::core::{
-    Branch, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi, pi_with,
-    prim_lit, prim_op, prim_ty, rc, shift, var,
+    Branch, PrimLit, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi,
+    pi_with, prim_lit, prim_op, prim_ty, rc, shift, var,
 };
 use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
@@ -33,7 +33,7 @@ fn show_sort(sort: Sort) -> String {
 /// Names reserved by the primitive layer. Redeclaring one would silently change
 /// the meaning of existing programs, so declarations are rejected.
 fn reserved_name(name: &str) -> Option<String> {
-    if name == PrimTy::U32.name() {
+    if PrimTy::from_name(name).is_some() {
         return Some(format!("`{}` is a primitive type", name));
     }
     if PrimOp::from_name(name).is_some() {
@@ -364,7 +364,14 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
     match expr {
         Expr::Var(name, span) => elab_var(globals, ctx, name, *span),
         Expr::Numeral(n, suffix, span) => elab_numeral_infer(*n, *suffix, *span),
-        Expr::Str(s, span) => string_literal(globals, s, *span),
+        Expr::Str(bytes, _) => Ok((
+            prim_lit(PrimLit::Str(std::rc::Rc::from(bytes.as_slice()))),
+            vprimty(PrimTy::String),
+        )),
+        Expr::Bytes(bytes, _) => Ok((
+            prim_lit(PrimLit::Bytes(std::rc::Rc::from(bytes.as_slice()))),
+            vprimty(PrimTy::Bytes),
+        )),
         Expr::Type(u, _) => Ok((rc(Tm::Type(*u)), vtype(u + 1))),
         Expr::Prop(_) => Ok((rc(Tm::Prop), vtype(0))),
         Expr::FnType(binders, body, _) => elab_pi(globals, ctx, binders, body),
@@ -418,15 +425,16 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
             .ok_or_else(|| Error::at(span, format!("unbound variable `{}`", name)))?;
         return Ok((var(idx), ty));
     }
-    if name == PrimTy::U32.name() {
-        return Ok((prim_ty(PrimTy::U32), vtype(0)));
+    if let Some(ty) = PrimTy::from_name(name) {
+        return Ok((prim_ty(ty), vtype(0)));
     }
     if let Some(op) = PrimOp::from_name(name) {
         return Err(Error::at(
             span,
             format!(
-                "primitive `{}` must be fully applied to two `U32` arguments",
-                op.name()
+                "primitive `{}` must be fully applied to {} argument(s)",
+                op.name(),
+                op.domains().len()
             ),
         ));
     }
@@ -551,21 +559,30 @@ fn elab_app_with(
                 format!("primitive `{}` takes no implicit arguments", op.name()),
             ));
         }
-        if args.len() != 2 {
+        let domains = op.domains();
+        if args.len() != domains.len() {
+            let noun = if domains.len() == 1 {
+                "argument"
+            } else {
+                "arguments"
+            };
             return Err(Error::at(
                 span,
                 format!(
-                    "primitive `{}` takes 2 arguments, got {}",
+                    "primitive `{}` takes {} {}, got {}",
                     op.name(),
+                    domains.len(),
+                    noun,
                     args.len()
                 ),
             ));
         }
-        let word = vprimty(PrimTy::U32);
-        let a = elab_check(globals, ctx, &args[0], &word)?;
-        let b = elab_check(globals, ctx, &args[1], &word)?;
+        let mut tm_args = Vec::with_capacity(args.len());
+        for (arg, dom) in args.iter().zip(domains) {
+            tm_args.push(elab_check(globals, ctx, arg, &vprimty(*dom))?);
+        }
         let ty = check::prim_result_ty(globals, op)?;
-        return Ok((prim_op(op, a, b), ty));
+        return Ok((prim_op(op, tm_args), ty));
     }
 
     let (mut f_tm, mut f_ty) = elab_infer(globals, ctx, f)?;
@@ -986,9 +1003,10 @@ fn collect_free_levels(tm: &RcTm, level: usize, depth: usize, out: &mut Vec<usiz
             out.push(level + depth - 1 - *i);
         }
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {}
-        Tm::PrimOp(_, a, b) => {
-            collect_free_levels(a, level, depth, out);
-            collect_free_levels(b, level, depth, out);
+        Tm::PrimOp(_, args) => {
+            for arg in args {
+                collect_free_levels(arg, level, depth, out);
+            }
         }
         Tm::Pi { dom, cod, .. } | Tm::Lam { dom, body: cod, .. } => {
             collect_free_levels(dom, level, depth, out);
@@ -1565,7 +1583,8 @@ enum EqTy {
     Nat,
     U32,
     Bool,
-    String,
+    Str,
+    Bytes,
     Unit,
 }
 
@@ -1588,11 +1607,12 @@ fn classify_eq_ty(globals: &Globals, ty: &V) -> Option<EqTy> {
         Val::Ind(name, args) if args.is_empty() => match name.as_str() {
             "Nat" => Some(EqTy::Nat),
             "Bool" => Some(EqTy::Bool),
-            "String" => Some(EqTy::String),
             "Unit" => Some(EqTy::Unit),
             _ => None,
         },
         Val::PrimTy(PrimTy::U32) => Some(EqTy::U32),
+        Val::PrimTy(PrimTy::String) => Some(EqTy::Str),
+        Val::PrimTy(PrimTy::Bytes) => Some(EqTy::Bytes),
         _ => None,
     }
 }
@@ -1609,7 +1629,7 @@ fn elab_numeral_infer(n: u64, suffix: Option<NumSuffix>, span: Span) -> Result<(
     match suffix {
         Some(NumSuffix::U32) => {
             let word = u32::try_from(n).map_err(|_| Error::at(span, "u32 literal is too large"))?;
-            Ok((prim_lit(word), vprimty(PrimTy::U32)))
+            Ok((prim_lit(PrimLit::U32(word)), vprimty(PrimTy::U32)))
         }
         None => Err(Error::at(
             span,
@@ -1628,7 +1648,7 @@ fn elab_numeral_check(
 ) -> Result<RcTm> {
     if let Some(NumSuffix::U32) = suffix {
         let word = u32::try_from(n).map_err(|_| Error::at(span, "u32 literal is too large"))?;
-        let tm = prim_lit(word);
+        let tm = prim_lit(PrimLit::U32(word));
         if conv_ty(globals, ctx.level(), &vprimty(PrimTy::U32), expected) {
             return Ok(tm);
         }
@@ -1647,7 +1667,7 @@ fn elab_numeral_check(
         Val::PrimTy(PrimTy::U32) => {
             let word =
                 u32::try_from(n).map_err(|_| Error::at(span, "literal does not fit in `U32`"))?;
-            Ok(prim_lit(word))
+            Ok(prim_lit(PrimLit::U32(word)))
         }
         Val::Neutral(_) => Err(Error::at(
             span,
@@ -1775,7 +1795,7 @@ fn numeric_call(
     span: Span,
 ) -> Result<RcTm> {
     match ty {
-        NumTy::U32 => Ok(prim_op(prim_op_of(op), a, b)),
+        NumTy::U32 => Ok(prim_op(prim_op_of(op), vec![a, b])),
         NumTy::Nat => prelude_call(globals, nat_op_name(op), a, b, span),
     }
 }
@@ -1804,12 +1824,14 @@ fn equality_call(
         (EqTy::Nat, true) => "nat_ne",
         (EqTy::Bool, false) => "bool_eq",
         (EqTy::Bool, true) => "bool_ne",
-        (EqTy::String, false) => "str_eq",
-        (EqTy::String, true) => "str_ne",
         (EqTy::Unit, false) => "unit_eq",
         (EqTy::Unit, true) => "unit_ne",
-        (EqTy::U32, false) => return Ok(prim_op(PrimOp::Eq, a, b)),
-        (EqTy::U32, true) => return Ok(prim_op(PrimOp::Ne, a, b)),
+        (EqTy::Str, false) => return Ok(prim_op(PrimOp::StrEq, vec![a, b])),
+        (EqTy::Str, true) => return Ok(prim_op(PrimOp::StrNe, vec![a, b])),
+        (EqTy::Bytes, false) => return Ok(prim_op(PrimOp::BytesEq, vec![a, b])),
+        (EqTy::Bytes, true) => return Ok(prim_op(PrimOp::BytesNe, vec![a, b])),
+        (EqTy::U32, false) => return Ok(prim_op(PrimOp::Eq, vec![a, b])),
+        (EqTy::U32, true) => return Ok(prim_op(PrimOp::Ne, vec![a, b])),
     };
     prelude_call(globals, name, a, b, span)
 }
@@ -1937,28 +1959,6 @@ fn nat_literal(globals: &Globals, n: u64, span: Span) -> Result<RcTm> {
         tm = rc(Tm::Ctor("Nat".to_string(), succ, vec![tm]));
     }
     Ok(tm)
-}
-
-fn string_literal(globals: &Globals, text: &str, span: Span) -> Result<(RcTm, V)> {
-    let info = globals
-        .get_enum("String")
-        .ok_or_else(|| Error::at(span, "string literals require the `String` type"))?;
-    let nil = info
-        .ctors
-        .iter()
-        .position(|c| c.name == "str_nil")
-        .ok_or_else(|| Error::at(span, "`String` must have a `str_nil` constructor"))?;
-    let cons = info
-        .ctors
-        .iter()
-        .position(|c| c.name == "str_cons")
-        .ok_or_else(|| Error::at(span, "`String` must have a `str_cons` constructor"))?;
-    let mut tm = rc(Tm::Ctor("String".to_string(), nil, Vec::new()));
-    for byte in text.as_bytes().iter().rev() {
-        let head = nat_literal(globals, u64::from(*byte), span)?;
-        tm = rc(Tm::Ctor("String".to_string(), cons, vec![head, tm]));
-    }
-    Ok((tm, vind("String", Vec::new())))
 }
 
 fn elab_match(

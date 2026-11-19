@@ -29,8 +29,12 @@ t, A, B ::=
   | Type u                  universe, u : Nat
   | Prop                    impredicative sort
   | U32                     primitive type
+  | String                  primitive UTF-8 byte sequence
+  | Bytes                   primitive byte sequence
   | n^32                    primitive literal, n < 2^32
-  | op(t, u)                fully applied primitive operation
+  | s                       primitive string literal
+  | b                       primitive bytes literal
+  | op(t1, ..., tn)         fully applied primitive operation
   | fn(x: A) -> B           dependent function type
   | fn(x: A) => t           lambda
   | t(u)                    application
@@ -214,45 +218,81 @@ A primitive type is an opaque type constant with no constructors:
 
 ```text
 Gamma |- U32 : Type 0
+Gamma |- String : Type 0
+Gamma |- Bytes : Type 0
 ```
 
-A literal inhabits the primitive type directly:
+A literal inhabits its primitive type directly:
 
 ```text
 n < 2^32
 ----------------
 Gamma |- n^32 : U32
+
+s is a UTF-8 byte sequence
+---------------------------
+Gamma |- s : String
+
+b is a byte sequence
+--------------------
+Gamma |- b : Bytes
 ```
 
-Operations are fully applied, binary, and have fixed signatures:
+Operations are fully applied and have fixed signatures. For an operation with
+domains `A1, ..., An` and result `R`:
 
 ```text
-Gamma |- a <= U32       Gamma |- b <= U32       op is arithmetic or bitwise
-----------------------------------------------------------------------------
-Gamma |- op(a, b) : U32
+Gamma |- t1 <= A1   ...   Gamma |- tn <= An
+--------------------------------------------
+Gamma |- op(t1, ..., tn) : R
+```
 
-Gamma |- a <= U32       Gamma |- b <= U32       cmp is a comparison
----------------------------------------------------------------------
-Gamma |- cmp(a, b) : Bool
+The signatures are:
+
+```text
+u32_add, u32_sub, u32_mul     : U32, U32 -> U32
+u32_div, u32_rem              : U32, U32 -> U32
+u32_and, u32_or, u32_xor      : U32, U32 -> U32
+u32_shl, u32_shr              : U32, U32 -> U32
+u32_lt, u32_le, u32_gt, u32_ge: U32, U32 -> Bool
+u32_eq, u32_ne                : U32, U32 -> Bool
+
+str_length                    : String -> U32
+str_slice                     : String, U32, U32 -> String
+str_concat                    : String, String -> String
+str_eq, str_ne                : String, String -> Bool
+str_to_bytes                  : String -> Bytes
+
+bytes_length                  : Bytes -> U32
+bytes_slice                   : Bytes, U32, U32 -> Bytes
+bytes_concat                  : Bytes, Bytes -> Bytes
+bytes_eq, bytes_ne            : Bytes, Bytes -> Bool
+bytes_get                     : Bytes, U32 -> U32
 ```
 
 `Bool` is the prelude enum; comparisons reduce to its `false` and `true`
 constructors. Operations are not values: a bare operation name is not a term,
 so it can never escape into a position the evaluator does not reduce.
 
-Evaluation reduces an operation whose operands are both literals:
+Evaluation reduces an operation whose arguments are all literals of the
+expected types:
 
 ```text
-op(n, m) --> apply(op, n, m)
+op(l1, ..., ln) --> apply(op, l1, ..., ln)
 ```
 
 `apply` is total. Arithmetic wraps modulo `2^32`, division and remainder by zero
 yield `0`, and shifts use the low five bits of the count. A comparison yields
-the corresponding `Bool` constructor.
+the corresponding `Bool` constructor. Text operations treat values as byte
+sequences: lengths count bytes, slices clamp their bounds to the length (with
+`end < start` yielding empty), concatenation copies both inputs, equality
+compares bytes, and `bytes_get` returns `0` out of bounds. `str_to_bytes`
+returns the same bytes under the other type; there is no reverse conversion
+yet.
 
 Conversion compares primitive types by name and literals by value. An
-operation with a non-literal operand stays neutral, and two neutral operations
-are convertible when their operator and operands are.
+operation with a non-literal argument stays neutral, and two neutral operations
+are convertible when their operator and arguments are.
 
 ## 5. Positivity and enum well-formedness
 
@@ -494,6 +534,9 @@ These are deliberate Stage 0 limits, not soundness holes:
 - No universe polymorphism: `Type u` levels are concrete.
 - `U32` is eliminated only by its fixed operations; there is no general
   recursor over machine words and no `Nat`/`U32` conversion.
+- `String` and `Bytes` are eliminated only by their fixed operations. `String`
+  is expected to contain UTF-8, but the kernel does not validate it; string
+  slicing is byte-based.
 - `Nat` arithmetic is unary and is intended for proofs and small indices; use
   `U32` for machine-sized computation.
 - Large elimination from `Prop` is only allowed under singleton elimination.

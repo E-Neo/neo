@@ -138,7 +138,8 @@ pub struct Binder {
 pub enum Expr {
     Var(String, Span),
     Numeral(u64, Option<NumSuffix>, Span),
-    Str(String, Span),
+    Str(Vec<u8>, Span),
+    Bytes(Vec<u8>, Span),
     Type(u32, Span),
     Prop(Span),
     FnType(Vec<Binder>, Box<Expr>, Span),
@@ -169,6 +170,7 @@ impl Expr {
             Expr::Var(_, s)
             | Expr::Numeral(_, _, s)
             | Expr::Str(_, s)
+            | Expr::Bytes(_, s)
             | Expr::Type(_, s)
             | Expr::Prop(s)
             | Expr::FnType(_, _, s)

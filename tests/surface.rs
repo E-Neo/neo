@@ -1,5 +1,6 @@
 #![cfg(not(target_family = "wasm"))]
 
+use neo::core::PrimLit;
 use neo::elab::elaborate_program;
 use neo::env::Globals;
 use neo::error::Error;
@@ -73,7 +74,7 @@ fn nat_main(body: &str) -> u64 {
 fn u32_main(body: &str) -> u32 {
     let globals = elaborate(&format!("fn main(): U32 {{\n{body}\n}}"));
     match &*main_value(&globals) {
-        Val::PrimLit(n) => *n,
+        Val::PrimLit(PrimLit::U32(n)) => *n,
         other => panic!("`main` did not evaluate to a u32 literal: {other:?}"),
     }
 }

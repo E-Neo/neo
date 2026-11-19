@@ -18,11 +18,6 @@ enum Unit {
   unit
 }
 
-enum String {
-  str_nil
-  str_cons(Nat, String)
-}
-
 enum List[T: Type] {
   nil
   cons(T, List[T])
@@ -296,52 +291,6 @@ fn unit_ne(a: Unit, b: Unit): Bool {
   false
 }
 
-fn str_length(s: String): Nat {
-  match s {
-    str_nil => zero
-    str_cons(byte, rest) => succ(str_length(rest))
-  }
-}
-
-fn str_concat(a: String, b: String): String {
-  match a {
-    str_nil => b
-    str_cons(byte, rest) => str_cons(byte, str_concat(rest, b))
-  }
-}
-
-fn str_byte_eq(a: Nat, b: Nat): Bool {
-  match a {
-    zero => match b {
-      zero => true
-      succ(k) => false
-    }
-    succ(k) => match b {
-      zero => false
-      succ(j) => str_byte_eq(k, j)
-    }
-  }
-}
-
-fn str_eq(a: String, b: String): Bool {
-  match a {
-    str_nil => match b {
-      str_nil => true
-      str_cons(byte, rest) => false
-    }
-    str_cons(byte, rest) => match b {
-      str_nil => false
-      str_cons(other, others) => match str_byte_eq(byte, other) {
-        true => str_eq(rest, others)
-        false => false
-      }
-    }
-  }
-}
-
-fn str_ne(a: String, b: String): Bool {
-  bool_not(str_eq(a, b))
-}
 "#;
 
 /// Install the prelude declarations into a fresh global environment.

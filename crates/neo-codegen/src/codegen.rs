@@ -11,7 +11,7 @@ use wasm_encoder::{
 use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
 use wit_parser::{Resolve, UnresolvedPackageGroup, WorldId};
 
-use crate::core::{PrimOp, PrimTy, RcTm, Tm};
+use crate::core::{PrimLit, PrimOp, PrimTy, RcTm, Tm};
 use crate::env::Globals;
 use crate::eval::{apply_pi, eval, eval_closure, force};
 use crate::value::{V, Val, vvar};
@@ -108,14 +108,21 @@ struct Codegen<'g> {
 
     data: Vec<u8>,
     strings: HashMap<String, (i32, i32)>,
+    literals: HashMap<Vec<u8>, i32>,
 
     alloc_id: usize,
+    memcpy_id: usize,
+    slice_id: usize,
+    concat_id: usize,
+    eq_id: usize,
+    get_id: usize,
     print_bytes_id: usize,
     print_u32_id: usize,
     print_nat_id: usize,
     print_bool_id: usize,
     print_unit_id: usize,
-    print_string_id: usize,
+    print_str_id: usize,
+    print_literal_bytes_id: usize,
     run_id: usize,
 
     succ_index: i32,
@@ -139,13 +146,20 @@ impl<'g> Codegen<'g> {
             printers: HashMap::new(),
             data: Vec::new(),
             strings: HashMap::new(),
+            literals: HashMap::new(),
             alloc_id: 0,
+            memcpy_id: 0,
+            slice_id: 0,
+            concat_id: 0,
+            eq_id: 0,
+            get_id: 0,
             print_bytes_id: 0,
             print_u32_id: 0,
             print_nat_id: 0,
             print_bool_id: 0,
             print_unit_id: 0,
-            print_string_id: 0,
+            print_str_id: 0,
+            print_literal_bytes_id: 0,
             run_id: 0,
             succ_index,
         }
@@ -199,6 +213,23 @@ impl<'g> Codegen<'g> {
         defined(self.alloc_id)
     }
 
+    /// Intern a primitive `String` or `Bytes` literal and return the address of
+    /// its descriptor. Equal bytes share one descriptor.
+    fn intern_literal(&mut self, bytes: &[u8]) -> i32 {
+        if let Some(&ptr) = self.literals.get(bytes) {
+            return ptr;
+        }
+        let data_ptr = DATA_BASE + self.data.len() as u32;
+        self.data.extend_from_slice(bytes);
+        let desc_ptr = DATA_BASE + self.data.len() as u32;
+        self.data.extend_from_slice(&data_ptr.to_le_bytes());
+        self.data.extend_from_slice(&0u32.to_le_bytes());
+        self.data
+            .extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        self.literals.insert(bytes.to_vec(), desc_ptr as i32);
+        desc_ptr as i32
+    }
+
     fn print_bytes_fn(&self) -> u32 {
         defined(self.print_bytes_id)
     }
@@ -214,16 +245,19 @@ impl<'g> Codegen<'g> {
         self.print_nat_id = self.new_func(&[ValType::I32], &[]);
         self.print_bool_id = self.new_func(&[ValType::I32], &[]);
         self.print_unit_id = self.new_func(&[ValType::I32], &[]);
-        self.print_string_id = self.new_func(&[ValType::I32], &[]);
+        self.print_str_id = self.new_func(&[ValType::I32], &[]);
+        self.print_literal_bytes_id = self.new_func(&[ValType::I32], &[]);
         self.run_id = self.new_func(&[], &[ValType::I32]);
 
         self.gen_alloc();
+        self.gen_runtime();
         self.gen_print_bytes();
         self.gen_print_u32();
         self.gen_print_nat();
         self.gen_print_bool();
         self.gen_print_unit();
-        self.gen_print_string()?;
+        self.gen_print_str();
+        self.gen_print_literal_bytes();
         Ok(())
     }
 
@@ -403,102 +437,337 @@ impl<'g> Codegen<'g> {
         self.set_body(id, body);
     }
 
-    fn gen_print_string(&mut self) -> Result<()> {
-        let string_info = self
-            .globals
-            .get_enum("String")
-            .ok_or_else(|| Error::new("the prelude is missing `String`"))?;
-        let nil = string_info
-            .ctors
-            .iter()
-            .position(|c| c.name == "str_nil")
-            .ok_or_else(|| Error::new("`String` is missing `str_nil`"))? as i32;
-        let cons = string_info
-            .ctors
-            .iter()
-            .position(|c| c.name == "str_cons")
-            .ok_or_else(|| Error::new("`String` is missing `str_cons`"))? as i32;
-        let nat_info = self
-            .globals
-            .get_enum("Nat")
-            .ok_or_else(|| Error::new("the prelude is missing `Nat`"))?;
-        let succ = nat_info
-            .ctors
-            .iter()
-            .position(|c| c.name == "succ")
-            .ok_or_else(|| Error::new("`Nat` is missing `succ`"))? as i32;
+    /// Runtime helpers for the primitive `String` and `Bytes` types.
+    ///
+    /// A value is a pointer to a 12-byte descriptor `{ data, start, len }`.
+    /// Descriptors and byte buffers are bump-allocated and never freed.
+    fn gen_runtime(&mut self) {
+        self.memcpy_id = self.new_func(&[ValType::I32; 3], &[]);
+        self.slice_id = self.new_func(&[ValType::I32; 3], &[ValType::I32]);
+        self.concat_id = self.new_func(&[ValType::I32; 2], &[ValType::I32]);
+        self.eq_id = self.new_func(&[ValType::I32; 2], &[ValType::I32]);
+        self.get_id = self.new_func(&[ValType::I32; 2], &[ValType::I32]);
 
-        let print_bytes = self.print_bytes_fn();
-        let mut fc = FnCompiler::new(self, 1);
-        let cursor = fc.local();
-        let byte = fc.local();
-        let count = fc.local();
+        self.gen_memcpy();
+        self.gen_slice();
+        self.gen_concat();
+        self.gen_eq();
+        self.gen_get();
+    }
 
+    fn gen_memcpy(&mut self) {
+        let mut fc = FnCompiler::new(self, 3);
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::I32Eqz);
+        fc.emit(I::BrIf(1));
         fc.emit(I::LocalGet(0));
-        fc.emit(I::LocalSet(cursor));
-
-        // Walk the cons list.
-        fc.emit(I::Block(BlockType::Empty));
-        fc.emit(I::Loop(BlockType::Empty));
-        fc.emit(I::LocalGet(cursor));
-        fc.emit(I::I32Load(mem(0)));
-        fc.emit(I::I32Const(nil));
-        fc.emit(I::I32Eq);
-        fc.emit(I::BrIf(1));
-        fc.emit(I::LocalGet(cursor));
-        fc.emit(I::I32Load(mem(0)));
-        fc.emit(I::I32Const(cons));
-        fc.emit(I::I32Ne);
-        fc.emit(I::If(BlockType::Empty));
-        fc.emit(I::Unreachable);
-        fc.emit(I::End);
-
-        // Convert the unary `Nat` byte to a machine integer.
-        fc.emit(I::LocalGet(cursor));
-        fc.emit(I::I32Load(mem(4)));
-        fc.emit(I::LocalSet(byte));
-        fc.emit(I::I32Const(0));
-        fc.emit(I::LocalSet(count));
-        fc.emit(I::Block(BlockType::Empty));
-        fc.emit(I::Loop(BlockType::Empty));
-        fc.emit(I::LocalGet(byte));
-        fc.emit(I::I32Load(mem(0)));
-        fc.emit(I::I32Const(succ));
-        fc.emit(I::I32Ne);
-        fc.emit(I::BrIf(1));
-        fc.emit(I::LocalGet(count));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::I32Store8(mem8(0)));
+        fc.emit(I::LocalGet(0));
         fc.emit(I::I32Const(1));
         fc.emit(I::I32Add);
-        fc.emit(I::LocalSet(count));
-        fc.emit(I::LocalGet(byte));
-        fc.emit(I::I32Load(mem(4)));
-        fc.emit(I::LocalSet(byte));
-        fc.emit(I::Br(0));
-        fc.emit(I::End);
-        fc.emit(I::End);
-
-        // Store the low byte and write it as a single-byte string.
-        fc.emit(I::I32Const(DIGIT_END));
-        fc.emit(I::LocalGet(count));
-        fc.emit(I::I32Const(255));
-        fc.emit(I::I32And);
-        fc.emit(I::I32Store8(mem8(0)));
-        fc.emit(I::I32Const(DIGIT_END));
+        fc.emit(I::LocalSet(0));
+        fc.emit(I::LocalGet(1));
         fc.emit(I::I32Const(1));
-        fc.emit(I::Call(print_bytes));
-
-        // Advance to the tail.
-        fc.emit(I::LocalGet(cursor));
-        fc.emit(I::I32Load(mem(8)));
-        fc.emit(I::LocalSet(cursor));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(1));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Sub);
+        fc.emit(I::LocalSet(2));
         fc.emit(I::Br(0));
         fc.emit(I::End);
         fc.emit(I::End);
-
         let body = fc.finish();
-        let id = self.print_string_id;
+        let id = self.memcpy_id;
         self.set_body(id, body);
-        Ok(())
+    }
+
+    fn gen_slice(&mut self) {
+        let alloc = self.alloc_fn();
+        let mut fc = FnCompiler::new(self, 3);
+        let len = fc.local();
+        let out = fc.local();
+        // `len = desc.len`
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(len));
+        emit_min_u(&mut fc, 1, len);
+        emit_min_u(&mut fc, 2, len);
+        // `if end < start { end = start }`
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32LtU);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::LocalSet(2));
+        fc.emit(I::End);
+        // `out = alloc(12)`, then fill the descriptor.
+        fc.emit(I::I32Const(12));
+        fc.emit(I::Call(alloc));
+        fc.emit(I::LocalSet(out));
+        fc.emit(I::LocalGet(out));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::I32Store(mem(0)));
+        fc.emit(I::LocalGet(out));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Store(mem(4)));
+        fc.emit(I::LocalGet(out));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Sub);
+        fc.emit(I::I32Store(mem(8)));
+        fc.emit(I::LocalGet(out));
+        let body = fc.finish();
+        let id = self.slice_id;
+        self.set_body(id, body);
+    }
+
+    fn gen_concat(&mut self) {
+        let alloc = self.alloc_fn();
+        let memcpy = defined(self.memcpy_id);
+        let mut fc = FnCompiler::new(self, 2);
+        let alen = fc.local();
+        let blen = fc.local();
+        let total = fc.local();
+        let buf = fc.local();
+        let out = fc.local();
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(alen));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(blen));
+        fc.emit(I::LocalGet(alen));
+        fc.emit(I::LocalGet(blen));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(total));
+        fc.emit(I::LocalGet(total));
+        fc.emit(I::Call(alloc));
+        fc.emit(I::LocalSet(buf));
+        // Copy the first buffer.
+        fc.emit(I::LocalGet(buf));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalGet(alen));
+        fc.emit(I::Call(memcpy));
+        // Copy the second buffer after the first.
+        fc.emit(I::LocalGet(buf));
+        fc.emit(I::LocalGet(alen));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalGet(blen));
+        fc.emit(I::Call(memcpy));
+        fc.emit(I::I32Const(12));
+        fc.emit(I::Call(alloc));
+        fc.emit(I::LocalSet(out));
+        fc.emit(I::LocalGet(out));
+        fc.emit(I::LocalGet(buf));
+        fc.emit(I::I32Store(mem(0)));
+        fc.emit(I::LocalGet(out));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::I32Store(mem(4)));
+        fc.emit(I::LocalGet(out));
+        fc.emit(I::LocalGet(total));
+        fc.emit(I::I32Store(mem(8)));
+        fc.emit(I::LocalGet(out));
+        let body = fc.finish();
+        let id = self.concat_id;
+        self.set_body(id, body);
+    }
+
+    fn gen_eq(&mut self) {
+        let mut fc = FnCompiler::new(self, 2);
+        let alen = fc.local();
+        let blen = fc.local();
+        let ap = fc.local();
+        let bp = fc.local();
+        let i = fc.local();
+        let byte = fc.local();
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(alen));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(blen));
+        fc.emit(I::LocalGet(alen));
+        fc.emit(I::LocalGet(blen));
+        fc.emit(I::I32Ne);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::Return);
+        fc.emit(I::End);
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(ap));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(bp));
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::LocalGet(alen));
+        fc.emit(I::I32GeU);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::Return);
+        fc.emit(I::End);
+        fc.emit(I::LocalGet(ap));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::LocalSet(byte));
+        fc.emit(I::LocalGet(bp));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::LocalGet(byte));
+        fc.emit(I::I32Ne);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::Return);
+        fc.emit(I::End);
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(i));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+        fc.emit(I::End);
+        fc.emit(I::I32Const(0));
+        let body = fc.finish();
+        let id = self.eq_id;
+        self.set_body(id, body);
+    }
+
+    fn gen_get(&mut self) {
+        let mut fc = FnCompiler::new(self, 2);
+        let len = fc.local();
+        let data = fc.local();
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(len));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(data));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::LocalGet(len));
+        fc.emit(I::I32GeU);
+        fc.emit(I::If(BlockType::Result(ValType::I32)));
+        fc.emit(I::I32Const(0));
+        fc.emit(I::Else);
+        fc.emit(I::LocalGet(data));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::End);
+        let body = fc.finish();
+        let id = self.get_id;
+        self.set_body(id, body);
+    }
+
+    fn gen_print_str(&mut self) {
+        let print_bytes = self.print_bytes_fn();
+        let mut fc = FnCompiler::new(self, 1);
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::Call(print_bytes));
+        let body = fc.finish();
+        let id = self.print_str_id;
+        self.set_body(id, body);
+    }
+
+    fn gen_print_literal_bytes(&mut self) {
+        let print_bytes = self.print_bytes_fn();
+        let (open_ptr, open_len) = self.intern("b\"");
+        let (quote_ptr, quote_len) = self.intern("\"");
+        let (escape_ptr, escape_len) = self.intern("\\x");
+        let mut fc = FnCompiler::new(self, 1);
+        let len = fc.local();
+        let data = fc.local();
+        let i = fc.local();
+        let byte = fc.local();
+        let nib = fc.local();
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(8)));
+        fc.emit(I::LocalSet(len));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Load(mem(4)));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(data));
+        fc.emit(I::I32Const(open_ptr));
+        fc.emit(I::I32Const(open_len));
+        fc.emit(I::Call(print_bytes));
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::LocalGet(len));
+        fc.emit(I::I32GeU);
+        fc.emit(I::BrIf(1));
+        fc.emit(I::LocalGet(data));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::LocalSet(byte));
+        fc.emit(I::LocalGet(byte));
+        fc.emit(I::I32Const(4));
+        fc.emit(I::I32ShrU);
+        fc.emit(I::LocalSet(nib));
+        fc.emit(I::I32Const(escape_ptr));
+        fc.emit(I::I32Const(escape_len));
+        fc.emit(I::Call(print_bytes));
+        emit_hex_nibble(&mut fc, nib, DIGIT_END);
+        fc.emit(I::LocalGet(byte));
+        fc.emit(I::I32Const(15));
+        fc.emit(I::I32And);
+        fc.emit(I::LocalSet(nib));
+        emit_hex_nibble(&mut fc, nib, DIGIT_END + 1);
+        fc.emit(I::I32Const(DIGIT_END));
+        fc.emit(I::I32Const(2));
+        fc.emit(I::Call(print_bytes));
+        fc.emit(I::LocalGet(i));
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(i));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+        fc.emit(I::End);
+        fc.emit(I::I32Const(quote_ptr));
+        fc.emit(I::I32Const(quote_len));
+        fc.emit(I::Call(print_bytes));
+        let body = fc.finish();
+        let id = self.print_literal_bytes_id;
+        self.set_body(id, body);
     }
 
     fn ensure_fn(&mut self, name: &str) -> Result<FnRef> {
@@ -617,11 +886,12 @@ impl<'g> Codegen<'g> {
         let ty = force(self.globals, ty.clone());
         match &*ty {
             Val::PrimTy(PrimTy::U32) => Ok(self.print_u32_id),
+            Val::PrimTy(PrimTy::String) => Ok(self.print_str_id),
+            Val::PrimTy(PrimTy::Bytes) => Ok(self.print_literal_bytes_id),
             Val::Ind(name, args) => match name.as_str() {
                 "Nat" => Ok(self.print_nat_id),
                 "Bool" => Ok(self.print_bool_id),
                 "Unit" => Ok(self.print_unit_id),
-                "String" => Ok(self.print_string_id),
                 _ => self.enum_printer(name, args),
             },
             _ => Err(Error::new(
@@ -859,6 +1129,33 @@ impl<'g> Codegen<'g> {
     }
 }
 
+fn emit_min_u(fc: &mut FnCompiler<'_, '_>, target: u32, limit: u32) {
+    fc.emit(I::LocalGet(target));
+    fc.emit(I::LocalGet(limit));
+    fc.emit(I::I32GtU);
+    fc.emit(I::If(BlockType::Empty));
+    fc.emit(I::LocalGet(limit));
+    fc.emit(I::LocalSet(target));
+    fc.emit(I::End);
+}
+
+fn emit_hex_nibble(fc: &mut FnCompiler<'_, '_>, nib: u32, addr: i32) {
+    fc.emit(I::I32Const(addr));
+    fc.emit(I::LocalGet(nib));
+    fc.emit(I::I32Const(10));
+    fc.emit(I::I32LtU);
+    fc.emit(I::If(BlockType::Result(ValType::I32)));
+    fc.emit(I::LocalGet(nib));
+    fc.emit(I::I32Const(b'0' as i32));
+    fc.emit(I::I32Add);
+    fc.emit(I::Else);
+    fc.emit(I::LocalGet(nib));
+    fc.emit(I::I32Const(b'a' as i32 - 10));
+    fc.emit(I::I32Add);
+    fc.emit(I::End);
+    fc.emit(I::I32Store8(mem8(0)));
+}
+
 struct FnCompiler<'a, 'g> {
     cg: &'a mut Codegen<'g>,
     code: Vec<I<'static>>,
@@ -979,8 +1276,12 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
                 self.emit(I::I32Const(0));
             }
             Tm::PrimTy(_) => self.emit(I::I32Const(0)),
-            Tm::PrimLit(n) => self.emit(I::I32Const(*n as i32)),
-            Tm::PrimOp(op, a, b) => self.compile_prim_op(*op, a, b)?,
+            Tm::PrimLit(PrimLit::U32(n)) => self.emit(I::I32Const(*n as i32)),
+            Tm::PrimLit(PrimLit::Str(bytes) | PrimLit::Bytes(bytes)) => {
+                let ptr = self.cg.intern_literal(bytes);
+                self.emit(I::I32Const(ptr));
+            }
+            Tm::PrimOp(op, args) => self.compile_prim_op(*op, args)?,
             Tm::Const(name) => self.compile_const(name)?,
             Tm::Ctor(enum_name, index, args) => self.compile_ctor(enum_name, *index, args)?,
             Tm::App(f, a) => self.compile_app(f, a)?,
@@ -1059,60 +1360,71 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         Ok(())
     }
 
-    /// Compile a primitive operation. `U32` values are unboxed `i32`s, while a
-    /// comparison result is an ordinary `Bool` constructor and is therefore
-    /// allocated like any other enum value.
-    fn compile_prim_op(&mut self, op: PrimOp, a: &RcTm, b: &RcTm) -> Result<()> {
-        if op.is_comparison() {
-            self.compile(a)?;
-            self.compile(b)?;
-            self.emit(match op {
-                PrimOp::Lt => I::I32LtU,
-                PrimOp::Le => I::I32LeU,
-                PrimOp::Gt => I::I32GtU,
-                PrimOp::Ge => I::I32GeU,
-                PrimOp::Eq => I::I32Eq,
-                PrimOp::Ne => I::I32Ne,
-                _ => return Err(Error::new("internal: comparison not handled")),
-            });
-
-            let (_, false_index) = self.cg.globals.bool_ctor(false).ok_or_else(|| {
+    /// Turn a 0/1 flag into a `Bool` constructor value.
+    fn bool_from_flag(&mut self) -> Result<()> {
+        let (_, false_index) =
+            self.cg.globals.bool_ctor(false).ok_or_else(|| {
                 Error::new("primitive comparisons require the prelude `Bool` type")
             })?;
-            let (_, true_index) = self.cg.globals.bool_ctor(true).ok_or_else(|| {
+        let (_, true_index) =
+            self.cg.globals.bool_ctor(true).ok_or_else(|| {
                 Error::new("primitive comparisons require the prelude `Bool` type")
             })?;
+        let flag = self.local();
+        self.emit(I::LocalSet(flag));
+        self.emit(I::LocalGet(flag));
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.emit(I::I32Const(true_index as i32));
+        self.emit(I::Else);
+        self.emit(I::I32Const(false_index as i32));
+        self.emit(I::End);
+        let tag = self.local();
+        self.emit(I::LocalSet(tag));
+        self.emit(I::I32Const(4));
+        self.emit(I::Call(self.cg.alloc_fn()));
+        let ptr = self.local();
+        self.emit(I::LocalSet(ptr));
+        self.emit(I::LocalGet(ptr));
+        self.emit(I::LocalGet(tag));
+        self.emit(I::I32Store(mem(0)));
+        self.emit(I::LocalGet(ptr));
+        Ok(())
+    }
 
-            // Turn the 0/1 comparison result into the constructor index.
-            let flag = self.local();
-            self.emit(I::LocalSet(flag));
-            self.emit(I::LocalGet(flag));
-            self.emit(I::If(BlockType::Result(ValType::I32)));
-            self.emit(I::I32Const(true_index as i32));
-            self.emit(I::Else);
-            self.emit(I::I32Const(false_index as i32));
-            self.emit(I::End);
-            let tag = self.local();
-            self.emit(I::LocalSet(tag));
-
-            self.emit(I::I32Const(4));
-            self.emit(I::Call(self.cg.alloc_fn()));
-            let ptr = self.local();
-            self.emit(I::LocalSet(ptr));
-            self.emit(I::LocalGet(ptr));
-            self.emit(I::LocalGet(tag));
-            self.emit(I::I32Store(mem(0)));
-            self.emit(I::LocalGet(ptr));
-            return Ok(());
-        }
-
+    /// Compile a primitive operation. `U32` values are unboxed `i32`s,
+    /// boolean results are ordinary `Bool` constructors, and `String` and
+    /// `Bytes` values are descriptor pointers.
+    fn compile_prim_op(&mut self, op: PrimOp, args: &[RcTm]) -> Result<()> {
+        let arg = |i: usize| {
+            args.get(i).ok_or_else(|| {
+                Error::new(format!(
+                    "internal: `{}` is missing argument {}",
+                    op.name(),
+                    i
+                ))
+            })
+        };
         match op {
+            PrimOp::Lt | PrimOp::Le | PrimOp::Gt | PrimOp::Ge | PrimOp::Eq | PrimOp::Ne => {
+                self.compile(arg(0)?)?;
+                self.compile(arg(1)?)?;
+                self.emit(match op {
+                    PrimOp::Lt => I::I32LtU,
+                    PrimOp::Le => I::I32LeU,
+                    PrimOp::Gt => I::I32GtU,
+                    PrimOp::Ge => I::I32GeU,
+                    PrimOp::Eq => I::I32Eq,
+                    PrimOp::Ne => I::I32Ne,
+                    _ => return Err(Error::new("internal: comparison not handled")),
+                });
+                self.bool_from_flag()?;
+            }
             PrimOp::Div | PrimOp::Rem => {
                 let lhs = self.local();
                 let rhs = self.local();
-                self.compile(a)?;
+                self.compile(arg(0)?)?;
                 self.emit(I::LocalSet(lhs));
-                self.compile(b)?;
+                self.compile(arg(1)?)?;
                 self.emit(I::LocalSet(rhs));
                 // Division by zero is total: it yields zero.
                 self.emit(I::LocalGet(rhs));
@@ -1129,9 +1441,16 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
                 });
                 self.emit(I::End);
             }
-            _ => {
-                self.compile(a)?;
-                self.compile(b)?;
+            PrimOp::Add
+            | PrimOp::Sub
+            | PrimOp::Mul
+            | PrimOp::And
+            | PrimOp::Or
+            | PrimOp::Xor
+            | PrimOp::Shl
+            | PrimOp::Shr => {
+                self.compile(arg(0)?)?;
+                self.compile(arg(1)?)?;
                 self.emit(match op {
                     PrimOp::Add => I::I32Add,
                     PrimOp::Sub => I::I32Sub,
@@ -1143,6 +1462,42 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
                     PrimOp::Shr => I::I32ShrU,
                     _ => return Err(Error::new("internal: primitive operation not handled")),
                 });
+            }
+            PrimOp::StrEq | PrimOp::BytesEq | PrimOp::StrNe | PrimOp::BytesNe => {
+                self.compile(arg(0)?)?;
+                self.compile(arg(1)?)?;
+                let eq = defined(self.cg.eq_id);
+                self.emit(I::Call(eq));
+                if matches!(op, PrimOp::StrNe | PrimOp::BytesNe) {
+                    self.emit(I::I32Eqz);
+                }
+                self.bool_from_flag()?;
+            }
+            PrimOp::StrLength | PrimOp::BytesLength => {
+                self.compile(arg(0)?)?;
+                self.emit(I::I32Load(mem(8)));
+            }
+            PrimOp::StrSlice | PrimOp::BytesSlice => {
+                for i in 0..3 {
+                    self.compile(arg(i)?)?;
+                }
+                let slice = defined(self.cg.slice_id);
+                self.emit(I::Call(slice));
+            }
+            PrimOp::StrConcat | PrimOp::BytesConcat => {
+                self.compile(arg(0)?)?;
+                self.compile(arg(1)?)?;
+                let concat = defined(self.cg.concat_id);
+                self.emit(I::Call(concat));
+            }
+            PrimOp::StrToBytes => {
+                self.compile(arg(0)?)?;
+            }
+            PrimOp::BytesGet => {
+                self.compile(arg(0)?)?;
+                self.compile(arg(1)?)?;
+                let get = defined(self.cg.get_id);
+                self.emit(I::Call(get));
             }
         }
         Ok(())
@@ -1308,7 +1663,7 @@ fn value_key(v: &V) -> String {
         Val::Type(u) => format!("Type{}", u),
         Val::Prop => "Prop".to_string(),
         Val::PrimTy(t) => t.name().to_string(),
-        Val::PrimLit(n) => n.to_string(),
+        Val::PrimLit(lit) => lit.show(),
         Val::Ind(name, args) => type_key(name, args),
         Val::Ctor(name, index, args) => {
             let mut out = format!("{}#{}", name, index);
@@ -1331,8 +1686,9 @@ fn value_key(v: &V) -> String {
         Val::Neutral(n) => match &**n {
             crate::value::Neutral::Var(i) => format!("Var{}", i),
             crate::value::Neutral::Global(g) => format!("Global{}", g),
-            crate::value::Neutral::PrimOp(op, a, b) => {
-                format!("{}({},{})", op.name(), value_key(a), value_key(b))
+            crate::value::Neutral::PrimOp(op, args) => {
+                let args: Vec<String> = args.iter().map(value_key).collect();
+                format!("{}({})", op.name(), args.join(","))
             }
             _ => "Neutral".to_string(),
         },
@@ -1359,7 +1715,7 @@ fn neutral_has_var(n: &crate::value::Neutral) -> bool {
         crate::value::Neutral::App(f, a) => neutral_has_var(f) || contains_neutral(a),
         crate::value::Neutral::Match { scrut, .. } => contains_neutral(scrut),
         crate::value::Neutral::J { proof, .. } => contains_neutral(proof),
-        crate::value::Neutral::PrimOp(_, a, b) => contains_neutral(a) || contains_neutral(b),
+        crate::value::Neutral::PrimOp(_, args) => args.iter().any(contains_neutral),
         crate::value::Neutral::Global(_) => false,
     }
 }

@@ -139,7 +139,7 @@ fn inline_lets(tm: &RcTm) -> RcTm {
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
             tm.clone()
         }
-        Tm::PrimOp(op, a, b) => prim_op(*op, inline_lets(a), inline_lets(b)),
+        Tm::PrimOp(op, args) => prim_op(*op, args.iter().map(inline_lets).collect()),
     }
 }
 
@@ -147,7 +147,7 @@ fn count_var(tm: &RcTm, index: usize, depth: usize) -> usize {
     match &**tm {
         Tm::Var(i) if *i == index + depth => 1,
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => 0,
-        Tm::PrimOp(_, a, b) => count_var(a, index, depth) + count_var(b, index, depth),
+        Tm::PrimOp(_, args) => args.iter().map(|a| count_var(a, index, depth)).sum(),
         Tm::Pi { dom, cod, .. } => count_var(dom, index, depth) + count_var(cod, index, depth + 1),
         Tm::Lam { dom, body, .. } => {
             count_var(dom, index, depth) + count_var(body, index, depth + 1)
@@ -243,9 +243,11 @@ fn check_occurrences(name: &str, arity: usize, tm: &RcTm) -> Result<()> {
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
             Ok(())
         }
-        Tm::PrimOp(_, a, b) => {
-            check_occurrences(name, arity, a)?;
-            check_occurrences(name, arity, b)
+        Tm::PrimOp(_, args) => {
+            for arg in args {
+                check_occurrences(name, arity, arg)?;
+            }
+            Ok(())
         }
         Tm::Pi { dom, cod, .. } => {
             check_occurrences(name, arity, dom)?;
@@ -417,9 +419,11 @@ fn check_decreasing_tm(
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
             Ok(())
         }
-        Tm::PrimOp(_, a, b) => {
-            check_decreasing_tm(name, arity, a, env, calls)?;
-            check_decreasing_tm(name, arity, b, env, calls)
+        Tm::PrimOp(_, args) => {
+            for arg in args {
+                check_decreasing_tm(name, arity, arg, env, calls)?;
+            }
+            Ok(())
         }
         Tm::Pi { dom, cod, .. } => {
             check_decreasing_tm(name, arity, dom, env, calls)?;

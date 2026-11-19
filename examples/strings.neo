@@ -1,5 +1,5 @@
-// String literals elaborate to the prelude `String` list of byte values.
-// `main` prints the string as text in both the interpreter and `neo build`.
+// `String` is a primitive UTF-8 byte sequence with O(1) length and slicing.
+// `main` prints string results as text in both the interpreter and `neo build`.
 fn main(): String {
-  "hello, world!"
+  str_concat(str_slice("hello, world", 7, 12), "!")
 }

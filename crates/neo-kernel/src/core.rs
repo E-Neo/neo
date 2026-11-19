@@ -7,25 +7,90 @@ pub type RcTm = Rc<Tm>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrimTy {
     U32,
+    String,
+    Bytes,
 }
 
 impl PrimTy {
+    pub const ALL: [PrimTy; 3] = [PrimTy::U32, PrimTy::String, PrimTy::Bytes];
+
     pub fn name(self) -> &'static str {
         match self {
             PrimTy::U32 => "U32",
+            PrimTy::String => "String",
+            PrimTy::Bytes => "Bytes",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<PrimTy> {
+        PrimTy::ALL.iter().copied().find(|ty| ty.name() == name)
+    }
+}
+
+/// A primitive literal. `String` and `Bytes` both hold raw bytes; a `String`
+/// is expected to contain UTF-8, but the representation does not enforce it, so
+/// byte slicing must stay on character boundaries to remain meaningful.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrimLit {
+    U32(u32),
+    Str(Rc<[u8]>),
+    Bytes(Rc<[u8]>),
+}
+
+impl PrimLit {
+    pub fn ty(&self) -> PrimTy {
+        match self {
+            PrimLit::U32(_) => PrimTy::U32,
+            PrimLit::Str(_) => PrimTy::String,
+            PrimLit::Bytes(_) => PrimTy::Bytes,
+        }
+    }
+
+    pub fn show(&self) -> String {
+        match self {
+            PrimLit::U32(n) => n.to_string(),
+            PrimLit::Str(bytes) => format!("\"{}\"", escape_bytes(bytes, true)),
+            PrimLit::Bytes(bytes) => format!("b\"{}\"", escape_bytes(bytes, false)),
         }
     }
 }
 
+fn escape_bytes(bytes: &[u8], printable: bool) -> String {
+    let mut out = String::new();
+    for &b in bytes {
+        match b {
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\r' => out.push_str("\\r"),
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            0x20..=0x7e if printable => out.push(b as char),
+            0x20..=0x7e => out.push_str(&format!("\\x{:02x}", b)),
+            _ => out.push_str(&format!("\\x{:02x}", b)),
+        }
+    }
+    out
+}
+
 /// The result of evaluating a primitive operation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrimOutcome {
     U32(u32),
     Bool(bool),
+    Bytes(Rc<[u8]>),
 }
 
-/// A primitive operation. Operations are binary and must be fully applied;
-/// they are not first-class values.
+/// The result type of a primitive operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimRet {
+    U32,
+    Bool,
+    Str,
+    Bytes,
+}
+
+/// A primitive operation. Operations must be fully applied; they are not
+/// first-class values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrimOp {
     Add,
@@ -44,10 +109,31 @@ pub enum PrimOp {
     Ge,
     Eq,
     Ne,
+    StrLength,
+    StrSlice,
+    StrConcat,
+    StrEq,
+    StrNe,
+    StrToBytes,
+    BytesLength,
+    BytesSlice,
+    BytesConcat,
+    BytesEq,
+    BytesNe,
+    BytesGet,
 }
 
+const U32_BINARY: [PrimTy; 2] = [PrimTy::U32, PrimTy::U32];
+const STR_UNARY: [PrimTy; 1] = [PrimTy::String];
+const STR_BINARY: [PrimTy; 2] = [PrimTy::String, PrimTy::String];
+const STR_SLICE: [PrimTy; 3] = [PrimTy::String, PrimTy::U32, PrimTy::U32];
+const BYTES_UNARY: [PrimTy; 1] = [PrimTy::Bytes];
+const BYTES_BINARY: [PrimTy; 2] = [PrimTy::Bytes, PrimTy::Bytes];
+const BYTES_SLICE: [PrimTy; 3] = [PrimTy::Bytes, PrimTy::U32, PrimTy::U32];
+const BYTES_GET: [PrimTy; 2] = [PrimTy::Bytes, PrimTy::U32];
+
 impl PrimOp {
-    pub const ALL: [PrimOp; 16] = [
+    pub const ALL: [PrimOp; 28] = [
         PrimOp::Add,
         PrimOp::Sub,
         PrimOp::Mul,
@@ -64,6 +150,18 @@ impl PrimOp {
         PrimOp::Ge,
         PrimOp::Eq,
         PrimOp::Ne,
+        PrimOp::StrLength,
+        PrimOp::StrSlice,
+        PrimOp::StrConcat,
+        PrimOp::StrEq,
+        PrimOp::StrNe,
+        PrimOp::StrToBytes,
+        PrimOp::BytesLength,
+        PrimOp::BytesSlice,
+        PrimOp::BytesConcat,
+        PrimOp::BytesEq,
+        PrimOp::BytesNe,
+        PrimOp::BytesGet,
     ];
 
     pub fn name(self) -> &'static str {
@@ -84,6 +182,18 @@ impl PrimOp {
             PrimOp::Ge => "u32_ge",
             PrimOp::Eq => "u32_eq",
             PrimOp::Ne => "u32_ne",
+            PrimOp::StrLength => "str_length",
+            PrimOp::StrSlice => "str_slice",
+            PrimOp::StrConcat => "str_concat",
+            PrimOp::StrEq => "str_eq",
+            PrimOp::StrNe => "str_ne",
+            PrimOp::StrToBytes => "str_to_bytes",
+            PrimOp::BytesLength => "bytes_length",
+            PrimOp::BytesSlice => "bytes_slice",
+            PrimOp::BytesConcat => "bytes_concat",
+            PrimOp::BytesEq => "bytes_eq",
+            PrimOp::BytesNe => "bytes_ne",
+            PrimOp::BytesGet => "bytes_get",
         }
     }
 
@@ -91,40 +201,122 @@ impl PrimOp {
         PrimOp::ALL.iter().copied().find(|op| op.name() == name)
     }
 
-    /// Whether this operation produces a `Bool` instead of a `U32`.
-    pub fn is_comparison(self) -> bool {
-        matches!(
-            self,
-            PrimOp::Lt | PrimOp::Le | PrimOp::Gt | PrimOp::Ge | PrimOp::Eq | PrimOp::Ne
-        )
-    }
-
-    /// Execute the operation on two machine words.
-    ///
-    /// Arithmetic wraps, division and remainder by zero return zero, and shift
-    /// amounts use their low five bits. This matches the WebAssembly `i32`
-    /// semantics that the backend emits.
-    pub fn apply(self, a: u32, b: u32) -> PrimOutcome {
-        use PrimOutcome::{Bool, U32};
+    /// The argument types of this operation, in order.
+    pub fn domains(self) -> &'static [PrimTy] {
         match self {
-            PrimOp::Add => U32(a.wrapping_add(b)),
-            PrimOp::Sub => U32(a.wrapping_sub(b)),
-            PrimOp::Mul => U32(a.wrapping_mul(b)),
-            PrimOp::Div => U32(a.checked_div(b).unwrap_or(0)),
-            PrimOp::Rem => U32(a.checked_rem(b).unwrap_or(0)),
-            PrimOp::And => U32(a & b),
-            PrimOp::Or => U32(a | b),
-            PrimOp::Xor => U32(a ^ b),
-            PrimOp::Shl => U32(a << (b & 31)),
-            PrimOp::Shr => U32(a >> (b & 31)),
-            PrimOp::Lt => Bool(a < b),
-            PrimOp::Le => Bool(a <= b),
-            PrimOp::Gt => Bool(a > b),
-            PrimOp::Ge => Bool(a >= b),
-            PrimOp::Eq => Bool(a == b),
-            PrimOp::Ne => Bool(a != b),
+            PrimOp::StrLength => &STR_UNARY,
+            PrimOp::StrSlice => &STR_SLICE,
+            PrimOp::StrConcat | PrimOp::StrEq | PrimOp::StrNe => &STR_BINARY,
+            PrimOp::StrToBytes => &STR_UNARY,
+            PrimOp::BytesLength => &BYTES_UNARY,
+            PrimOp::BytesSlice => &BYTES_SLICE,
+            PrimOp::BytesConcat | PrimOp::BytesEq | PrimOp::BytesNe => &BYTES_BINARY,
+            PrimOp::BytesGet => &BYTES_GET,
+            _ => &U32_BINARY,
         }
     }
+
+    pub fn result(self) -> PrimRet {
+        match self {
+            PrimOp::Lt
+            | PrimOp::Le
+            | PrimOp::Gt
+            | PrimOp::Ge
+            | PrimOp::Eq
+            | PrimOp::Ne
+            | PrimOp::StrEq
+            | PrimOp::StrNe
+            | PrimOp::BytesEq
+            | PrimOp::BytesNe => PrimRet::Bool,
+            PrimOp::StrLength | PrimOp::BytesLength | PrimOp::BytesGet => PrimRet::U32,
+            PrimOp::StrSlice | PrimOp::StrConcat => PrimRet::Str,
+            PrimOp::StrToBytes | PrimOp::BytesSlice | PrimOp::BytesConcat => PrimRet::Bytes,
+            _ => PrimRet::U32,
+        }
+    }
+
+    /// Whether the operation produces a `Bool`.
+    pub fn returns_bool(self) -> bool {
+        self.result() == PrimRet::Bool
+    }
+
+    /// Whether every argument is a literal of the expected type.
+    pub fn accepts(self, args: &[PrimLit]) -> bool {
+        let domains = self.domains();
+        args.len() == domains.len() && args.iter().zip(domains).all(|(arg, dom)| arg.ty() == *dom)
+    }
+
+    /// Execute the operation on literals of the expected types.
+    ///
+    /// Arithmetic wraps, division and remainder by zero return zero, and shift
+    /// amounts use their low five bits. String and byte slices clamp their
+    /// bounds to the value length, and `bytes_get` returns `0` out of bounds.
+    pub fn apply(self, args: &[PrimLit]) -> PrimOutcome {
+        use PrimOutcome::{Bool, Bytes, U32};
+        let x = arg_word(args, 0);
+        let y = arg_word(args, 1);
+        let z = arg_word(args, 2);
+        match self {
+            PrimOp::Add => U32(x.wrapping_add(y)),
+            PrimOp::Sub => U32(x.wrapping_sub(y)),
+            PrimOp::Mul => U32(x.wrapping_mul(y)),
+            PrimOp::Div => U32(x.checked_div(y).unwrap_or(0)),
+            PrimOp::Rem => U32(x.checked_rem(y).unwrap_or(0)),
+            PrimOp::And => U32(x & y),
+            PrimOp::Or => U32(x | y),
+            PrimOp::Xor => U32(x ^ y),
+            PrimOp::Shl => U32(x << (y & 31)),
+            PrimOp::Shr => U32(x >> (y & 31)),
+            PrimOp::Lt => Bool(x < y),
+            PrimOp::Le => Bool(x <= y),
+            PrimOp::Gt => Bool(x > y),
+            PrimOp::Ge => Bool(x >= y),
+            PrimOp::Eq => Bool(x == y),
+            PrimOp::Ne => Bool(x != y),
+            PrimOp::StrLength | PrimOp::BytesLength => U32(arg_bytes(args, 0).len() as u32),
+            PrimOp::StrSlice | PrimOp::BytesSlice => {
+                let bytes = arg_bytes(args, 0);
+                let (start, end) = clamp_range(bytes.len(), y, z);
+                Bytes(Rc::from(&bytes[start..end]))
+            }
+            PrimOp::StrConcat | PrimOp::BytesConcat => {
+                let a = arg_bytes(args, 0);
+                let b = arg_bytes(args, 1);
+                let mut out = Vec::with_capacity(a.len() + b.len());
+                out.extend_from_slice(a);
+                out.extend_from_slice(b);
+                Bytes(Rc::from(out))
+            }
+            PrimOp::StrEq | PrimOp::BytesEq => Bool(arg_bytes(args, 0) == arg_bytes(args, 1)),
+            PrimOp::StrNe | PrimOp::BytesNe => Bool(arg_bytes(args, 0) != arg_bytes(args, 1)),
+            PrimOp::StrToBytes => Bytes(Rc::from(arg_bytes(args, 0))),
+            PrimOp::BytesGet => {
+                let byte = arg_bytes(args, 0).get(y as usize).copied().unwrap_or(0);
+                U32(byte as u32)
+            }
+        }
+    }
+}
+
+fn arg_word(args: &[PrimLit], i: usize) -> u32 {
+    match args.get(i) {
+        Some(PrimLit::U32(n)) => *n,
+        _ => 0,
+    }
+}
+
+fn arg_bytes(args: &[PrimLit], i: usize) -> &[u8] {
+    match args.get(i) {
+        Some(PrimLit::Str(bytes) | PrimLit::Bytes(bytes)) => bytes,
+        _ => &[],
+    }
+}
+
+fn clamp_range(len: usize, start: u32, end: u32) -> (usize, usize) {
+    let limit = len.min(u32::MAX as usize) as u32;
+    let start = start.min(limit);
+    let end = end.min(limit).max(start);
+    (start as usize, end as usize)
 }
 
 #[derive(Clone, Debug)]
@@ -135,10 +327,10 @@ pub enum Tm {
     Prop,
     /// A primitive type former.
     PrimTy(PrimTy),
-    /// A machine-word literal.
-    PrimLit(u32),
+    /// A primitive literal.
+    PrimLit(PrimLit),
     /// A fully applied primitive operation.
-    PrimOp(PrimOp, RcTm, RcTm),
+    PrimOp(PrimOp, Vec<RcTm>),
     Pi {
         name: String,
         dom: RcTm,
@@ -193,12 +385,12 @@ pub fn prim_ty(t: PrimTy) -> RcTm {
     rc(Tm::PrimTy(t))
 }
 
-pub fn prim_lit(n: u32) -> RcTm {
-    rc(Tm::PrimLit(n))
+pub fn prim_lit(lit: PrimLit) -> RcTm {
+    rc(Tm::PrimLit(lit))
 }
 
-pub fn prim_op(op: PrimOp, a: RcTm, b: RcTm) -> RcTm {
-    rc(Tm::PrimOp(op, a, b))
+pub fn prim_op(op: PrimOp, args: Vec<RcTm>) -> RcTm {
+    rc(Tm::PrimOp(op, args))
 }
 
 pub fn app(f: RcTm, a: RcTm) -> RcTm {
@@ -257,7 +449,9 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
             }
         }
         Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => tm.clone(),
-        Tm::PrimOp(op, a, b) => prim_op(*op, shift(a, delta, cutoff), shift(b, delta, cutoff)),
+        Tm::PrimOp(op, args) => {
+            prim_op(*op, args.iter().map(|a| shift(a, delta, cutoff)).collect())
+        }
         Tm::Pi {
             name,
             dom,
@@ -342,10 +536,11 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
             }
         }
         Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => tm.clone(),
-        Tm::PrimOp(op, a, b) => prim_op(
+        Tm::PrimOp(op, args) => prim_op(
             *op,
-            subst_at(a, index, replacement, depth),
-            subst_at(b, index, replacement, depth),
+            args.iter()
+                .map(|a| subst_at(a, index, replacement, depth))
+                .collect(),
         ),
         Tm::Pi {
             name,
@@ -437,10 +632,11 @@ fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> Rc
         Tm::Var(_) | Tm::Const(_) | Tm::Type(_) | Tm::Prop | Tm::PrimTy(_) | Tm::PrimLit(_) => {
             tm.clone()
         }
-        Tm::PrimOp(op, a, b) => prim_op(
+        Tm::PrimOp(op, args) => prim_op(
             *op,
-            abstract_at(target, replacement, a, depth),
-            abstract_at(target, replacement, b, depth),
+            args.iter()
+                .map(|a| abstract_at(target, replacement, a, depth))
+                .collect(),
         ),
         Tm::Pi {
             name,
@@ -526,8 +722,8 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
         (Tm::Prop, Tm::Prop) => true,
         (Tm::PrimTy(a), Tm::PrimTy(b)) => a == b,
         (Tm::PrimLit(a), Tm::PrimLit(b)) => a == b,
-        (Tm::PrimOp(o1, a1, b1), Tm::PrimOp(o2, a2, b2)) => {
-            o1 == o2 && same_tm(a1, a2) && same_tm(b1, b2)
+        (Tm::PrimOp(o1, a1), Tm::PrimOp(o2, a2)) => {
+            o1 == o2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| same_tm(x, y))
         }
         (
             Tm::Pi {

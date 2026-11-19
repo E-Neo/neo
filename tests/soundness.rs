@@ -506,3 +506,79 @@ fn bad(): Vec[Nat, 1] {
         "produce the expected type",
     );
 }
+
+#[test]
+fn rejects_misapplied_text_primitives() {
+    assert_rejected(
+        r#"fn main(): U32 { str_length("a", "b") }"#,
+        "takes 1 argument",
+    );
+    assert_rejected(r#"fn f(n: Nat): U32 { str_length(n) }"#, "type mismatch");
+    assert_rejected(
+        r#"fn main(): Bytes { bytes_get(b"a") }"#,
+        "takes 2 arguments",
+    );
+    assert_rejected(
+        r#"fn main(): String { str_slice("abc", 0u32) }"#,
+        "takes 3 arguments",
+    );
+    assert_rejected(r#"fn main(): U32 { bytes_to_str(b"a") }"#, "unknown");
+}
+
+#[test]
+fn rejects_arithmetic_and_matching_on_text() {
+    assert_rejected(
+        r#"fn main(): String { "a" + "b" }"#,
+        "requires `Nat` or `U32`",
+    );
+    assert_rejected(
+        r#"fn f(s: String): Nat { match s { x => zero } }"#,
+        "not an enum value",
+    );
+    assert_rejected(
+        r#"fn f(s: Bytes): Nat { match s { x => zero } }"#,
+        "not an enum value",
+    );
+}
+
+#[test]
+fn rejects_equality_on_functions() {
+    assert_rejected(
+        r#"fn f(g: fn(Nat) -> Nat): Bool { g == g }"#,
+        "boolean equality is not defined",
+    );
+}
+
+#[test]
+fn accepts_text_primitives() {
+    elaborate_ok(
+        r#"
+fn main(): Bool {
+  str_eq(str_concat(str_slice("abc", 1, 2), "!"), "b!")
+}
+"#,
+    );
+    elaborate_ok(
+        r#"
+fn main(): Bytes {
+  bytes_concat(bytes_slice(b"abc", 0, 1), b"\xff")
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_text_primitive_redeclarations() {
+    assert_rejected(
+        "enum String { only }\nfn main(): Nat { 0 }",
+        "is a primitive type",
+    );
+    assert_rejected(
+        "fn bytes_slice(b: Bytes): Bytes { b }",
+        "is a primitive operation",
+    );
+    assert_rejected(
+        "enum Wrap { str_length(Nat) }\nfn main(): Nat { 0 }",
+        "is a primitive operation",
+    );
+}

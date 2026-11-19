@@ -1,12 +1,13 @@
 use std::rc::Rc;
 
+use neo::core::PrimLit;
 use neo::elab::elaborate_program;
 use neo::env::Globals;
 use neo::eval::{force, vapp};
 use neo::parser::parse_source;
 use neo::prelude::new_globals;
 use neo::pretty::show_val;
-use neo::value::V;
+use neo::value::{V, Val};
 
 fn program(src: &str) -> (Globals, neo::surface::Program) {
     let globals = new_globals().expect("prelude");
@@ -649,20 +650,13 @@ fn main(): Nat {
 fn string_literals_and_operations() {
     let globals = define(
         r#"
-fn add(a: Nat, b: Nat): Nat {
-  match a {
-    zero => b
-    succ(k) => succ(add(k, b))
-  }
-}
-
-fn main(): Nat {
-  add(str_length("hello"), str_length("\n\t\\\""))
+fn main(): U32 {
+  str_length("hello") + str_length("\n\t\\\"")
 }
 "#,
     );
     let result = call(&globals, "main", &[]);
-    assert_eq!(as_nat(&globals, &result), 9);
+    assert!(matches!(&*result, Val::PrimLit(PrimLit::U32(9))));
 }
 
 #[test]
@@ -671,6 +665,98 @@ fn string_equality_and_concat() {
         r#"
 fn main(): Bool {
   str_eq(str_concat("ab", "cd"), "abcd")
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert!(matches!(
+        &*result,
+        neo::value::Val::Ctor(name, index, _) if name == "Bool" && *index == 1
+    ));
+}
+
+#[test]
+fn string_slicing_and_concatenation() {
+    let globals = define(
+        r#"
+fn main(): Bool {
+  str_eq(
+    str_concat(str_slice("hello, world", 7, 12), str_concat(" ", str_slice("héllo!", 0, 6))),
+    "world héllo"
+  )
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert!(matches!(
+        &*result,
+        neo::value::Val::Ctor(name, index, _) if name == "Bool" && *index == 1
+    ));
+}
+
+#[test]
+fn string_slices_are_total() {
+    let globals = define(
+        r#"
+fn main(): U32 {
+  str_length(str_slice("abc", 2, 1)) +
+  str_length(str_slice("abc", 99, 0)) +
+  str_length(str_slice("abc", 0, 99))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert!(matches!(&*result, Val::PrimLit(PrimLit::U32(3))));
+}
+
+#[test]
+fn bytes_operations() {
+    let globals = define(
+        r#"
+fn main(): U32 {
+  bytes_get(b"abc", 1) +
+  bytes_length(b"abcd") +
+  bytes_get(b"a", 9) +
+  bytes_length(bytes_concat(bytes_slice(b"hello", 1, 3), b"!"))
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    assert!(matches!(&*result, Val::PrimLit(PrimLit::U32(105))));
+}
+
+#[test]
+fn string_and_bytes_equality_operators() {
+    let globals = define(
+        r#"
+fn strings(): Bool {
+  "abc" == str_concat("ab", "c")
+}
+
+fn bytes(): Bool {
+  b"a\x00" == str_to_bytes("a\x00")
+}
+"#,
+    );
+    for name in ["strings", "bytes"] {
+        let result = call(&globals, name, &[]);
+        assert!(
+            matches!(
+                &*result,
+                neo::value::Val::Ctor(name, index, _) if name == "Bool" && *index == 1
+            ),
+            "`{}` did not evaluate to true",
+            name
+        );
+    }
+}
+
+#[test]
+fn string_to_bytes_preserves_utf8() {
+    let globals = define(
+        r#"
+fn main(): Bool {
+  bytes_eq(str_to_bytes("héllo"), b"h\xc3\xa9llo")
 }
 "#,
     );

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::core::{Branch, PrimOp, PrimOutcome, RcTm};
+use crate::core::{Branch, PrimLit, PrimOp, PrimOutcome, PrimRet, RcTm};
 use crate::env::{GlobalDef, Globals};
 use crate::value::*;
 
@@ -20,11 +20,10 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
         Type(u) => vtype(*u),
         Prop => vprop(),
         PrimTy(t) => vprimty(*t),
-        PrimLit(n) => vprimlit(*n),
-        PrimOp(op, a, b) => {
-            let a = eval(globals, env, a);
-            let b = eval(globals, env, b);
-            reduce_prim(globals, *op, &a, &b)
+        PrimLit(lit) => vprimlit(lit.clone()),
+        PrimOp(op, args) => {
+            let args: Vec<V> = args.iter().map(|a| eval(globals, env, a)).collect();
+            reduce_prim(globals, *op, &args)
         }
         Pi {
             dom, cod, implicit, ..
@@ -137,22 +136,43 @@ pub fn eval_closure(globals: &Globals, closure: &Closure, arg: V) -> V {
     eval(globals, &env, &closure.body)
 }
 
-/// Reduce a primitive operation on two values. Literal operands reduce to a
-/// literal or to a prelude `Bool` constructor; anything else stays neutral.
-pub fn reduce_prim(globals: &Globals, op: PrimOp, a: &V, b: &V) -> V {
-    let a = force(globals, a.clone());
-    let b = force(globals, b.clone());
-    if let (Val::PrimLit(x), Val::PrimLit(y)) = (&*a, &*b) {
-        match op.apply(*x, *y) {
-            PrimOutcome::U32(n) => return vprimlit(n),
-            PrimOutcome::Bool(flag) => {
-                if let Some((enum_name, index)) = globals.bool_ctor(flag) {
-                    return vctor(enum_name, index, Vec::new());
-                }
-            }
+/// Reduce a primitive operation whose arguments are already values. The
+/// operation reduces when every argument is a literal of the expected type;
+/// otherwise it stays neutral.
+pub fn reduce_prim(globals: &Globals, op: PrimOp, args: &[V]) -> V {
+    let forced: Vec<V> = args.iter().map(|a| force(globals, a.clone())).collect();
+    let literals: Option<Vec<PrimLit>> = forced
+        .iter()
+        .map(|v| match &**v {
+            Val::PrimLit(lit) => Some(lit.clone()),
+            _ => None,
+        })
+        .collect();
+    if let Some(literals) = literals
+        && op.accepts(&literals)
+        && let Some(value) = prim_outcome(globals, op.result(), op.apply(&literals))
+    {
+        return value;
+    }
+    vprimop(op, forced)
+}
+
+fn prim_outcome(globals: &Globals, result: PrimRet, outcome: PrimOutcome) -> Option<V> {
+    match outcome {
+        PrimOutcome::U32(n) => Some(vprimlit(PrimLit::U32(n))),
+        PrimOutcome::Bool(flag) => {
+            let (enum_name, index) = globals.bool_ctor(flag)?;
+            Some(vctor(enum_name, index, Vec::new()))
+        }
+        PrimOutcome::Bytes(bytes) => {
+            let lit = if result == PrimRet::Str {
+                PrimLit::Str(bytes)
+            } else {
+                PrimLit::Bytes(bytes)
+            };
+            Some(vprimlit(lit))
         }
     }
-    vprimop(op, a, b)
 }
 
 pub fn apply_pi(globals: &Globals, pi: V, arg: V) -> Option<V> {

@@ -100,8 +100,10 @@ fn conv_neutral(globals: &Globals, level: usize, a: &Neutral, b: &Neutral) -> bo
     match (a, b) {
         (Neutral::Var(i), Neutral::Var(j)) => i == j,
         (Neutral::Global(x), Neutral::Global(y)) => x == y,
-        (Neutral::PrimOp(o1, a1, b1), Neutral::PrimOp(o2, a2, b2)) => {
-            o1 == o2 && conv(globals, level, a1, a2) && conv(globals, level, b1, b2)
+        (Neutral::PrimOp(o1, a1), Neutral::PrimOp(o2, a2)) => {
+            o1 == o2
+                && a1.len() == a2.len()
+                && a1.iter().zip(a2).all(|(x, y)| conv(globals, level, x, y))
         }
         (Neutral::App(f, x), Neutral::App(g, y)) => {
             conv_neutral(globals, level, f, g) && conv(globals, level, x, y)

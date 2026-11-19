@@ -1,23 +1,27 @@
-examples/argument_elision.neo	ok	Nat	5533	0xe7e0dc31d0fde82a
-examples/bool.neo	ok	Bool	3185	0xdc93efadc5f60e06
-examples/closures.neo	ok	Nat	3469	0x6d577fd08e7ea9ff
-examples/enums.neo	ok	Nat	3658	0x108da2b1f6052128
-examples/hello.neo	ok	Nat	3014	0x59abe0f8d071dd3b
-examples/indexed_append.neo	ok	Nat	5515	0xa978bbc4d20028e0
-examples/indexed_match.neo	ok	Nat	3419	0x569485f10db4fb09
-examples/indexed_vec.neo	ok	Nat	4613	0x6721975617d43740
-examples/list.neo	ok	List(Nat)	3625	0x970e1961bf642667
-examples/nat.neo	ok	Nat	3608	0x9f8f5ecb2ef4fe80
-examples/operators.neo	ok	Nat	11839	0x7fcbb3a8da74ae9f
-examples/pattern_matching.neo	ok	Nat	3701	0xb8879149365076bc
-examples/proofs.neo	ok	Nat	3260	0xa4a09ef9067eaf2b
-examples/strings.neo	ok	String	31665	0x0f2d195348c6bafb
-examples/u32.neo	ok	U32	3066	0x2153023cecb64249
+examples/argument_elision.neo	ok	Nat	6011	0x9f192188e54463ab
+examples/bool.neo	ok	Bool	3663	0xfbdbe696484f0004
+examples/bytes.neo	ok	Bytes	3418	0xdbae4b7413a95640
+examples/closures.neo	ok	Nat	3947	0x73da09c9a7f0222e
+examples/enums.neo	ok	Nat	4136	0x02285df34533f37b
+examples/hello.neo	ok	Nat	3498	0x70669ec75999d22e
+examples/indexed_append.neo	ok	Nat	5993	0x3439d2f4374134fd
+examples/indexed_match.neo	ok	Nat	3897	0x3e4393c495e0380c
+examples/indexed_vec.neo	ok	Nat	5091	0x0f6fcc9ab1085378
+examples/list.neo	ok	List(Nat)	4103	0xd06d65142e3ab3b5
+examples/nat.neo	ok	Nat	4086	0x0dd2be846711373f
+examples/operators.neo	ok	Nat	12317	0x0307afbacf728b08
+examples/pattern_matching.neo	ok	Nat	4179	0x8069c8264eef947e
+examples/proofs.neo	ok	Nat	3738	0x1d1cec3a5c790418
+examples/strings.neo	ok	String	3432	0x14d602ab34378537
+examples/u32.neo	ok	U32	3544	0x06588e24dc0aca1f
 tests/corpus/ambiguous_numeral.neo	reject	cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix	-	-
+tests/corpus/bytes_literal_non_ascii.neo	reject	bytes literals must contain only ASCII characters; use `\\x` escapes	-	-
 tests/corpus/chained_comparison.neo	reject	comparison operators are not associative; parenthesize	-	-
 tests/corpus/mixed_operator_types.neo	reject	type mismatch: expected `U32`, found `Nat`	-	-
 tests/corpus/nat_literal_too_large.neo	reject	`Nat` literal is too large (limit 1000000); use a `u32` literal	-	-
 tests/corpus/nested_inductive.neo	reject	`Bad` is not strictly positive in this constructor field (nested inductives are not supported)	-	-
 tests/corpus/non_decreasing.neo	reject	kernel rejected `loop`: recursive call to `loop` is not structurally decreasing; no argument is a strict subterm of a parameter	-	-
+tests/corpus/string_hex_high.neo	reject	`\\x` above `7f` is not valid UTF-8; use a bytes literal	-	-
+tests/corpus/text_primitive_arity.neo	reject	primitive `str_length` takes 1 argument, got 2	-	-
 tests/corpus/u32_literal_too_large.neo	reject	u32 literal is too large	-	-
 tests/corpus/u32_suffix_conflict.neo	reject	literal suffix `u32` conflicts with expected type `Nat`	-	-

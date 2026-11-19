@@ -28,13 +28,11 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
         Tm::Type(u) => format!("Type {}", u),
         Tm::Prop => "Prop".to_string(),
         Tm::PrimTy(t) => t.name().to_string(),
-        Tm::PrimLit(n) => n.to_string(),
-        Tm::PrimOp(op, a, b) => format!(
-            "{}({}, {})",
-            op.name(),
-            term_at(globals, names, a),
-            term_at(globals, names, b)
-        ),
+        Tm::PrimLit(lit) => lit.show(),
+        Tm::PrimOp(op, args) => {
+            let args: Vec<String> = args.iter().map(|a| term_at(globals, names, a)).collect();
+            format!("{}({})", op.name(), args.join(", "))
+        }
         Tm::Pi {
             name,
             dom,
