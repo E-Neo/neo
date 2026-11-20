@@ -25,6 +25,6 @@ fn area(s: Shape): Nat {
   }
 }
 
-fn main(): Nat {
-  area(rect(3, 4))
+fn main(): IO[Nat] {
+  io_pure(area(rect(3, 4)))
 }

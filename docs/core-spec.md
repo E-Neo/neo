@@ -35,6 +35,9 @@ t, A, B ::=
   | s                       primitive string literal
   | b                       primitive bytes literal
   | op(t1, ..., tn)         fully applied primitive operation
+  | IO[A]                   action type
+  | io_pure(t)              pure action
+  | io_bind(t, k)           action sequencing
   | fn(x: A) -> B           dependent function type
   | fn(x: A) => t           lambda
   | t(u)                    application
@@ -92,6 +95,9 @@ v ::=
   | C(v*)                  constructor
   | Eq(A, x, y)
   | refl(x)
+  | IO(v)                  action type
+  | pure(v)                action that produces `v`
+  | bind(m, k)             action that runs `m`, then `k`'s action
   | global c               unapplied function constant
   | neutral
 ```
@@ -306,6 +312,44 @@ Conversion compares primitive types by name and literals by value. An
 operation with a non-literal argument stays neutral, and two neutral operations
 are convertible when their operator and arguments are.
 
+### 4.6 Actions
+
+`IO` is an opaque type former. It has no constructors, no eliminator, and no
+`run` operation in the language:
+
+```text
+Gamma |- A : Type u
+--------------------
+Gamma |- IO[A] : Type u
+
+Gamma |- A : Type u    Gamma |- t <= A
+--------------------------------------
+Gamma |- io_pure(t) : IO[A]
+
+Gamma |- m <= IO[A]
+Gamma |- k <= (x: A) -> IO[B]
+x is not free in B
+------------------------------------------
+Gamma |- io_bind(m, k) : IO[B]
+```
+
+The implicit type arguments of `io_pure` and `io_bind` are inferred; the
+kernel rules above show the fully applied form. The result type of `io_bind`
+may not depend on the value produced by the first action, which is what lets
+the two implicit type arguments be solved from the expected type.
+
+There are **no computation rules**. `io_pure(t)` and `io_bind(m, k)` are
+canonical values of type `IO[A]`, compared structurally: `io_pure(t)` with
+`io_pure(t')` when `t` and `t'` are convertible, and `io_bind(m, k)` with
+`io_bind(m', k')` when the components are convertible. `eval` never executes
+an action, so evaluating an `IO` term cannot perform a side effect.
+
+Canonicity is therefore stated only for types other than `IO`: a closed value
+of an enum, primitive, function, or equality type is canonical, while a closed
+`IO[A]` value may be `io_pure`, `io_bind`, or an opaque host action introduced
+by an `extern` declaration. The program entry point, outside the kernel,
+interprets `main`'s action once; that interpretation is not part of typing.
+
 ## 5. Positivity and enum well-formedness
 
 The kernel re-validates every enum from its stored telescope. These checks are
@@ -485,6 +529,8 @@ There is no mutual recursion and no well-founded recursion in Stage 0.
 - Lambdas compare extensionally.
 - Enums and constructors compare name, tag, and arguments exactly.
 - Equality types compare all three components.
+- `IO` types compare their parameter. Actions compare structurally: `pure`
+  with `pure` and `bind` with `bind`, componentwise.
 - Neutrals compare structurally.
 - A global body may unfold only after it has been sealed as checked.
 
@@ -498,7 +544,8 @@ equation.
 Evaluation is normalisation by evaluation. `quote` is its inverse at a given
 level. A `match` reduces only when the scrutinee is a constructor; otherwise it
 is a neutral. An impossible branch is never selected. `J` reduces only when its
-proof is `refl`.
+proof is `refl`. `IO` terms evaluate to action values but never run: execution
+belongs to the entry point.
 
 Type-level terms, proofs, and equality witnesses are erased by the backend.
 Runtime values are heap-allocated constructor blocks and closures. Erasure is
@@ -515,7 +562,8 @@ Trusted (must be audited):
 - primitive operation semantics (`PrimOp::apply`);
 - the type checker and match refinement in `check.rs`;
 - positivity and enum re-validation;
-- the structural termination checker.
+- the structural termination checker;
+- the `IO` formation, introduction, and conversion rules.
 
 Untrusted (bugs cause rejection or wrong code generation, not a false proof):
 
@@ -526,6 +574,7 @@ Untrusted (bugs cause rejection or wrong code generation, not a false proof):
 - the `nat_*` prelude functions. They are ordinary checked Neo code, not
   primitives;
 - pretty printer and REPL;
+- action execution in the interpreter and in generated components;
 - WASM code generation;
 - the CLI.
 
@@ -542,6 +591,8 @@ These are deliberate Stage 0 limits, not soundness holes:
 - No mutual or nested inductives, no higher inductive types.
 - No proof irrelevance in conversion. Two different proofs of the same
   proposition are not automatically convertible.
+- `IO` is uneliminable inside the language: there is no `run`, no `IO` in
+  indices, and no user-defined effects. There is one world and no effect rows.
 - No general well-founded recursion; only structural recursion.
 - No universe polymorphism: `Type u` levels are concrete.
 - `U32` is eliminated only by its fixed operations; there is no general

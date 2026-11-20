@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use neo::codegen::build_component;
+use neo::codegen::{build_component, build_component_bytes};
 use neo::elab::elaborate_program;
 use neo::parser::parse_source;
 use neo::prelude::new_globals;
@@ -18,6 +18,13 @@ fn build(source: &str, name: &str) -> PathBuf {
     let path = dir.join(format!("{}-{}.wasm", name, std::process::id()));
     build_component(&globals, &path).expect("codegen");
     path
+}
+
+fn build_error(source: &str) -> neo::error::Error {
+    let mut globals = new_globals().expect("prelude");
+    let program = parse_source(source).expect("parse");
+    elaborate_program(&mut globals, &program).expect("elaborate");
+    build_component_bytes(&globals).expect_err("codegen should fail")
 }
 
 fn is_component(path: &Path) -> bool {
@@ -58,8 +65,8 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn main(): Nat {
-  add(2, 3)
+fn main(): IO[Nat] {
+  io_pure(add(2, 3))
 }
 "#,
         "nat",
@@ -78,8 +85,8 @@ fn not(b: Bool): Bool {
   }
 }
 
-fn main(): Bool {
-  not(false)
+fn main(): IO[Bool] {
+  io_pure(not(false))
 }
 "#,
         "bool",
@@ -97,8 +104,8 @@ enum Color {
   blue
 }
 
-fn main(): Color {
-  green
+fn main(): IO[Color] {
+  io_pure(green)
 }
 "#,
         "color",
@@ -117,8 +124,8 @@ fn range(n: Nat): List[Nat] {
   }
 }
 
-fn main(): List[Nat] {
-  range(3)
+fn main(): IO[List[Nat]] {
+  io_pure(range(3))
 }
 "#,
         "list",
@@ -130,8 +137,8 @@ fn main(): List[Nat] {
 fn prints_strings() {
     check(
         r#"
-fn main(): String {
-  "hello, world"
+fn main(): IO[String] {
+  io_pure("hello, world")
 }
 "#,
         "string",
@@ -143,8 +150,8 @@ fn main(): String {
 fn prints_concatenated_strings() {
     check(
         r#"
-fn main(): String {
-  str_concat("hello, ", "world")
+fn main(): IO[String] {
+  io_pure(str_concat("hello, ", "world"))
 }
 "#,
         "string-concat",
@@ -167,8 +174,8 @@ fn addn(n: Nat): fn(x: Nat) -> Nat {
   fn(x: Nat) => add(n, x)
 }
 
-fn main(): Nat {
-  addn(2)(3)
+fn main(): IO[Nat] {
+  io_pure(addn(2)(3))
 }
 "#,
         "closure",
@@ -180,9 +187,9 @@ fn main(): Nat {
 fn supports_first_class_constructors() {
     check(
         r#"
-fn main(): Nat {
+fn main(): IO[Nat] {
   let f = succ
-  f(4)
+  io_pure(f(4))
 }
 "#,
         "ctor",
@@ -201,8 +208,8 @@ fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   }
 }
 
-fn main(): List[Nat] {
-  append(cons((1 : Nat), cons((2 : Nat), nil)), cons((3 : Nat), nil))
+fn main(): IO[List[Nat]] {
+  io_pure(append(cons((1 : Nat), cons((2 : Nat), nil)), cons((3 : Nat), nil)))
 }
 "#,
         "append",
@@ -236,9 +243,9 @@ fn add_zero(a: Nat): add(a, zero) = a {
   }
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   let q = add_zero(3)
-  7
+  io_pure(7)
 }
 "#,
         "proof",
@@ -250,8 +257,8 @@ fn main(): Nat {
 fn builds_u32_arithmetic() {
     check(
         r#"
-fn main(): U32 {
-  6u32 * 7u32 + 0u32 - 1u32
+fn main(): IO[U32] {
+  io_pure(6u32 * 7u32 + 0u32 - 1u32)
 }
 "#,
         "u32",
@@ -263,8 +270,8 @@ fn main(): U32 {
 fn builds_u32_division_by_zero() {
     check(
         r#"
-fn main(): U32 {
-  9u32 / 0u32 + 9u32 % 0u32
+fn main(): IO[U32] {
+  io_pure(9u32 / 0u32 + 9u32 % 0u32)
 }
 "#,
         "u32-divzero",
@@ -280,8 +287,8 @@ fn is_even(n: U32): Bool {
   n % 2u32 == 0u32
 }
 
-fn main(): Bool {
-  is_even(40u32)
+fn main(): IO[Bool] {
+  io_pure(is_even(40u32))
 }
 "#,
         "u32-cmp",
@@ -293,8 +300,8 @@ fn main(): Bool {
 fn builds_nat_operators() {
     check(
         r#"
-fn main(): Nat {
-  ((12 : Nat) & 10) + ((1 : Nat) << 4) + ((20 : Nat) / 6) + ((20 : Nat) % 6)
+fn main(): IO[Nat] {
+  io_pure(((12 : Nat) & 10) + ((1 : Nat) << 4) + ((20 : Nat) / 6) + ((20 : Nat) % 6))
 }
 "#,
         "nat-operators",
@@ -306,8 +313,8 @@ fn main(): Nat {
 fn builds_u32_infix_operators() {
     check(
         r#"
-fn main(): U32 {
-  (20 / 6) + (20 % 6) + (1 << 4) + (12 & 10)
+fn main(): IO[U32] {
+  io_pure((20 / 6) + (20 % 6) + (1 << 4) + (12 & 10))
 }
 "#,
         "u32-infix-operators",
@@ -319,8 +326,8 @@ fn main(): U32 {
 fn builds_string_slicing_and_concatenation() {
     check(
         r#"
-fn main(): String {
-  str_concat(str_slice("hello, world", 7, 12), str_concat(" ", str_slice("héllo!", 0, 6)))
+fn main(): IO[String] {
+  io_pure(str_concat(str_slice("hello, world", 7, 12), str_concat(" ", str_slice("héllo!", 0, 6))))
 }
 "#,
         "string-slice",
@@ -332,11 +339,13 @@ fn main(): String {
 fn builds_bytes_operations() {
     check(
         r#"
-fn main(): U32 {
-  bytes_get(b"abc", 1) +
-  bytes_length(b"abcd") +
-  bytes_get(b"a", 9) +
-  bytes_length(bytes_concat(bytes_slice(b"hello", 1, 3), b"!"))
+fn main(): IO[U32] {
+  io_pure(
+    bytes_get(b"abc", 1) +
+    bytes_length(b"abcd") +
+    bytes_get(b"a", 9) +
+    bytes_length(bytes_concat(bytes_slice(b"hello", 1, 3), b"!"))
+  )
 }
 "#,
         "bytes-ops",
@@ -348,8 +357,8 @@ fn main(): U32 {
 fn builds_bytes_printing() {
     check(
         r#"
-fn main(): Bytes {
-  bytes_concat(b"neo", b"\x00\xff")
+fn main(): IO[Bytes] {
+  io_pure(bytes_concat(b"neo", b"\x00\xff"))
 }
 "#,
         "bytes-print",
@@ -368,8 +377,8 @@ fn List.length[T: Type](xs: List[T]): Nat {
   }
 }
 
-fn main(): String {
-  "hello".slice(0, 4).concat("!")
+fn main(): IO[String] {
+  io_pure("hello".slice(0, 4).concat("!"))
 }
 "#,
         "methods",
@@ -388,9 +397,9 @@ fn List.length[T: Type](xs: List[T]): Nat {
   }
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   let xs: List[Nat] = cons(1, cons(2, cons(3, nil)))
-  xs.length()
+  io_pure(xs.length())
 }
 "#,
         "generic-methods",
@@ -402,8 +411,8 @@ fn main(): Nat {
 fn builds_valid_utf8_conversion() {
     check(
         r#"
-fn main(): Result[String, Utf8Error] {
-  b"hello, \xe2\x82\xac".to_str()
+fn main(): IO[Result[String, Utf8Error]] {
+  io_pure(b"hello, \xe2\x82\xac".to_str())
 }
 "#,
         "utf8-ok",
@@ -415,8 +424,8 @@ fn main(): Result[String, Utf8Error] {
 fn builds_invalid_utf8_conversion() {
     check(
         r#"
-fn main(): Result[String, Utf8Error] {
-  b"ab\xff".to_str()
+fn main(): IO[Result[String, Utf8Error]] {
+  io_pure(b"ab\xff".to_str())
 }
 "#,
         "utf8-err",
@@ -428,11 +437,48 @@ fn main(): Result[String, Utf8Error] {
 fn builds_bytes_utf8_check() {
     check(
         r#"
-fn main(): U32 {
-  bytes_utf8_check(b"abc") + bytes_utf8_check(b"\xf4\x8f\xbf\xbf") * 10u32 + bytes_utf8_check(b"\xf4\x90\x80\x80")
+fn main(): IO[U32] {
+  io_pure(
+    bytes_utf8_check(b"abc") +
+    bytes_utf8_check(b"\xf4\x8f\xbf\xbf") * 10u32 +
+    bytes_utf8_check(b"\xf4\x90\x80\x80")
+  )
 }
 "#,
         "utf8-check",
         "1\n",
+    );
+}
+
+#[test]
+fn builds_io_bind() {
+    check(
+        r#"
+fn inc(m: IO[U32]): IO[U32] {
+  io_bind(m, fn(x: U32) => io_pure(x + 1u32))
+}
+
+fn main(): IO[U32] {
+  inc(inc(io_pure(40u32)))
+}
+"#,
+        "io-bind",
+        "42\n",
+    );
+}
+
+#[test]
+fn rejects_non_io_main() {
+    let error = build_error(
+        r#"
+fn main(): U32 {
+  0u32
+}
+"#,
+    );
+    assert!(
+        error.message.contains("`main` must have type `IO[T]`"),
+        "unexpected error: {}",
+        error.message
     );
 }

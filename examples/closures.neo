@@ -15,6 +15,6 @@ fn twice(f: fn(x: Nat) -> Nat, x: Nat): Nat {
   f(f(x))
 }
 
-fn main(): Nat {
-  twice(addn(2), 3)
+fn main(): IO[Nat] {
+  io_pure(twice(addn(2), 3))
 }

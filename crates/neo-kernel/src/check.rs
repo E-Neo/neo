@@ -93,6 +93,59 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
             }
             prim_result_ty(globals, *op)
         }
+        Io(t) => {
+            let sort = infer_sort(globals, ctx, t)?;
+            match sort {
+                Sort::Type(u) => Ok(vtype(u)),
+                Sort::Prop => Err(Error::new("`IO` expects a type, not a proposition")),
+            }
+        }
+        IoPure(v) => {
+            let ty = infer(globals, ctx, v)?;
+            Ok(vio(ty))
+        }
+        IoBind { m, k } => {
+            let m_ty = infer(globals, ctx, m)?;
+            let m_ty = force(globals, m_ty);
+            let a = match &*m_ty {
+                Val::Io(a) => a.clone(),
+                _ => {
+                    return Err(Error::new(
+                        "`io_bind`: the first argument is not an `IO` action",
+                    ));
+                }
+            };
+            let k_ty = infer(globals, ctx, k)?;
+            let k_ty = force(globals, k_ty);
+            let (dom, closure) = match &*k_ty {
+                Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
+                _ => {
+                    return Err(Error::new(
+                        "`io_bind`: the second argument is not a function",
+                    ));
+                }
+            };
+            if !conv(globals, ctx.level(), &dom, &a) {
+                return Err(Error::new(
+                    "`io_bind`: the function does not accept the action's result type",
+                ));
+            }
+            let cod = force(globals, eval_closure(globals, &closure, vvar(ctx.level())));
+            let b = match &*cod {
+                Val::Io(b) => b.clone(),
+                _ => {
+                    return Err(Error::new(
+                        "`io_bind`: the function must return an `IO` action",
+                    ));
+                }
+            };
+            if occurs(globals, ctx.level(), &b) {
+                return Err(Error::new(
+                    "`io_bind`: the result type may not depend on the produced value",
+                ));
+            }
+            Ok(vio(b))
+        }
         Pi { dom, cod, name, .. } => {
             let dom_sort = infer_sort(globals, ctx, dom)?;
             let dom_v = eval(globals, &ctx.env, dom);
@@ -532,6 +585,7 @@ fn unify_indices(
                 UnifyOutcome::Stuck
             }
         }
+        (Val::Io(a), Val::Io(b)) => unify_indices(globals, level, flexible, solutions, a, b),
         (Val::Prop, Val::Prop) => UnifyOutcome::Ok,
         (Val::PrimTy(a), Val::PrimTy(b)) => {
             if a == b {
@@ -637,6 +691,12 @@ fn bind_flexible(
     UnifyOutcome::Ok
 }
 
+/// Whether a value mentions a context level. Used by the elaborator to reject
+/// a value-dependent `io_bind` result.
+pub fn mentions_level(globals: &Globals, level: usize, value: &V) -> bool {
+    occurs(globals, level, value)
+}
+
 fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
     let value = force(globals, value.clone());
     match &*value {
@@ -655,6 +715,11 @@ fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
         }
         Val::Refl(a) => occurs(globals, var, a),
         Val::Pi(..) | Val::Lam(_) => true,
+        Val::Io(a) => occurs(globals, var, a),
+        Val::Action(a) => match &**a {
+            Action::Pure(v) => occurs(globals, var, v),
+            Action::Bind(m, k) => occurs(globals, var, m) || occurs(globals, var, k),
+        },
         Val::Type(_) | Val::Prop | Val::PrimTy(_) | Val::PrimLit(_) | Val::Glob(_) => false,
     }
 }
@@ -907,6 +972,10 @@ pub fn sort_of_val_in(globals: &Globals, ctx: &Ctx, v: &V) -> Result<Sort> {
             .sort_of_enum(name)
             .ok_or_else(|| Error::new(format!("unknown enum `{}`", name))),
         Val::Eq(_, _, _) => Ok(Sort::Prop),
+        Val::Io(a) => match sort_of_val_in(globals, ctx, a)? {
+            Sort::Type(u) => Ok(Sort::Type(u)),
+            Sort::Prop => Err(Error::new("`IO` expects a type, not a proposition")),
+        },
         Val::Pi(dom, closure, _) => {
             let dom_sort = sort_of_val_in(globals, ctx, dom)?;
             let mut inner = ctx.clone();

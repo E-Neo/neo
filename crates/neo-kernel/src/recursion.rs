@@ -1,5 +1,7 @@
 use crate::check::{self, Ctx};
-use crate::core::{Branch, RcTm, Tm, app, ctor, eq, ind, lam, pi_with, prim_op, rc};
+use crate::core::{
+    Branch, RcTm, Tm, app, ctor, eq, ind, io, io_bind, io_pure, lam, pi_with, prim_op, rc,
+};
 use crate::env::Globals;
 use crate::eval::eval;
 use neo_common::error::{Error, Result};
@@ -99,6 +101,9 @@ fn inline_lets(tm: &RcTm) -> RcTm {
             implicit,
         } => pi_with(name.clone(), inline_lets(dom), inline_lets(cod), *implicit),
         Tm::Ind(name, args) => ind(name.clone(), args.iter().map(inline_lets).collect()),
+        Tm::Io(t) => io(inline_lets(t)),
+        Tm::IoPure(v) => io_pure(inline_lets(v)),
+        Tm::IoBind { m, k } => io_bind(inline_lets(m), inline_lets(k)),
         Tm::Ctor(name, index, args) => {
             ctor(name.clone(), *index, args.iter().map(inline_lets).collect())
         }
@@ -156,6 +161,9 @@ fn count_var(tm: &RcTm, index: usize, depth: usize) -> usize {
         Tm::Ind(_, args) | Tm::Ctor(_, _, args) => {
             args.iter().map(|a| count_var(a, index, depth)).sum()
         }
+        Tm::Io(t) => count_var(t, index, depth),
+        Tm::IoPure(v) => count_var(v, index, depth),
+        Tm::IoBind { m, k } => count_var(m, index, depth) + count_var(k, index, depth),
         Tm::Match {
             motive,
             scrut,
@@ -248,6 +256,12 @@ fn check_occurrences(name: &str, arity: usize, tm: &RcTm) -> Result<()> {
                 check_occurrences(name, arity, arg)?;
             }
             Ok(())
+        }
+        Tm::Io(t) => check_occurrences(name, arity, t),
+        Tm::IoPure(v) => check_occurrences(name, arity, v),
+        Tm::IoBind { m, k } => {
+            check_occurrences(name, arity, m)?;
+            check_occurrences(name, arity, k)
         }
         Tm::Pi { dom, cod, .. } => {
             check_occurrences(name, arity, dom)?;
@@ -424,6 +438,12 @@ fn check_decreasing_tm(
                 check_decreasing_tm(name, arity, arg, env, calls)?;
             }
             Ok(())
+        }
+        Tm::Io(t) => check_decreasing_tm(name, arity, t, env, calls),
+        Tm::IoPure(v) => check_decreasing_tm(name, arity, v, env, calls),
+        Tm::IoBind { m, k } => {
+            check_decreasing_tm(name, arity, m, env, calls)?;
+            check_decreasing_tm(name, arity, k, env, calls)
         }
         Tm::Pi { dom, cod, .. } => {
             check_decreasing_tm(name, arity, dom, env, calls)?;

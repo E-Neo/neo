@@ -112,10 +112,8 @@ fn build_command(args: &[String]) -> Result<()> {
 
 fn run_main(globals: &Globals) -> Result<()> {
     let ty = ensure_main(globals)?;
-    let value = whnf(
-        globals,
-        eval(globals, &Vec::new(), &neo::core::const_("main")),
-    );
+    let action = eval(globals, &Vec::new(), &neo::core::const_("main"));
+    let value = whnf(globals, neo::eval::run_action(globals, &action)?);
     let text = print_value(globals, &value).ok_or_else(|| {
         Error::new(format!(
             "`main` has a type that cannot be printed: `{}`",
@@ -129,18 +127,27 @@ fn run_main(globals: &Globals) -> Result<()> {
 fn ensure_main(globals: &Globals) -> Result<V> {
     let ty = globals
         .get_ty("main")
-        .ok_or_else(|| Error::new("this program needs `fn main(): T`"))?;
+        .ok_or_else(|| Error::new("this program needs `fn main(): IO[T]`"))?;
     let ty_v = force(globals, eval(globals, &Vec::new(), ty));
     if let Val::Pi(..) = &*ty_v {
         return Err(Error::new("`main` must not take parameters"));
     }
-    if !is_printable(globals, &ty_v, &mut Vec::new()) {
+    let result = match &*ty_v {
+        Val::Io(inner) => inner.clone(),
+        _ => {
+            return Err(Error::new(format!(
+                "`main` must have type `IO[T]`, found `{}`",
+                show_val(globals, 0, &ty_v)
+            )));
+        }
+    };
+    if !is_printable(globals, &result, &mut Vec::new()) {
         return Err(Error::new(format!(
             "the result type of `main` is not printable: `{}`",
-            show_val(globals, 0, &ty_v)
+            show_val(globals, 0, &result)
         )));
     }
-    Ok(ty_v)
+    Ok(result)
 }
 
 fn is_printable(globals: &Globals, ty: &V, visiting: &mut Vec<String>) -> bool {
@@ -238,6 +245,9 @@ fn print_value(globals: &Globals, v: &V) -> Option<String> {
         Val::PrimLit(PrimLit::U32(n)) => Some(n.to_string()),
         Val::PrimLit(PrimLit::Str(bytes)) => Some(String::from_utf8_lossy(bytes).into_owned()),
         Val::PrimLit(PrimLit::Bytes(_)) => Some(show_val(globals, 0, &v)),
+        Val::Io(_) => Some(show_val(globals, 0, &v)),
+        // Actions are not run by the REPL, so they have no printable value.
+        Val::Action(_) => Some("<io>".to_string()),
         _ => None,
     }
 }

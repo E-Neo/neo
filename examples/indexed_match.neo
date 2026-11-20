@@ -22,6 +22,6 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
   }
 }
 
-fn main(): Nat {
-  head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil)))
+fn main(): IO[Nat] {
+  io_pure(head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil))))
 }

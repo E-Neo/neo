@@ -33,6 +33,13 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
             let args: Vec<String> = args.iter().map(|a| term_at(globals, names, a)).collect();
             format!("{}({})", op.name(), args.join(", "))
         }
+        Tm::Io(t) => format!("IO[{}]", term_at(globals, names, t)),
+        Tm::IoPure(v) => format!("io_pure({})", term_at(globals, names, v)),
+        Tm::IoBind { m, k } => format!(
+            "io_bind({}, {})",
+            term_at(globals, names, m),
+            term_at(globals, names, k)
+        ),
         Tm::Pi {
             name,
             dom,

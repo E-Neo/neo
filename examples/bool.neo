@@ -15,6 +15,6 @@ fn both(a: Bool, b: Bool): Bool {
   }
 }
 
-fn main(): Bool {
-  both(not(false), true)
+fn main(): IO[Bool] {
+  io_pure(both(not(false), true))
 }

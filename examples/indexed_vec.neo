@@ -43,7 +43,7 @@ fn three(): Vec[Nat, 3] {
   append(two(), vcons(0, 7, vnil))
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   // Try `two()` or `three()` in the REPL to see the vectors.
-  length(three())
+  io_pure(length(three()))
 }

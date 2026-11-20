@@ -73,19 +73,22 @@ wasmtime nat.wasm                    # run the WASI 0.2 component
 The smallest program:
 
 ```neo
-fn main(): Nat {
-  5
+fn main(): IO[Nat] {
+  io_pure(5)
 }
 ```
 
-There are no general I/O functions yet. A program reports its result by
-returning it from `main`; the runtime prints that value, including strings.
+`main` produces an `IO` action. `io_pure(v)` produces `v`; `io_bind(m, k)`
+runs `m` and passes its result to `k`. Host I/O arrives with `extern`
+declarations. The runtime runs `main`'s action once and prints its result,
+including strings.
 
 More examples live in [`examples/`](examples):
 
 | File | Demonstrates | Output |
 | --- | --- | --- |
 | `hello.neo` | minimal program | `5` |
+| `io.neo` | `IO` actions and `io_bind` | `42` |
 | `nat.neo` | structural recursion | `42` |
 | `bool.neo` | booleans, `match` | `true` |
 | `list.neo` | generics, lists | `cons(2, cons(1, cons(0, cons(1, cons(0, nil)))))` |

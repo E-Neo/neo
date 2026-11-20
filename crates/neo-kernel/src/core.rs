@@ -416,6 +416,15 @@ pub enum Tm {
     PrimLit(PrimLit),
     /// A fully applied primitive operation.
     PrimOp(PrimOp, Vec<RcTm>),
+    /// The opaque action type `IO[A]`.
+    Io(RcTm),
+    /// `io_pure(v)`: an action that produces `v`.
+    IoPure(RcTm),
+    /// `io_bind(m, k)`: run `m`, then run the action produced by `k`.
+    IoBind {
+        m: RcTm,
+        k: RcTm,
+    },
     Pi {
         name: String,
         dom: RcTm,
@@ -478,6 +487,18 @@ pub fn prim_op(op: PrimOp, args: Vec<RcTm>) -> RcTm {
     rc(Tm::PrimOp(op, args))
 }
 
+pub fn io(t: RcTm) -> RcTm {
+    rc(Tm::Io(t))
+}
+
+pub fn io_pure(t: RcTm) -> RcTm {
+    rc(Tm::IoPure(t))
+}
+
+pub fn io_bind(m: RcTm, k: RcTm) -> RcTm {
+    rc(Tm::IoBind { m, k })
+}
+
 pub fn app(f: RcTm, a: RcTm) -> RcTm {
     rc(Tm::App(f, a))
 }
@@ -537,6 +558,9 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
         Tm::PrimOp(op, args) => {
             prim_op(*op, args.iter().map(|a| shift(a, delta, cutoff)).collect())
         }
+        Tm::Io(t) => io(shift(t, delta, cutoff)),
+        Tm::IoPure(v) => io_pure(shift(v, delta, cutoff)),
+        Tm::IoBind { m, k } => io_bind(shift(m, delta, cutoff), shift(k, delta, cutoff)),
         Tm::Pi {
             name,
             dom,
@@ -626,6 +650,12 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
             args.iter()
                 .map(|a| subst_at(a, index, replacement, depth))
                 .collect(),
+        ),
+        Tm::Io(t) => io(subst_at(t, index, replacement, depth)),
+        Tm::IoPure(v) => io_pure(subst_at(v, index, replacement, depth)),
+        Tm::IoBind { m, k } => io_bind(
+            subst_at(m, index, replacement, depth),
+            subst_at(k, index, replacement, depth),
         ),
         Tm::Pi {
             name,
@@ -723,6 +753,12 @@ fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> Rc
                 .map(|a| abstract_at(target, replacement, a, depth))
                 .collect(),
         ),
+        Tm::Io(t) => io(abstract_at(target, replacement, t, depth)),
+        Tm::IoPure(v) => io_pure(abstract_at(target, replacement, v, depth)),
+        Tm::IoBind { m, k } => io_bind(
+            abstract_at(target, replacement, m, depth),
+            abstract_at(target, replacement, k, depth),
+        ),
         Tm::Pi {
             name,
             dom,
@@ -809,6 +845,11 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
         (Tm::PrimLit(a), Tm::PrimLit(b)) => a == b,
         (Tm::PrimOp(o1, a1), Tm::PrimOp(o2, a2)) => {
             o1 == o2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| same_tm(x, y))
+        }
+        (Tm::Io(a), Tm::Io(b)) => same_tm(a, b),
+        (Tm::IoPure(a), Tm::IoPure(b)) => same_tm(a, b),
+        (Tm::IoBind { m: m1, k: k1 }, Tm::IoBind { m: m2, k: k2 }) => {
+            same_tm(m1, m2) && same_tm(k1, k2)
         }
         (
             Tm::Pi {

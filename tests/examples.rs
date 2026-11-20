@@ -34,9 +34,11 @@ fn examples_elaborate_and_evaluate() {
             path.display()
         );
 
+        let action = eval(&globals, &Vec::new(), &neo::core::const_("main"));
         let value = force(
             &globals,
-            eval(&globals, &Vec::new(), &neo::core::const_("main")),
+            neo::eval::run_action(&globals, &action)
+                .unwrap_or_else(|e| panic!("{}: {}", path.display(), e)),
         );
         assert!(
             matches!(&*value, Val::Ctor(..) | Val::PrimLit(..)),

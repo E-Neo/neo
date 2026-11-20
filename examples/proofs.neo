@@ -22,8 +22,8 @@ fn add_zero(a: Nat): add(a, zero) = a {
   }
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   // The proof is checked now and erased at run time.
   let proof = add_zero(3)
-  7
+  io_pure(7)
 }

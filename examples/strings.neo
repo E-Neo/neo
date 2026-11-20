@@ -1,6 +1,6 @@
 // `String` is a primitive UTF-8 byte sequence. The prelude provides its
 // methods: `length`, `slice`, `concat`, and `to_bytes`.
 // `main` prints string results as text in both the interpreter and `neo build`.
-fn main(): String {
-  "hello, world".slice(7, 12).concat("!")
+fn main(): IO[String] {
+  io_pure("hello, world".slice(7, 12).concat("!"))
 }

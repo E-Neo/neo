@@ -1169,7 +1169,11 @@ impl<'g> Codegen<'g> {
         let print_bytes = self.print_bytes_fn();
         let fin = {
             let mut fc = FnCompiler::new(self, 0);
+            // `main` evaluates to an action; run it before printing its result.
             fc.emit(I::Call(defined(main_id)));
+            let action = fc.local();
+            fc.emit(I::LocalSet(action));
+            emit_call_closure(&mut fc, action, None);
             fc.emit(I::Call(defined(printer_id)));
             fc.emit(I::I32Const(nl_ptr));
             fc.emit(I::I32Const(nl_len));
@@ -1189,12 +1193,13 @@ impl<'g> Codegen<'g> {
             .globals
             .get_ty("main")
             .cloned()
-            .ok_or_else(|| Error::new("this program needs `fn main(): T`"))?;
+            .ok_or_else(|| Error::new("this program needs `fn main(): IO[T]`"))?;
         let main_ty = force(self.globals, eval(self.globals, &Vec::new(), &main_ty_tm));
-        if matches!(&*main_ty, Val::Pi(..)) {
-            return Err(Error::new("`main` must not take parameters"));
-        }
-        let printer_id = self.printer_for(&main_ty)?;
+        let main_result = match &*main_ty {
+            Val::Io(inner) => inner.clone(),
+            _ => return Err(Error::new("`main` must have type `IO[T]`")),
+        };
+        let printer_id = self.printer_for(&main_result)?;
         let main_id = match self.ensure_fn("main")? {
             FnRef::Zero(id) => id,
             FnRef::Closure(_) => return Err(Error::new("`main` must not take parameters")),
@@ -1330,6 +1335,35 @@ impl<'g> Codegen<'g> {
 
         Ok(module.finish())
     }
+}
+
+/// The environment of a thunk: its captured values live in the closure block's
+/// fields, in the order they were captured. A thunk's ignored argument is not
+/// part of the term's context.
+fn captured_env(count: usize) -> Vec<Place> {
+    (0..count)
+        .map(|j| Place {
+            local: 0,
+            offset: Some(8 + 4 * j as u32),
+        })
+        .collect()
+}
+
+/// Call a closure value. Actions ignore the argument, so `arg` is `None`; a
+/// continuation receives the produced value.
+fn emit_call_closure(fc: &mut FnCompiler<'_, '_>, closure: u32, arg: Option<u32>) {
+    let ty = fc.cg.closure_ty();
+    fc.emit(I::LocalGet(closure));
+    match arg {
+        Some(arg) => fc.emit(I::LocalGet(arg)),
+        None => fc.emit(I::I32Const(0)),
+    }
+    fc.emit(I::LocalGet(closure));
+    fc.emit(I::I32Load(mem(4)));
+    fc.emit(I::CallIndirect {
+        type_index: ty,
+        table_index: 0,
+    });
 }
 
 fn emit_min_u(fc: &mut FnCompiler<'_, '_>, target: u32, limit: u32) {
@@ -1485,6 +1519,9 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
                 self.emit(I::I32Const(ptr));
             }
             Tm::PrimOp(op, args) => self.compile_prim_op(*op, args)?,
+            Tm::Io(_) => self.emit(I::I32Const(0)),
+            Tm::IoPure(v) => self.compile_thunk(v)?,
+            Tm::IoBind { m, k } => self.compile_bind(m, k)?,
             Tm::Const(name) => self.compile_const(name)?,
             Tm::Ctor(enum_name, index, args) => self.compile_ctor(enum_name, *index, args)?,
             Tm::App(f, a) => self.compile_app(f, a)?,
@@ -1727,6 +1764,58 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         Ok(())
     }
 
+    /// Compile a term into a zero-argument thunk. The closure takes an ignored
+    /// argument but the body is compiled in the current environment, not under
+    /// a binder.
+    fn compile_thunk(&mut self, body: &RcTm) -> Result<()> {
+        let caps = self.env.clone();
+        let (id, slot) = self.cg.new_lambda_func();
+        self.make_closure(slot, &caps);
+
+        let fin = {
+            let mut child = FnCompiler::new(&mut *self.cg, 2);
+            child.env = captured_env(caps.len());
+            child.compile(body)?;
+            child.finish()
+        };
+        self.cg.set_body(id, fin);
+        Ok(())
+    }
+
+    /// Compile `io_bind(m, k)` into a thunk that runs `m`, applies `k`, and
+    /// runs the resulting action.
+    fn compile_bind(&mut self, action: &RcTm, next: &RcTm) -> Result<()> {
+        let caps = self.env.clone();
+        let (id, slot) = self.cg.new_lambda_func();
+        self.make_closure(slot, &caps);
+
+        let fin = {
+            let mut child = FnCompiler::new(&mut *self.cg, 2);
+            child.env = captured_env(caps.len());
+
+            // Run the first action; the argument is ignored.
+            child.compile(action)?;
+            let first = child.local();
+            child.emit(I::LocalSet(first));
+            emit_call_closure(&mut child, first, None);
+            let produced = child.local();
+            child.emit(I::LocalSet(produced));
+
+            // Apply the continuation to the produced value, then run the
+            // action it returns.
+            child.compile(next)?;
+            let continuation = child.local();
+            child.emit(I::LocalSet(continuation));
+            emit_call_closure(&mut child, continuation, Some(produced));
+            let deferred = child.local();
+            child.emit(I::LocalSet(deferred));
+            emit_call_closure(&mut child, deferred, None);
+            child.finish()
+        };
+        self.cg.set_body(id, fin);
+        Ok(())
+    }
+
     fn compile_lambda(&mut self, body: &RcTm) -> Result<()> {
         let caps = self.env.clone();
         let (id, slot) = self.cg.new_lambda_func();
@@ -1891,6 +1980,8 @@ fn value_key(v: &V) -> String {
             format!("Eq({},{},{})", value_key(a), value_key(b), value_key(c))
         }
         Val::Refl(a) => format!("Refl({})", value_key(a)),
+        Val::Io(a) => format!("IO<{}>", value_key(a)),
+        Val::Action(_) => "Action".to_string(),
         Val::Neutral(n) => match &**n {
             crate::value::Neutral::Var(i) => format!("Var{}", i),
             crate::value::Neutral::Global(g) => format!("Global{}", g),
@@ -1913,6 +2004,8 @@ fn contains_neutral(v: &V) -> bool {
         Val::Refl(a) => contains_neutral(a),
         Val::Pi(dom, _, _) => contains_neutral(dom),
         Val::Lam(_) => false,
+        Val::Io(a) => contains_neutral(a),
+        Val::Action(_) => true,
         Val::Type(_) | Val::Prop | Val::PrimTy(_) | Val::PrimLit(_) | Val::Glob(_) => false,
     }
 }

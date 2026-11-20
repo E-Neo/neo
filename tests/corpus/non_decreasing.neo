@@ -2,6 +2,6 @@ fn loop(n: Nat): Nat {
   loop(n)
 }
 
-fn main(): Nat {
-  loop(0)
+fn main(): IO[Nat] {
+  io_pure(loop(0))
 }

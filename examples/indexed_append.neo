@@ -32,6 +32,6 @@ fn append[T: Type, n: Nat, m: Nat](
   }
 }
 
-fn main(): Nat {
-  length(append(vcons(1, (10 : Nat), vcons(0, (20 : Nat), vnil)), vcons(0, (30 : Nat), vnil)))
+fn main(): IO[Nat] {
+  io_pure(length(append(vcons(1, (10 : Nat), vcons(0, (20 : Nat), vnil)), vcons(0, (30 : Nat), vnil))))
 }

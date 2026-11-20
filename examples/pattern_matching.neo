@@ -26,6 +26,6 @@ fn sample(): Tree {
   node(node(leaf, leaf), node(leaf, node(leaf, leaf)))
 }
 
-fn main(): Nat {
-  count(sample())
+fn main(): IO[Nat] {
+  io_pure(count(sample()))
 }

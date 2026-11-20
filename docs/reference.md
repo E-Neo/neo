@@ -40,8 +40,8 @@ that are planned but not implemented are listed in
 The smallest Neo program:
 
 ```neo
-fn main(): Nat {
-  5
+fn main(): IO[Nat] {
+  io_pure(5)
 }
 ```
 
@@ -55,8 +55,10 @@ wasmtime hello.wasm                # runs the component: prints 5
 
 `neo build` writes `hello.wasm` next to the input by default.
 
-There are no general I/O functions yet. A program communicates its result by
-returning it from `main`; Neo prints that value, including `String` results.
+`main` produces an `IO` action. `io_pure(v)` is an action that produces `v`;
+`io_bind(m, k)` runs `m` and passes its result to the function `k`. Stage 0 has
+no host I/O yet, so these two forms are the whole API for now. Neo runs
+`main`'s action once and prints its result, including `String` results.
 
 ---
 
@@ -80,7 +82,7 @@ neo -V | --version                   show the version
 
 Details:
 
-- `neo FILE` requires `fn main(): T`; interpreting a library-only file is an
+- `neo FILE` requires `fn main(): IO[T]`; interpreting a library-only file is an
   error.
 - `neo build` also requires `main`, and `T` must be a printable data type
   (see [section 13](#13-printing-and-building-for-wasi)).
@@ -107,7 +109,7 @@ and run to the end of the line:
 
 ```neo
 // This is a comment.
-fn main(): Nat { 5 }  // So is this.
+fn main(): IO[Nat] { io_pure(5) }  // So is this.
 ```
 
 There are no block comments. There are no semicolons.
@@ -182,10 +184,10 @@ There is no default. A numeral in a position with no expected type is rejected:
 
 ```neo
 fn id[T: Type](x: T): T { x }
-fn main(): Nat { id(42) }          // error
-fn main(): U32 { id(42u32) }       // ok
-fn main(): Nat { id[Nat](42) }     // ok
-fn main(): Nat { id((42 : Nat)) }  // ok
+fn main(): IO[Nat] { io_pure(id(42)) }          // error
+fn main(): IO[U32] { io_pure(id(42u32)) }       // ok
+fn main(): IO[Nat] { io_pure(id[Nat](42)) }     // ok
+fn main(): IO[Nat] { io_pure(id((42 : Nat))) }  // ok
 ```
 
 A literal with the `u32` suffix pins the type to `U32`:
@@ -367,6 +369,20 @@ for a byte buffer with O(1) length and slicing; slicing allocates only a
 descriptor, while concatenation allocates a fresh buffer. All three primitive
 types live in `Type 0`.
 
+### Action types
+
+`IO[T]` is an opaque type of deferred actions:
+
+```neo
+IO[U32]
+IO[String]
+IO[List[Nat]]
+```
+
+`IO[T]` lives in the same universe as `T`. It has no constructors, no matcher,
+and no `run`; an action is built with `io_pure(v)` or `io_bind(m, k)`. The
+runtime runs `main`'s action once. `T` must be a type, not a proposition.
+
 ### Equality types
 
 ```neo
@@ -464,9 +480,9 @@ fn five(): Maybe[Nat] {
   some(5)
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   let m = five()
-  0
+  io_pure(0)
 }
 ```
 
@@ -640,7 +656,7 @@ fn add(a: Nat, b: Nat): Nat {
 ```
 
 - Parentheses are always required for explicit parameters, including when
-  there are none: `fn main(): Nat { ... }`.
+  there are none: `fn main(): IO[Nat] { ... }`.
 - The body is always a block and must end in an expression. There is no
   `return` keyword.
 - Parameter types and the result type may depend on earlier parameters:
@@ -670,10 +686,10 @@ fn add(a: Nat, b: Nat): Nat {
   }
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   let x: Nat = 2
   let y: Nat = 3
-  add(x, y)
+  io_pure(add(x, y))
 }
 ```
 
@@ -693,9 +709,9 @@ fn main(): Nat {
 A parameterised constructor needs a known result type. Annotate the binding:
 
 ```neo
-fn main(): Nat {
+fn main(): IO[Nat] {
   let m: List[Nat] = cons(5, nil)
-  0
+  io_pure(0)
 }
 ```
 
@@ -706,9 +722,9 @@ fn five(): List[Nat] {
   cons(5, nil)
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   let m = five()
-  0
+  io_pure(0)
 }
 ```
 
@@ -798,8 +814,8 @@ fn apply(f: fn(x: Nat) -> Nat, x: Nat): Nat {
   f(x)
 }
 
-fn main(): Nat {
-  apply(fn(y: Nat) => succ(y), 3)
+fn main(): IO[Nat] {
+  io_pure(apply(fn(y: Nat) => succ(y), 3))
 }
 ```
 
@@ -915,8 +931,8 @@ If both operands are bare numerals and there is no expected numeric type, the
 operator is rejected:
 
 ```neo
-fn main(): Bool { 1 < 2 }     // error: cannot infer the numeric type
-fn main(): Bool { 1u32 < 2 }  // ok
+fn main(): IO[Bool] { io_pure(1 < 2) }     // error: cannot infer the numeric type
+fn main(): IO[Bool] { io_pure(1u32 < 2) }  // ok
 ```
 
 `==` and `!=` are boolean equality. They are not the equality proposition; that
@@ -1264,14 +1280,14 @@ At run time, types and type-level terms carry no information. Equality proofs
 and `J` compile to their `refl` case. A proof can be bound and ignored:
 
 ```neo
-fn main(): Nat {
+fn main(): IO[Nat] {
   let proof = add_zero(3)
-  7
+  io_pure(7)
 }
 ```
 
 Proposition-enum values such as `trivial` are ordinary runtime values at
-Stage 0; this is why `fn main(): True { trivial }` can print `trivial`.
+Stage 0; this is why `fn main(): IO[True] { io_pure(trivial) }` can print `trivial`.
 
 ### Proof irrelevance
 
@@ -1543,8 +1559,9 @@ Notes:
 - `String` and `Bytes` literals and operations are primitive; their public
   surface is the method set in [text methods](#text-methods).
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
-- `Option` and `Result` are ordinary enums. `main` may return either; both
-  backends print constructors as `some(3)`, `ok("x")`, or `err(invalid_utf8(2))`.
+- `Option` and `Result` are ordinary enums. `main`'s action may produce either;
+  both backends print constructors as `some(3)`, `ok("x")`, or
+  `err(invalid_utf8(2))`.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
 - Constructor names are global. Avoid `and` if you also want a Boolean
   conjunction function; name it `both` instead.
@@ -1560,15 +1577,15 @@ Notes:
 
 ### Requirements for `main`
 
-`main` must be a `fn` declaration with **no parameters**:
+`main` must be a `fn` declaration with **no parameters** and type `IO[T]`:
 
 ```neo
-fn main(): Nat {
-  5
+fn main(): IO[U32] {
+  io_pure(0u32)
 }
 ```
 
-Its result type must be printable.
+`T` must be printable.
 
 A type is printable when it is:
 
@@ -1593,8 +1610,8 @@ interpreter and `neo build`:
 the result type of `main` is not printable: `Vec[Nat, 2]`
 ```
 
-A `main` returning a function type is currently reported as
-`` `main` must not take parameters ``; either way, it is not buildable.
+A `main` whose type is not `IO[T]` is rejected with
+`` `main` must have type `IO[T]` ``.
 
 ### Printed form
 
@@ -1626,7 +1643,8 @@ The runtime prints one newline after the value.
 - export: `wasi:cli/run@0.2.9#run`;
 - imports: `wasi:cli/stdout@0.2.9` and `wasi:io/streams@0.2.9` for printing;
 - memory is exported;
-- the program returns exit code 0 after printing.
+- the runtime runs `main`'s action once, prints the produced value, and returns
+  exit code 0.
 
 Run it with any WASI 0.2 runtime:
 
@@ -1641,8 +1659,9 @@ remain ordinary values and can be printed. The runtime allocates with a bump
 allocator; memory grows on demand. There is no garbage collector and no
 reference counting.
 
-There is no user-facing I/O API yet: a program cannot read input, open files,
-or print custom strings.
+The only I/O API in this milestone is `io_pure` and `io_bind`. Host
+operations (`argv`, standard input, files, standard error) arrive with
+`extern` declarations.
 
 ---
 
@@ -1787,6 +1806,9 @@ Notes:
 - A postfix `.name(args)` is a method call. It requires the argument list,
   even when the method takes none: `s.length()`. It cannot be partially
   applied or used as a value.
+- `IO[T]`, `io_pure(e)`, and `io_bind(m, k)` are built-in forms. `IO` takes one
+  type in `[]`; the two operations take their arguments in `()`. Their names
+  are reserved and cannot be redeclared at the top level.
 
 ---
 
@@ -1851,9 +1873,9 @@ Common messages:
 | `a match on an equality proof must use the pattern refl` | Equality matches have one `refl`/`_` arm. |
 | `recursive call ... is not structurally decreasing ...` | Termination check failed. |
 | `... is not strictly positive ...` | Positivity check failed. |
-| `this program needs fn main(): T` | The file has no `main`. |
-| `main must not take parameters` | `main` was declared with parameters, or returns a function type. |
-| `the result type of main is not printable: ...` | Pick a printable result type. |
+| `this program needs fn main(): IO[T]` | The file has no `main`. |
+| `main must have type IO[T]` | `main` was declared with parameters or another result type. |
+| `the result type of main is not printable: ...` | Pick a printable result type for the action. |
 
 ---
 
@@ -1916,8 +1938,8 @@ fn mul(a: Nat, b: Nat): Nat {
   }
 }
 
-fn main(): Nat {
-  mul(6, 7)
+fn main(): IO[Nat] {
+  io_pure(mul(6, 7))
 }
 ```
 
@@ -1942,8 +1964,8 @@ fn both(a: Bool, b: Bool): Bool {
   }
 }
 
-fn main(): Bool {
-  both(not(false), true)
+fn main(): IO[Bool] {
+  io_pure(both(not(false), true))
 }
 ```
 
@@ -1968,8 +1990,8 @@ fn range(n: Nat): List[Nat] {
   }
 }
 
-fn main(): List[Nat] {
-  append(range(3), range(2))
+fn main(): IO[List[Nat]] {
+  io_pure(append(range(3), range(2)))
 }
 ```
 
@@ -1995,8 +2017,8 @@ fn twice(f: fn(x: Nat) -> Nat, x: Nat): Nat {
   f(f(x))
 }
 
-fn main(): Nat {
-  twice(addn(2), 3)
+fn main(): IO[Nat] {
+  io_pure(twice(addn(2), 3))
 }
 ```
 
@@ -2021,7 +2043,7 @@ fn area(s: Shape): Nat {
 }
 ```
 
-With `main` returning `area(rect(3, 4))`, the output is `12`.
+With `main` returning `io_pure(area(rect(3, 4)))`, the output is `12`.
 
 ### Equality proofs
 
@@ -2037,9 +2059,9 @@ fn add_zero(a: Nat): add(a, zero) = a {
   }
 }
 
-fn main(): Nat {
+fn main(): IO[Nat] {
   let proof = add_zero(3)
-  7
+  io_pure(7)
 }
 ```
 
@@ -2084,14 +2106,14 @@ fn three(): Vec[Nat, 3] {
   append(two(), vcons(0, 7, vnil))
 }
 
-fn main(): Nat {
-  length(three())
+fn main(): IO[Nat] {
+  io_pure(length(three()))
 }
 ```
 
 The REPL can display `two()` as `vcons(1, 4, vcons(0, 3, vnil))`. The program
-builds because `main` returns `Nat`; a `main` returning `Vec` itself is not
-printable. `length` matches on its implicit index `n`; refinement learns `n` is
+builds because `main`'s action produces `Nat`; a `main` producing `Vec` itself
+is not printable. `length` matches on its implicit index `n`; refinement learns `n` is
 `zero` or `succ(m)` in the two branches, which is what makes the recursive call
 `length(xs)` well typed. `append` learns `n := succ(k)` in its `vcons` branch.
 Output: `3`.
@@ -2114,8 +2136,8 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
 
 The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
 The `m` field is refined to `n`, which gives `xs` the type `Vec[Nat, n]`. With
-`main` returning `head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil)))`, the
-output is `4`. The ascriptions are needed because `head`'s type parameters are
+`main` returning `io_pure(head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil))))`,
+the output is `4`. The ascriptions are needed because `head`'s type parameters are
 inferred, so the elements have no expected type of their own.
 
 `examples/pattern_matching.neo` shows nested patterns and multiple arms for one
@@ -2157,8 +2179,8 @@ fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, 
   }
 }
 
-fn main(): Nat {
-  length(append(v1(), v2()))
+fn main(): IO[Nat] {
+  io_pure(length(append(v1(), v2())))
 }
 ```
 
@@ -2170,8 +2192,8 @@ remaining arguments determine the arguments to `length`. Output: `3`.
 `examples/strings.neo` slices and concatenates strings:
 
 ```neo
-fn main(): String {
-  "hello, world".slice(7, 12).concat("!")
+fn main(): IO[String] {
+  io_pure("hello, world".slice(7, 12).concat("!"))
 }
 ```
 
@@ -2185,8 +2207,8 @@ world!
 `examples/bytes.neo` builds a byte sequence:
 
 ```neo
-fn main(): Bytes {
-  b"neo".concat(b"\x00\xff")
+fn main(): IO[Bytes] {
+  io_pure(b"neo".concat(b"\x00\xff"))
 }
 ```
 

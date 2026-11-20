@@ -1,5 +1,5 @@
 // `Bytes.to_str` validates UTF-8 and returns `Result[String, Utf8Error]`.
 // The error carries the byte index where the first invalid sequence starts.
-fn main(): Result[String, Utf8Error] {
-  b"neo \xe2\x82\xac".to_str()
+fn main(): IO[Result[String, Utf8Error]] {
+  io_pure(b"neo \xe2\x82\xac".to_str())
 }

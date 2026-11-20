@@ -8,7 +8,8 @@ This document records the scope, the decisions that shape it, and the order of
 work. Milestones **M0–M4a** are implemented: the decision record, the
 deterministic corpus oracle, the primitive `U32` layer, the surface-syntax
 revision, primitive `String`/`Bytes`, receiver-keyed methods, and
-`Option`/`Result` with checked UTF-8 conversion.
+`Option`/`Result` with checked UTF-8 conversion. The first I/O step, **M4b.1**,
+adds the `IO` modality and the `main(): IO[T]` entry point.
 
 ## 1. Stages and gates
 
@@ -38,7 +39,7 @@ commits and design notes.
 | D2 | **Integers.** One primitive `U32`: unboxed `i32`, wrapping `+ - *`, total `/ %` (zero divisor yields `0`), low-five-bit shifts, comparisons to `Bool`. `Nat` remains for proofs and indices; no automatic conversion. |
 | D3 | **Text and bytes.** Primitive `String` (immutable UTF-8 with O(1) length and slicing) and `Bytes` (immutable byte sequence). Output is built as a chunk list plus one `concat`. No mutation and therefore no ownership design. |
 | D4 | **Collections.** `Option`, `Result`, and `Ordering` are prelude enums. `Map[K, V]` is written in Neo as a size-balanced tree; it is not a primitive. |
-| D5 | **I/O.** `argv`, `stdin.read_all`, `file.read`, `file.write`, `stderr.write`, all total and returning `Result[T, IoError]`. `main` returns `U32` as the exit code. The WIT world grows to `wasi:cli/environment`, `wasi:cli/stderr`, `wasi:cli/exit`, `wasi:filesystem/{preopens,types}`, `wasi:io/streams`. |
+| D5 | **I/O is an `IO` modality.** Effectful operations have type `IO[T]`, not `Result[T, IoError]`: `argv`, `stdin.read_all`, `file.read`, `file.write`, and `stderr.write` are `IO` actions that convert host errors inside the action, and `main` has type `IO[U32]`. Its value is printed; M4b.4 makes it the process exit status. The WIT world grows to `wasi:cli/environment`, `wasi:cli/stderr`, `wasi:cli/exit`, `wasi:filesystem/{preopens,types}`, `wasi:io/streams`. |
 | D6 | **Loops.** No new surface form. Structural recursion only; WASM `return_call` is emitted for tail-position self calls. The compiler is written accumulator-style. |
 | D7 | **Memory.** Per-phase arenas plus size-class free lists in the generated runtime. No GC or reference counting in v1; data is acyclic. |
 | D8 | **Kernel totality.** `eval` gets a deterministic fuel budget (constant plus term-size allowance) and reports `normalization budget exceeded`. Where Stage 0 diverges, the harness records a rejection class. |
@@ -62,9 +63,10 @@ commits and design notes.
 | D26 | **No classes or method values.** Methods are not values: `xs.length` is invalid and a call must supply every explicit argument, including `()`. There is no unqualified overloading, no type classes or instances, and no user-defined operator overloading. `==`/`!=` remain fixed. |
 | D27 | **Modules use `::`.** Qualified module access is `M::f(x)`; `.` is reserved for method calls and method declarations. This removes the ambiguity between `M.f(x)` and a method on a value named `M`. |
 | D28 | **Internal primitives.** The `u32_*` operations are the kernel/operator implementation and cannot be written in a program; using one reports the corresponding operator. Text operations remain callable as low-level `str_*`/`bytes_*` builtins, with the prelude methods as the public surface. |
-| D29 | **`Option`, `Result`, and `Utf8Error` are prelude enums.** `Option[T]` has `none` and `some(T)`; `Result[T, E]` has `ok(T)` and `err(E)`; `Utf8Error` has `invalid_utf8(U32)`. They are ordinary inductives with no special typing or printing rules, so `main` may return any of them. |
+| D29 | **`Option`, `Result`, and `Utf8Error` are prelude enums.** `Option[T]` has `none` and `some(T)`; `Result[T, E]` has `ok(T)` and `err(E)`; `Utf8Error` has `invalid_utf8(U32)`. They are ordinary inductives with no special typing or printing rules, so `main`'s action may produce any of them. |
 | D30 | **Checked UTF-8.** `bytes_utf8_check` returns `0` for valid bytes and otherwise the 1-based index of the first byte of the first invalid sequence; `str_from_bytes` is the unchecked inverse of `str_to_bytes`. `Bytes.to_str` combines them into `Result[String, Utf8Error]`, whose error carries the 0-based start of the offending sequence. Validation is strict: overlong forms, surrogates, code points above `U+10FFFF`, and truncated sequences are rejected. |
-| D31 | **Primitive results stay primitive.** A primitive operation returns only a primitive type, so structured results are assembled in Neo. `Bytes.to_str` is the model: a `U32` check code plus a prelude `match`. I/O that returns `List`, `Option`, or another inductive needs extern declarations; that mechanism is deferred past M4. |
+| D31 | **Primitive results stay primitive.** A primitive operation returns only a primitive type, so structured results are assembled in Neo. `Bytes.to_str` is the model: a `U32` check code plus a prelude `match`. This also applies to `IO`: a primitive cannot return an action. Host functions that produce structured results are declared `extern` with an `IO` type and are introduced in M4b.2. |
+| D32 | **`IO` is the effect design.** `IO[T]` is a type former with no constructors, no eliminator, and no surface `run`. The kernel provides `io_pure : {A} -> A -> IO[A]` and `io_bind : {A,B} -> IO[A] -> (A -> IO[B]) -> IO[B]`; neither has a computation rule, so actions are compared structurally. `extern` declarations are typed in `IO`, and only the program entry point interprets `main`'s action, once. This keeps every data type canonical: no effectful term is ever a stuck neutral at a data type, and no primitive smuggles an action through a status-code side channel. Effect rows were rejected as unnecessary, and a world-token model was rejected because Neo has no linearity. |
 
 ## 3. The `Neo-B` subset
 
@@ -76,7 +78,7 @@ by the Stage 1 build itself.
 | --- | --- | --- |
 | B0 | enums, `fn`, `match` with nested patterns, implicit `[]` parameters, unary `Nat` | exists |
 | B1 | `U32`, primitive `String`/`Bytes`, `List`, `Option`, `Result`, `Ordering`, `Map`, `Bool` | M2, M3, M7 |
-| B2 | first-class functions and closures, indexed enums, `use`/modules, file and argv I/O | M6–M8 |
+| B2 | first-class functions and closures, indexed enums, `use`/modules, file and argv I/O | M4b, M6 |
 | B3 | everything the elaborator needs: implicit inference, block and `match` type preservation, universe levels | M10 |
 
 Stage 1 deliberately avoids: tactics (there are none), `Exists`-heavy
@@ -100,7 +102,10 @@ Parity against Stage 0 is added by M1 and applies from then on.
 | M3 | Primitive `String`/`Bytes` and literal lowering | Corpus green; prelude migrated | ~900 Rust |
 | M3.5 | Receiver-keyed methods; `u32_*` retired from the surface | Method tests green; corpus green | ~500 Rust + ~150 Neo |
 | M4a | `Option`, `Result`, `Utf8Error`; checked `Bytes.to_str` | Valid and invalid inputs agree in both backends | ~250 Rust + ~60 Neo |
-| M4b | I/O and world growth, `main(): U32` | File-reading program runs under `wasmtime` | ~700 Rust |
+| M4b.1 | `IO[T]`, `io_pure`/`io_bind`, `main(): IO[T]` | `fn main(): IO[U32] { io_pure(0) }` agrees in both backends | ~250 Rust |
+| M4b.2 | `extern fn ... = "wasi:...#name"`, explicit imports, host-built results (`stderr.write`) | External write runs under `wasmtime`; interpreter parity where possible | ~200 Rust |
+| M4b.3 | World growth: `argv`, `stdin.read_all`, `file.read`, `file.write` | File-reading program runs under `wasmtime` | ~150 Rust |
+| M4b.4 | Exit status through `wasi:cli/exit#exit-with-code` | Compiled exit status matches `main`'s `U32` | ~100 Rust + spike |
 | M5 | Arenas, free lists, `return_call`, benchmark | Self-compile-shaped workload in budget | ~700 Rust |
 | M6 | Modules | Multi-module example builds and runs | ~600 Rust |
 | M7 | Neo-written standard library (`Option`, `Result`, `Ordering`, `Map`, string utilities) | Library tests pass | ~1,500 Neo |

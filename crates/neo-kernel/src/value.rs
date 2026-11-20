@@ -26,6 +26,20 @@ pub enum Val {
     Eq(V, V, V),
     Refl(V),
     Glob(String),
+    /// The opaque action type `IO[A]`.
+    Io(V),
+    /// A deferred action value.
+    Action(Rc<Action>),
+}
+
+/// A deferred `IO` action. Actions have no computation rules: they are
+/// compared structurally and executed only by the program entry point.
+#[derive(Clone, Debug)]
+pub enum Action {
+    /// `io_pure(v)`.
+    Pure(V),
+    /// `io_bind(m, k)`.
+    Bind(V, V),
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +115,18 @@ pub fn vrefl(v: V) -> V {
 
 pub fn vglob(name: impl Into<String>) -> V {
     Rc::new(Val::Glob(name.into()))
+}
+
+pub fn vio(t: V) -> V {
+    Rc::new(Val::Io(t))
+}
+
+pub fn vpure(v: V) -> V {
+    Rc::new(Val::Action(Rc::new(Action::Pure(v))))
+}
+
+pub fn vbind(m: V, k: V) -> V {
+    Rc::new(Val::Action(Rc::new(Action::Bind(m, k))))
 }
 
 pub fn vvar(level: usize) -> V {

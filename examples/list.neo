@@ -13,6 +13,6 @@ fn range(n: Nat): List[Nat] {
   }
 }
 
-fn main(): List[Nat] {
-  append(range(3), range(2))
+fn main(): IO[List[Nat]] {
+  io_pure(append(range(3), range(2)))
 }

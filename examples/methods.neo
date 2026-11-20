@@ -19,9 +19,9 @@ fn Shape.area(self: Shape): U32 {
   }
 }
 
-fn main(): U32 {
+fn main(): IO[U32] {
   match false.not() {
-    true => rect(3u32, 4u32).area()
-    false => 0u32
+    true => io_pure(rect(3u32, 4u32).area())
+    false => io_pure(0u32)
   }
 }

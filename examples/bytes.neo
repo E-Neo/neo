@@ -2,6 +2,6 @@
 // their bounds and an out-of-range `get` yields `0`.
 //
 // `main` prints a byte result as `b"..."` with two hex digits per byte.
-fn main(): Bytes {
-  b"neo".concat(b"\x00\xff")
+fn main(): IO[Bytes] {
+  io_pure(b"neo".concat(b"\x00\xff"))
 }

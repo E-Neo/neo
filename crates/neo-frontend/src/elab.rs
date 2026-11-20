@@ -1,8 +1,8 @@
 use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
 use crate::core::{
-    Branch, PrimLit, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, ind, lam, pi,
-    pi_with, prim_lit, prim_op, prim_ty, rc, shift, var,
+    Branch, PrimLit, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, ind, io, io_bind,
+    io_pure, lam, pi, pi_with, prim_lit, prim_op, prim_ty, rc, shift, var,
 };
 use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
@@ -38,6 +38,9 @@ fn reserved_name(name: &str) -> Option<String> {
     }
     if PrimOp::from_name(name).is_some() {
         return Some(format!("`{}` is a primitive operation", name));
+    }
+    if matches!(name, "IO" | "io_pure" | "io_bind") {
+        return Some(format!("`{}` is built in", name));
     }
     None
 }
@@ -491,6 +494,15 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
             .ok_or_else(|| Error::at(span, format!("unbound variable `{}`", name)))?;
         return Ok((var(idx), ty));
     }
+    if name == "IO" {
+        return Err(Error::at(span, "`IO` expects one parameter in `[]`"));
+    }
+    if name == "io_pure" {
+        return Err(Error::at(span, "`io_pure` expects one argument in `()`"));
+    }
+    if name == "io_bind" {
+        return Err(Error::at(span, "`io_bind` expects two arguments in `()`"));
+    }
     if let Some(ty) = PrimTy::from_name(name) {
         return Ok((prim_ty(ty), vtype(0)));
     }
@@ -561,6 +573,140 @@ fn elab_enum_app(
     Ok((ind(name, terms), check::sort_value(sort)))
 }
 
+/// `IO[T]`: the opaque action type.
+fn elab_io_ty(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    implicit: &[Expr],
+    args: &[Expr],
+    span: Span,
+) -> Result<(RcTm, V)> {
+    if !args.is_empty() {
+        return Err(Error::at(
+            span,
+            "`IO` takes its parameter in `[]`, not `()`",
+        ));
+    }
+    let [inner_expr] = implicit else {
+        return Err(Error::at(
+            span,
+            format!("`IO` expects one parameter in `[]`, got {}", implicit.len()),
+        ));
+    };
+    let inner = elab_type(globals, ctx, inner_expr)?;
+    let sort = check::infer_sort(globals, ctx, &inner)
+        .map_err(|e| Error::at(span, format!("invalid `IO` parameter: {}", e.message)))?;
+    match sort {
+        Sort::Type(u) => Ok((io(inner), vtype(u))),
+        Sort::Prop => Err(Error::at(span, "`IO` expects a type, not a proposition")),
+    }
+}
+
+fn elab_io_pure(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    implicit: &[Expr],
+    args: &[Expr],
+    expected: Option<&V>,
+    span: Span,
+) -> Result<(RcTm, V)> {
+    if !implicit.is_empty() {
+        return Err(Error::at(span, "`io_pure` takes no implicit arguments"));
+    }
+    let [value] = args else {
+        return Err(Error::at(
+            span,
+            format!("`io_pure` takes one argument, got {}", args.len()),
+        ));
+    };
+    if let Some(expected) = expected {
+        let expected = force(globals, expected.clone());
+        if let Val::Io(result) = &*expected {
+            let value_tm = elab_check(globals, ctx, value, result)?;
+            return Ok((io_pure(value_tm), expected.clone()));
+        }
+    }
+    let (value_tm, value_ty) = elab_infer(globals, ctx, value)?;
+    Ok((io_pure(value_tm), vio(value_ty)))
+}
+
+fn elab_io_bind(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    implicit: &[Expr],
+    args: &[Expr],
+    expected: Option<&V>,
+    span: Span,
+) -> Result<(RcTm, V)> {
+    if !implicit.is_empty() {
+        return Err(Error::at(span, "`io_bind` takes no implicit arguments"));
+    }
+    let [action, next] = args else {
+        return Err(Error::at(
+            span,
+            format!("`io_bind` takes two arguments, got {}", args.len()),
+        ));
+    };
+    let (action_tm, action_ty) = elab_infer(globals, ctx, action)?;
+    let action_ty = force(globals, action_ty);
+    let produced_ty = match &*action_ty {
+        Val::Io(a) => a.clone(),
+        _ => {
+            return Err(Error::at(
+                span,
+                "`io_bind`: the first argument is not an `IO` action",
+            ));
+        }
+    };
+    // When the result type is known, check the continuation against
+    // `(x: A) -> IO[B]`. This lets an unannotated tail such as `io_pure(0)`
+    // take its type from the context.
+    if let Some(expected) = expected {
+        let expected = force(globals, expected.clone());
+        if let Val::Io(b) = &*expected {
+            let dom = quote(globals, ctx.level(), &produced_ty);
+            let cod = shift(&quote(globals, ctx.level(), b), 1, 0);
+            let function_ty = eval(globals, &ctx.env, &pi_with("_x", dom, io(cod), false));
+            let next_tm = elab_check(globals, ctx, next, &function_ty)?;
+            return Ok((io_bind(action_tm, next_tm), expected.clone()));
+        }
+    }
+    let (next_tm, next_ty) = elab_infer(globals, ctx, next)?;
+    let next_ty = force(globals, next_ty);
+    let (dom, closure) = match &*next_ty {
+        Val::Pi(dom, closure, _) => (dom.clone(), closure.clone()),
+        _ => {
+            return Err(Error::at(
+                span,
+                "`io_bind`: the second argument is not a function",
+            ));
+        }
+    };
+    if !conv(globals, ctx.level(), &dom, &produced_ty) {
+        return Err(Error::at(
+            span,
+            "`io_bind`: the function does not accept the action's result type",
+        ));
+    }
+    let cod = force(globals, eval_closure(globals, &closure, vvar(ctx.level())));
+    let b = match &*cod {
+        Val::Io(b) => b.clone(),
+        _ => {
+            return Err(Error::at(
+                span,
+                "`io_bind`: the function must return an `IO` action",
+            ));
+        }
+    };
+    if check::mentions_level(globals, ctx.level(), &b) {
+        return Err(Error::at(
+            span,
+            "`io_bind`: the result type may not depend on the produced value",
+        ));
+    }
+    Ok((io_bind(action_tm, next_tm), vio(b)))
+}
+
 fn elab_app(
     globals: &Globals,
     ctx: &mut Ctx,
@@ -605,6 +751,17 @@ fn elab_app_with(
     expected: Option<&V>,
     span: Span,
 ) -> Result<(RcTm, V)> {
+    if let Expr::Var(name, _) = f
+        && ctx.lookup_index(name).is_none()
+    {
+        match name.as_str() {
+            "IO" => return elab_io_ty(globals, ctx, implicit, args, span),
+            "io_pure" => return elab_io_pure(globals, ctx, implicit, args, expected, span),
+            "io_bind" => return elab_io_bind(globals, ctx, implicit, args, expected, span),
+            _ => {}
+        }
+    }
+
     if let Expr::Var(name, _) = f
         && ctx.lookup_index(name).is_none()
         && globals.get_enum(name).is_some()
@@ -1004,6 +1161,7 @@ fn unify_meta(
             unify_meta(globals, level, levels, sols, r1, r2)
         }
         (Val::Refl(x), Val::Refl(y)) => unify_meta(globals, level, levels, sols, x, y),
+        (Val::Io(x), Val::Io(y)) => unify_meta(globals, level, levels, sols, x, y),
         (Val::Neutral(n1), Val::Neutral(n2)) => match (&**n1, &**n2) {
             (Neutral::App(f1, a1), Neutral::App(f2, a2)) => {
                 unify_meta(
@@ -1160,6 +1318,11 @@ fn collect_free_levels(tm: &RcTm, level: usize, depth: usize, out: &mut Vec<usiz
             for arg in args {
                 collect_free_levels(arg, level, depth, out);
             }
+        }
+        Tm::Io(t) | Tm::IoPure(t) => collect_free_levels(t, level, depth, out),
+        Tm::IoBind { m, k } => {
+            collect_free_levels(m, level, depth, out);
+            collect_free_levels(k, level, depth, out);
         }
         Tm::Pi { dom, cod, .. } | Tm::Lam { dom, body: cod, .. } => {
             collect_free_levels(dom, level, depth, out);

@@ -13,6 +13,6 @@ fn mul(a: Nat, b: Nat): Nat {
   }
 }
 
-fn main(): Nat {
-  mul(6, 7)
+fn main(): IO[Nat] {
+  io_pure(mul(6, 7))
 }

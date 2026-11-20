@@ -2,6 +2,6 @@ enum Bad {
   mk(f: fn(Bad) -> Nat)
 }
 
-fn main(): Nat {
-  0
+fn main(): IO[Nat] {
+  io_pure(0)
 }

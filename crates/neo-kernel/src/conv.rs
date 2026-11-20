@@ -65,6 +65,18 @@ pub fn conv(globals: &Globals, level: usize, a: &V, b: &V) -> bool {
                 && conv(globals, level, ra, rb)
         }
         (Val::Refl(a), Val::Refl(b)) => conv(globals, level, a, b),
+        (Val::Io(a), Val::Io(b)) => conv(globals, level, a, b),
+        (Val::Action(a), Val::Action(b)) => conv_action(globals, level, a, b),
+        _ => false,
+    }
+}
+
+fn conv_action(globals: &Globals, level: usize, a: &Action, b: &Action) -> bool {
+    match (a, b) {
+        (Action::Pure(x), Action::Pure(y)) => conv(globals, level, x, y),
+        (Action::Bind(m1, k1), Action::Bind(m2, k2)) => {
+            conv(globals, level, m1, m2) && conv(globals, level, k1, k2)
+        }
         _ => false,
     }
 }

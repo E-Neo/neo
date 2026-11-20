@@ -2,6 +2,6 @@ fn f[T: Type](x: T): U32 {
   x.length()
 }
 
-fn main(): U32 {
-  0
+fn main(): IO[U32] {
+  io_pure(0)
 }

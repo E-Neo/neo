@@ -52,6 +52,18 @@ pub fn quote(globals: &Globals, level: usize, v: &V) -> RcTm {
         )),
         Val::Refl(x) => Rc::new(Tm::Refl(quote(globals, level, x))),
         Val::Glob(name) => Rc::new(Tm::Const(name.clone())),
+        Val::Io(t) => Rc::new(Tm::Io(quote(globals, level, t))),
+        Val::Action(a) => quote_action(globals, level, a),
+    }
+}
+
+fn quote_action(globals: &Globals, level: usize, action: &Action) -> RcTm {
+    match action {
+        Action::Pure(v) => Rc::new(Tm::IoPure(quote(globals, level, v))),
+        Action::Bind(m, k) => Rc::new(Tm::IoBind {
+            m: quote(globals, level, m),
+            k: quote(globals, level, k),
+        }),
     }
 }
 
@@ -160,6 +172,12 @@ fn close_under(globals: &Globals, level: usize, env: &Env, tm: &RcTm, extra: usi
                 .map(|a| close_under(globals, level, env, a, extra))
                 .collect(),
         )),
+        Tm::Io(t) => Rc::new(Tm::Io(close_under(globals, level, env, t, extra))),
+        Tm::IoPure(v) => Rc::new(Tm::IoPure(close_under(globals, level, env, v, extra))),
+        Tm::IoBind { m, k } => Rc::new(Tm::IoBind {
+            m: close_under(globals, level, env, m, extra),
+            k: close_under(globals, level, env, k, extra),
+        }),
         Tm::Pi {
             name,
             dom,

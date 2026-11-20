@@ -2,7 +2,7 @@
 //
 // `Nat` arithmetic is unbounded and unary; it is intended for proofs and
 // small indices. `U32` arithmetic is machine-sized and wraps.
-fn main(): Nat {
+fn main(): IO[Nat] {
   let a: Nat = 20
   let b: Nat = 6
   let q: Nat = a / b
@@ -14,5 +14,5 @@ fn main(): Nat {
     true => 1
     false => 0
   }
-  q + r + bits + shift + word_ok
+  io_pure(q + r + bits + shift + word_ok)
 }
