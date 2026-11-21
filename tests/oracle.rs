@@ -79,7 +79,7 @@ fn codegen_matches_the_interpreter() {
             .output()
             .expect("run the interpreter");
         assert!(
-            interpreted.status.success(),
+            interpreted.status.code().is_some(),
             "{} failed to interpret:\n{}",
             relative,
             String::from_utf8_lossy(&interpreted.stderr)
@@ -105,10 +105,16 @@ fn codegen_matches_the_interpreter() {
             .output()
             .expect("run wasmtime");
         assert!(
-            compiled.status.success(),
+            compiled.status.code().is_some(),
             "{} failed under wasmtime:\n{}",
             relative,
             String::from_utf8_lossy(&compiled.stderr)
+        );
+        assert_eq!(
+            interpreted.status.code(),
+            compiled.status.code(),
+            "{} exits differently when interpreted and compiled",
+            relative
         );
         assert_eq!(
             interpreted.stdout, compiled.stdout,

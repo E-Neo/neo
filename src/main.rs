@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use neo::core::PrimLit;
+use neo::core::{PrimLit, PrimTy};
 use neo::elab::{elab_infer, elaborate_program};
 use neo::env::Globals;
 use neo::error::{Error, Result};
@@ -15,7 +15,7 @@ use neo::value::{V, Val};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::FAILURE
@@ -23,18 +23,18 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: &[String]) -> Result<()> {
+fn run(args: &[String]) -> Result<u8> {
     match args.first().map(String::as_str) {
-        None => repl(),
+        None => repl().map(|()| 0),
         Some("-h") | Some("--help") => {
             print_help();
-            Ok(())
+            Ok(0)
         }
         Some("-V") | Some("--version") => {
             println!("neo {}", env!("CARGO_PKG_VERSION"));
-            Ok(())
+            Ok(0)
         }
-        Some("build") => build_command(&args[1..]),
+        Some("build") => build_command(&args[1..]).map(|()| 0),
         Some("run") | Some("check") => Err(Error::new(format!(
             "`neo {}` is not a subcommand; use `neo <file.neo>` or `neo build <file.neo>`",
             args[0]
@@ -60,7 +60,7 @@ fn print_help() {
     );
 }
 
-fn interpret_file(path: &str) -> Result<()> {
+fn interpret_file(path: &str) -> Result<u8> {
     let program = neo::load::parse_file(path)?;
     let mut globals = new_globals()?;
     elaborate_program(&mut globals, &program).map_err(|e| add_file(path, e))?;
@@ -106,7 +106,7 @@ fn build_command(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn run_main(globals: &Globals) -> Result<()> {
+fn run_main(globals: &Globals) -> Result<u8> {
     let ty = ensure_main(globals)?;
     let action = eval(globals, &Vec::new(), &neo::core::const_("main"));
     let value = whnf(
@@ -120,7 +120,11 @@ fn run_main(globals: &Globals) -> Result<()> {
         ))
     })?;
     println!("{}", text);
-    Ok(())
+    let status = match (&*force(globals, ty), &*value) {
+        (Val::PrimTy(PrimTy::U32), Val::PrimLit(PrimLit::U32(n))) => *n as u8,
+        _ => 0,
+    };
+    Ok(status)
 }
 
 fn ensure_main(globals: &Globals) -> Result<V> {

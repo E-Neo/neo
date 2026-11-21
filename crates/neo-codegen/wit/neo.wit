@@ -8,6 +8,8 @@ world neo {
   import wasi:cli/stderr@0.2.9;
   /// Used by `env.argv` capabilities.
   import wasi:cli/environment@0.2.9;
+  /// Used to report `main`'s `U32` result as the process exit status.
+  import wasi:cli/exit@0.2.9;
   /// Used by `stdin.read_all` capabilities.
   import wasi:cli/stdin@0.2.9;
   import wasi:io/streams@0.2.9;

@@ -36,7 +36,7 @@ fn is_component(path: &Path) -> bool {
 /// so the test can be skipped in minimal environments.
 fn run(path: &Path) -> Option<String> {
     let out = Command::new("wasmtime").arg(path).output().ok()?;
-    if !out.status.success() {
+    if out.status.code().is_none() || !out.stderr.is_empty() {
         panic!(
             "wasmtime failed for {}: {}",
             path.display(),
@@ -497,7 +497,7 @@ fn main(): U32 {
 /// Run a component with wasmtime and return both streams.
 fn run_streams(path: &Path) -> Option<(String, String)> {
     let out = Command::new("wasmtime").arg(path).output().ok()?;
-    if !out.status.success() {
+    if out.status.code().is_none() {
         panic!(
             "wasmtime failed for {}: {}",
             path.display(),
@@ -562,7 +562,7 @@ fn run_capability(path: &Path, dir: Option<&Path>, args: &[&str], stdin: &[u8]) 
         .write_all(stdin)
         .expect("write stdin");
     let out = child.wait_with_output().ok()?;
-    if !out.status.success() {
+    if out.status.code().is_none() || !out.stderr.is_empty() {
         panic!(
             "wasmtime failed for {}: {}",
             path.display(),
@@ -632,4 +632,48 @@ fn main(): IO[Result[Bytes, IoError]] {
         b"neo\x00file"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn run_exit(path: &Path) -> Option<(String, i32)> {
+    let out = Command::new("wasmtime").arg(path).output().ok()?;
+    assert!(
+        out.stderr.is_empty(),
+        "wasmtime failed for {}: {}",
+        path.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let code = out.status.code().expect("process exited normally");
+    Some((String::from_utf8_lossy(&out.stdout).into_owned(), code))
+}
+
+#[test]
+fn u32_main_sets_the_exit_status() {
+    let path = build(
+        r#"
+fn main(): IO[U32] {
+  IO::pure(7u32)
+}
+"#,
+        "exit-status",
+    );
+    if let Some((stdout, code)) = run_exit(&path) {
+        assert_eq!(stdout, "7\n");
+        assert_eq!(code, 7);
+    }
+}
+
+#[test]
+fn non_u32_main_exits_zero() {
+    let path = build(
+        r#"
+fn main(): IO[Bool] {
+  IO::pure(Bool::True)
+}
+"#,
+        "exit-status-zero",
+    );
+    if let Some((stdout, code)) = run_exit(&path) {
+        assert_eq!(stdout, "True\n");
+        assert_eq!(code, 0);
+    }
 }

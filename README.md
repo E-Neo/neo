@@ -40,7 +40,8 @@ Implemented:
   and regular files (`stderr::write`, `env::argv`, `stdin::read_all`,
   `file::read`, `file::write`);
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
-  component.
+  component; a `U32` result from `main` is both printed and used as the
+  process exit status.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
 and growable vectors (`Array[T, n]`, `Vec[T]`), package management, module

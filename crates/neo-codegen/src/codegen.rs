@@ -35,7 +35,7 @@ const DIGIT_END: i32 = 96;
 const DATA_BASE: u32 = 1024;
 
 /// The number of imported WASI functions. Function indices start after these.
-const NUM_IMPORTS: u32 = 14;
+const NUM_IMPORTS: u32 = 15;
 
 const HEAP_START: u32 = 65_536;
 
@@ -53,6 +53,7 @@ const IMPORT_OPEN_AT: u32 = 10;
 const IMPORT_DESCRIPTOR_READ: u32 = 11;
 const IMPORT_DESCRIPTOR_WRITE: u32 = 12;
 const IMPORT_DROP_DESCRIPTOR: u32 = 13;
+const IMPORT_EXIT_WITH_CODE: u32 = 14;
 
 const NEO_WIT: &str = include_str!("../wit/neo.wit");
 const WIT_IO: &str = include_str!("../wit/deps/io.wit");
@@ -1359,7 +1360,7 @@ impl<'g> Codegen<'g> {
         Ok(id)
     }
 
-    fn gen_run(&mut self, main_id: usize, printer_id: usize) -> Result<()> {
+    fn gen_run(&mut self, main_id: usize, printer_id: usize, status: bool) -> Result<()> {
         let (nl_ptr, nl_len) = self.intern("\n");
         let print_bytes = self.print_bytes_fn();
         let fin = {
@@ -1369,10 +1370,21 @@ impl<'g> Codegen<'g> {
             let action = fc.local();
             fc.emit(I::LocalSet(action));
             emit_call_closure(&mut fc, action, None);
+            let value = fc.local();
+            fc.emit(I::LocalSet(value));
+            fc.emit(I::LocalGet(value));
             fc.emit(I::Call(defined(printer_id)));
             fc.emit(I::I32Const(nl_ptr));
             fc.emit(I::I32Const(nl_len));
             fc.emit(I::Call(print_bytes));
+            if status {
+                fc.emit(I::LocalGet(value));
+                fc.emit(I::I32Const(0xff));
+                fc.emit(I::I32And);
+            } else {
+                fc.emit(I::I32Const(0));
+            }
+            fc.emit(I::Call(IMPORT_EXIT_WITH_CODE));
             fc.emit(I::I32Const(0));
             fc.finish()
         };
@@ -1395,11 +1407,12 @@ impl<'g> Codegen<'g> {
             _ => return Err(Error::new("`main` must have type `IO[T]`")),
         };
         let printer_id = self.printer_for(&main_result)?;
+        let u32_status = matches!(&*main_result, Val::PrimTy(PrimTy::U32));
         let main_id = match self.ensure_fn("main")? {
             FnRef::Zero(id) => id,
             FnRef::Closure(_) => return Err(Error::new("`main` must not take parameters")),
         };
-        self.gen_run(main_id, printer_id)?;
+        self.gen_run(main_id, printer_id, u32_status)?;
 
         self.encode_core()
     }
@@ -1524,6 +1537,11 @@ impl<'g> Codegen<'g> {
         imports.import(
             "wasi:filesystem/types@0.2.9",
             "[resource-drop]descriptor",
+            EntityType::Function(drop_ty),
+        );
+        imports.import(
+            "wasi:cli/exit@0.2.9",
+            "exit-with-code",
             EntityType::Function(drop_ty),
         );
 

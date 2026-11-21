@@ -75,7 +75,7 @@ neo -V | --version                   show the version
 | Command | Behaviour |
 | --- | --- |
 | `neo` | Starts an interactive session. Declarations persist until you quit. |
-| `neo FILE` | Parses, checks, evaluates `main`, and prints its result. |
+| `neo FILE` | Parses, checks, evaluates `main`, prints its result, and exits with its `U32` status (or `0`). |
 | `neo build FILE` | Compiles `main` and everything reachable from it into a component. |
 | `neo build FILE -o PATH` | Same, with an explicit output path. `--output PATH` is also accepted. |
 | `neo run` / `neo check` | Reserved and rejected with an error. |
@@ -87,8 +87,10 @@ Details:
 - `neo build` also requires `main`, and `T` must be a printable data type
   (see [section 13](#13-printing-and-building-for-wasi)).
 - `neo build` accepts exactly one input file. Unknown `-` options are errors.
-- Success exits with status 0. Any error is written to stderr and exits with
-  status 1.
+- `neo FILE` exits with the low eight bits of a `U32` result from `main`;
+  other result types exit `0`.
+- `neo build` exits with status 0. Any error is written to stderr and exits
+  with status 1.
 - Errors in a file include the path, for example:
   `error: 3:7: examples/nat.neo: type mismatch: expected ...`.
 - An unknown first argument is treated as a file path, not as a subcommand.
@@ -1836,6 +1838,10 @@ The I/O API is `IO::pure`, `IO::bind`, and the `extern` capabilities in the
 closed registry. The prelude provides `stderr::write`, `env::argv`,
 `stdin::read_all`, `file::read`, and `file::write`. File paths are relative to
 a preopened directory; pass `--dir .` to `wasmtime` to grant the current one.
+
+When `main`'s action produces `U32`, that value is printed and its low eight
+bits become the process exit status. Other result types print normally and
+exit `0`. The interpreter and compiled component agree on the status.
 
 ---
 
