@@ -29,8 +29,9 @@ and conversion, written in Neo.
 - `Eq`, `ReflTm`, and a first `J` slice. Equality values are encoded as
   `VInd("Eq", ...)` and proofs as `VCtor("Refl", ...)`, so the existing
   conversion code handles them. `Refl` checks both sides against the value;
-  `J` checks the proof and reduces to its `refl_case`. Motives are not yet
-  applied.
+  `J` checks the proof and reduces to its `refl_case`; it also applies the
+  motive to both sides, checks `refl_case` against `motive(lhs)`, and checks
+  the expected type against `motive(rhs)`.
 - A conservative positivity check over enum constructor telescopes. Direct
   positive occurrences are accepted; negative occurrences in function
   domains and nested occurrences under another type constructor are rejected.

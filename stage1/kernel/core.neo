@@ -642,6 +642,26 @@ pub fn ctor_at(ctors: CtorList, index: U32): Option[CtorInfo] {
   }
 }
 
+pub fn apply_val(fuel: Nat, f: Val, arg: Val): Result[Val, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match f {
+      VLam(_, _, body, env) => eval(k, env_ext(env, arg), body)
+      VPi(_, _, cod, env) => eval(k, env_ext(env, arg), cod)
+      VError(e) => Err(e)
+      VNil => Err(NotFunction)
+      VCons(_, _) => Err(NotFunction)
+      VVar(_) => Err(NotFunction)
+      VConst(_) => Err(NotFunction)
+      VType(_) => Err(NotFunction)
+      VProp => Err(NotFunction)
+      VInd(_, _) => Err(NotFunction)
+      VCtor(_, _, _) => Err(NotFunction)
+      VApp(_, _) => Err(NotFunction)
+    }
+  }
+}
+
 pub fn apply_type(fuel: Nat, ty: Val, args: Val): Result[Val, KernelError] {
   match fuel {
     Zero => Err(OutOfFuel)
@@ -1016,7 +1036,7 @@ pub fn check(
         VApp(_, _) => Err(TypeMismatch)
         VError(e) => Err(e)
       }
-      J(_, lhs, rhs, proof, _, refl_case) => match eval(k, ctx_env(ctx), lhs) {
+      J(_, lhs, rhs, proof, motive, refl_case) => match eval(k, ctx_env(ctx), lhs) {
         Ok(vlhs) => match eval(k, ctx_env(ctx), rhs) {
           Ok(vrhs) => match check(
             k,
@@ -1025,7 +1045,20 @@ pub fn check(
             proof,
             VInd("Eq", VCons(vlhs, VCons(vrhs, VNil)))
           ) {
-            Ok(Unit) => check(k, globals, ctx, refl_case, expected)
+            Ok(Unit) => match eval(k, ctx_env(ctx), motive) {
+              Ok(vmotive) => match apply_val(k, vmotive, vlhs) {
+                Ok(lhs_ty) => match apply_val(k, vmotive, vrhs) {
+                  Ok(rhs_ty) => match conv(k, ctx_len(ctx), rhs_ty, expected) {
+                    Ok(True) => check(k, globals, ctx, refl_case, lhs_ty)
+                    Ok(False) => Err(TypeMismatch)
+                    Err(e) => Err(e)
+                  }
+                  Err(e) => Err(e)
+                }
+                Err(e) => Err(e)
+              }
+              Err(e) => Err(e)
+            }
             Err(e) => Err(e)
           }
           Err(e) => Err(e)
@@ -1397,7 +1430,14 @@ pub fn demo_j_check(): U32 {
     100,
     empty_globals,
     Nil,
-    J(Ty(0u32), Ty(0u32), Ty(0u32), ReflTm(Ty(0u32)), Ty(0u32), Ty(0u32)),
+    J(
+      Ty(0u32),
+      Ty(0u32),
+      Ty(0u32),
+      ReflTm(Ty(0u32)),
+      Lam("x", Ty(0u32), Ty(1u32)),
+      Ty(0u32)
+    ),
     VType(1u32)
   ) {
     Ok(Unit) => 1u32
