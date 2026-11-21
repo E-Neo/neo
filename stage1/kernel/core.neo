@@ -11,6 +11,8 @@ pub enum KernelError {
   NotType
   TypeMismatch
   Unsupported
+  UnknownEnum
+  UnknownCtor
 }
 
 pub enum Tm {
@@ -241,6 +243,8 @@ pub fn demo_unbound(): U32 {
     Err(NotType) => 0u32
     Err(TypeMismatch) => 0u32
     Err(Unsupported) => 0u32
+    Err(UnknownEnum) => 0u32
+    Err(UnknownCtor) => 0u32
     Ok(TNil) => 0u32
     Ok(TCons(_, _)) => 0u32
     Ok(Var(_)) => 0u32
@@ -263,6 +267,8 @@ pub fn demo_fuel(): U32 {
     Err(NotType) => 0u32
     Err(TypeMismatch) => 0u32
     Err(Unsupported) => 0u32
+    Err(UnknownEnum) => 0u32
+    Err(UnknownCtor) => 0u32
     Ok(TNil) => 0u32
     Ok(TCons(_, _)) => 0u32
     Ok(Var(_)) => 0u32
@@ -528,6 +534,90 @@ pub enum Sort {
   SType(U32)
 }
 
+pub enum CtorList {
+  CNil
+  CCons(CtorInfo, CtorList)
+}
+
+pub enum CtorInfo {
+  CtorData(String, String, U32, U32, U32, Tm)
+}
+
+pub enum EnumInfo {
+  EnumData(String, U32, Sort, Bool, CtorList)
+}
+
+pub fn empty_globals(name: String): Option[EnumInfo] {
+  None
+}
+
+pub fn ctor_at(ctors: CtorList, index: U32): Option[CtorInfo] {
+  match ctors {
+    CNil => None
+    CCons(info, rest) => match index == 0u32 {
+      True => Some(info)
+      False => ctor_at(rest, index - 1u32)
+    }
+  }
+}
+
+pub fn apply_type(fuel: Nat, ty: Val, args: Val): Result[Val, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match args {
+      VNil => Ok(ty)
+      VCons(arg, rest) => match ty {
+        VPi(_, _, cod, env) => match eval(k, env_ext(env, arg), cod) {
+          Ok(next) => apply_type(k, next, rest)
+          Err(e) => Err(e)
+        }
+        VError(e) => Err(e)
+        VNil => Err(NotFunction)
+        VCons(_, _) => Err(NotFunction)
+        VVar(_) => Err(NotFunction)
+        VConst(_) => Err(NotFunction)
+        VType(_) => Err(NotFunction)
+        VProp => Err(NotFunction)
+        VInd(_, _) => Err(NotFunction)
+        VCtor(_, _, _) => Err(NotFunction)
+        VLam(_, _, _, _) => Err(NotFunction)
+        VApp(_, _) => Err(NotFunction)
+      }
+      VError(e) => Err(e)
+      VVar(_) => Err(Unsupported)
+      VConst(_) => Err(Unsupported)
+      VType(_) => Err(Unsupported)
+      VProp => Err(Unsupported)
+      VInd(_, _) => Err(Unsupported)
+      VCtor(_, _, _) => Err(Unsupported)
+      VPi(_, _, _, _) => Err(Unsupported)
+      VLam(_, _, _, _) => Err(Unsupported)
+      VApp(_, _) => Err(Unsupported)
+    }
+  }
+}
+
+pub fn bool_globals(name: String): Option[EnumInfo] {
+  match name == "Bool" {
+    True => Some(
+      EnumData(
+        "Bool",
+        0u32,
+        SType(0u32),
+        True,
+        CCons(
+          CtorData("False", "Bool", 0u32, 0u32, 0u32, Ind("Bool", TNil)),
+          CCons(
+            CtorData("True", "Bool", 1u32, 0u32, 0u32, Ind("Bool", TNil)),
+            CNil
+          )
+        )
+      )
+    )
+    False => None
+  }
+}
+
 pub fn ctx_len(ctx: List[Val]): U32 {
   match ctx {
     Nil => 0u32
@@ -593,7 +683,12 @@ fn infer_sort(fuel: Nat, value: Val): Result[Sort, KernelError] {
   }
 }
 
-pub fn infer(fuel: Nat, ctx: List[Val], tm: Tm): Result[Val, KernelError] {
+pub fn infer(
+  fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
+  ctx: List[Val],
+  tm: Tm
+): Result[Val, KernelError] {
   match fuel {
     Zero => Err(OutOfFuel)
     Succ(k) => match tm {
@@ -615,7 +710,7 @@ pub fn infer(fuel: Nat, ctx: List[Val], tm: Tm): Result[Val, KernelError] {
       }
       Lam(name, dom, body) => match eval(k, ctx_env(ctx), dom) {
         Ok(vdom) => match infer_sort(k, vdom) {
-          Ok(_) => match infer(k, Cons(vdom, ctx), body) {
+          Ok(_) => match infer(k, globals, Cons(vdom, ctx), body) {
             Ok(body_ty) => match quote(k, ctx_len(ctx) + 1u32, body_ty) {
               Ok(cod) => Ok(VPi(name, vdom, cod, ctx_env(ctx)))
               Err(e) => Err(e)
@@ -626,8 +721,8 @@ pub fn infer(fuel: Nat, ctx: List[Val], tm: Tm): Result[Val, KernelError] {
         }
         Err(e) => Err(e)
       }
-      App(f, a) => match infer(k, ctx, f) {
-        Ok(VPi(_, dom, cod, env)) => match check(k, ctx, a, dom) {
+      App(f, a) => match infer(k, globals, ctx, f) {
+        Ok(VPi(_, dom, cod, env)) => match check(k, globals, ctx, a, dom) {
           Ok(Unit) => match eval(k, ctx_env(ctx), a) {
             Ok(value) => eval(k, env_ext(env, value), cod)
             Err(e) => Err(e)
@@ -641,14 +736,33 @@ pub fn infer(fuel: Nat, ctx: List[Val], tm: Tm): Result[Val, KernelError] {
       Const(_) => Err(Unsupported)
       TNil => Err(Unsupported)
       TCons(_, _) => Err(Unsupported)
-      Ind(_, _) => Err(Unsupported)
-      Ctor(_, _, _) => Err(Unsupported)
+      Ind(name, args) => match globals(name) {
+        Some(EnumData(_, _, sort, _, _)) => match eval(k, ctx_env(ctx), args) {
+          Ok(_) => Ok(sort_value(sort))
+          Err(e) => Err(e)
+        }
+        None => Err(UnknownEnum)
+      }
+      Ctor(name, index, args) => match globals(name) {
+        Some(EnumData(_, _, _, _, ctors)) => match ctor_at(ctors, index) {
+          Some(CtorData(_, _, _, _, _, ty)) => match eval(k, env_empty, ty) {
+            Ok(vty) => match eval(k, ctx_env(ctx), args) {
+              Ok(vargs) => apply_type(k, vty, vargs)
+              Err(e) => Err(e)
+            }
+            Err(e) => Err(e)
+          }
+          None => Err(UnknownCtor)
+        }
+        None => Err(UnknownEnum)
+      }
     }
   }
 }
 
 pub fn check(
   fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
   ctx: List[Val],
   tm: Tm,
   expected: Val
@@ -660,7 +774,7 @@ pub fn check(
         VPi(_, pdom, cod, env) => match eval(k, ctx_env(ctx), dom) {
           Ok(vdom) => match conv(k, ctx_len(ctx), vdom, pdom) {
             Ok(True) => match eval(k, env_ext(env, VVar(ctx_len(ctx))), cod) {
-              Ok(codv) => check(k, Cons(pdom, ctx), body, codv)
+              Ok(codv) => check(k, globals, Cons(pdom, ctx), body, codv)
               Err(e) => Err(e)
             }
             Ok(False) => Err(TypeMismatch)
@@ -680,27 +794,28 @@ pub fn check(
         VLam(_, _, _, _) => Err(NotFunction)
         VApp(_, _) => Err(NotFunction)
       }
-      Var(_) => check_infer(k, ctx, tm, expected)
-      Ty(_) => check_infer(k, ctx, tm, expected)
-      PropTy => check_infer(k, ctx, tm, expected)
-      Pi(_, _, _) => check_infer(k, ctx, tm, expected)
-      App(_, _) => check_infer(k, ctx, tm, expected)
-      Const(_) => check_infer(k, ctx, tm, expected)
-      TNil => check_infer(k, ctx, tm, expected)
-      TCons(_, _) => check_infer(k, ctx, tm, expected)
-      Ind(_, _) => check_infer(k, ctx, tm, expected)
-      Ctor(_, _, _) => check_infer(k, ctx, tm, expected)
+      Var(_) => check_infer(k, globals, ctx, tm, expected)
+      Ty(_) => check_infer(k, globals, ctx, tm, expected)
+      PropTy => check_infer(k, globals, ctx, tm, expected)
+      Pi(_, _, _) => check_infer(k, globals, ctx, tm, expected)
+      App(_, _) => check_infer(k, globals, ctx, tm, expected)
+      Const(_) => check_infer(k, globals, ctx, tm, expected)
+      TNil => check_infer(k, globals, ctx, tm, expected)
+      TCons(_, _) => check_infer(k, globals, ctx, tm, expected)
+      Ind(_, _) => check_infer(k, globals, ctx, tm, expected)
+      Ctor(_, _, _) => check_infer(k, globals, ctx, tm, expected)
     }
   }
 }
 
 fn check_infer(
   fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
   ctx: List[Val],
   tm: Tm,
   expected: Val
 ): Result[Unit, KernelError] {
-  match infer(fuel, ctx, tm) {
+  match infer(fuel, globals, ctx, tm) {
     Ok(found) => match conv(fuel, ctx_len(ctx), found, expected) {
       Ok(True) => Ok(Unit)
       Ok(False) => Err(TypeMismatch)
@@ -715,14 +830,14 @@ fn identity_pi(): Val {
 }
 
 pub fn demo_check_identity(): U32 {
-  match check(100, Nil, Lam("x", Ty(0u32), Var(0u32)), identity_pi()) {
+  match check(100, empty_globals, Nil, Lam("x", Ty(0u32), Var(0u32)), identity_pi()) {
     Ok(Unit) => 1u32
     Err(_) => 0u32
   }
 }
 
 pub fn demo_check_bad(): U32 {
-  match check(100, Nil, Lam("x", Ty(0u32), Ty(0u32)), identity_pi()) {
+  match check(100, empty_globals, Nil, Lam("x", Ty(0u32), Ty(0u32)), identity_pi()) {
     Ok(Unit) => 0u32
     Err(TypeMismatch) => 1u32
     Err(_) => 0u32
@@ -730,7 +845,7 @@ pub fn demo_check_bad(): U32 {
 }
 
 pub fn demo_infer_pi(): U32 {
-  match infer(100, Nil, Pi("x", Ty(0u32), Ty(0u32))) {
+  match infer(100, empty_globals, Nil, Pi("x", Ty(0u32), Ty(0u32))) {
     Ok(VType(_)) => 1u32
     Ok(VNil) => 0u32
     Ok(VCons(_, _)) => 0u32
@@ -749,7 +864,7 @@ pub fn demo_infer_pi(): U32 {
 
 pub fn demo_infer_app(): U32 {
   let term = App(Lam("x", Ty(1u32), Var(0u32)), Ty(0u32))
-  match infer(100, Nil, term) {
+  match infer(100, empty_globals, Nil, term) {
     Ok(VType(level)) => match level == 1u32 {
       True => 1u32
       False => 0u32
@@ -765,6 +880,61 @@ pub fn demo_infer_app(): U32 {
     Ok(VLam(_, _, _, _)) => 0u32
     Ok(VApp(_, _)) => 0u32
     Ok(VError(_)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_infer_ind_bool(): U32 {
+  match infer(100, bool_globals, Nil, Ind("Bool", TNil)) {
+    Ok(VType(level)) => match level == 0u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(VNil) => 0u32
+    Ok(VCons(_, _)) => 0u32
+    Ok(VVar(_)) => 0u32
+    Ok(VConst(_)) => 0u32
+    Ok(VProp) => 0u32
+    Ok(VInd(_, _)) => 0u32
+    Ok(VCtor(_, _, _)) => 0u32
+    Ok(VPi(_, _, _, _)) => 0u32
+    Ok(VLam(_, _, _, _)) => 0u32
+    Ok(VApp(_, _)) => 0u32
+    Ok(VError(_)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_infer_ctor_bool(): U32 {
+  match infer(100, bool_globals, Nil, Ctor("Bool", 0u32, TNil)) {
+    Ok(VInd(name, _)) => match name == "Bool" {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(VNil) => 0u32
+    Ok(VCons(_, _)) => 0u32
+    Ok(VVar(_)) => 0u32
+    Ok(VConst(_)) => 0u32
+    Ok(VType(_)) => 0u32
+    Ok(VProp) => 0u32
+    Ok(VCtor(_, _, _)) => 0u32
+    Ok(VPi(_, _, _, _)) => 0u32
+    Ok(VLam(_, _, _, _)) => 0u32
+    Ok(VApp(_, _)) => 0u32
+    Ok(VError(_)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_check_ctor_bool(): U32 {
+  match check(
+    100,
+    bool_globals,
+    Nil,
+    Ctor("Bool", 1u32, TNil),
+    VInd("Bool", VNil)
+  ) {
+    Ok(Unit) => 1u32
     Err(_) => 0u32
   }
 }

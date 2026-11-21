@@ -13,5 +13,8 @@ fn main(): IO[U32] {
       + core::demo_check_bad()
       + core::demo_infer_pi()
       + core::demo_infer_app()
+      + core::demo_infer_ind_bool()
+      + core::demo_infer_ctor_bool()
+      + core::demo_check_ctor_bool()
   )
 }

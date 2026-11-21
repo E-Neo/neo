@@ -21,14 +21,15 @@ and conversion, written in Neo.
 - `eval`, `quote`, `normalize`, and `conv`.
 - Sorts and `infer`/`check` for variables, universes, Pi, lambda, and
   application, with a `List[Val]` context and context-environment functions.
+- A Stage 1 global environment (`EnumInfo`/`CtorInfo`/`CtorList`) and typing
+  for enum values and constructor applications via `apply_type`.
 - Alpha-renamed lambdas, different universes, unbound variables, fuel
   exhaustion, identity checking, a type error, Pi inference, and application
   inference are tested.
 
 ## Next
 
-- Constructor and enum typing, `match`, and `J`; these need a global
-  environment in Stage 1.
+- `match` and `J`, including dependent motives and branch refinement.
 - Positivity, termination, and pretty printing.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.
 
