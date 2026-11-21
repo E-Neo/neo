@@ -31,6 +31,9 @@ and conversion, written in Neo.
   conversion code handles them. `Refl` checks both sides against the value;
   `J` checks the proof and reduces to its `refl_case`. Motives are not yet
   applied.
+- A conservative positivity check over enum constructor telescopes. Direct
+  positive occurrences are accepted; negative occurrences in function
+  domains and nested occurrences under another type constructor are rejected.
 - Alpha-renamed lambdas, different universes, unbound variables, fuel
   exhaustion, identity checking, a type error, Pi inference, and application
   inference are tested.
@@ -38,7 +41,7 @@ and conversion, written in Neo.
 ## Next
 
 - Dependent match refinement and full motive application in `J`.
-- Positivity, termination, and pretty printing.
+- Termination checking and pretty printing.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.
 
 ## Frontend, codegen, and driver slices

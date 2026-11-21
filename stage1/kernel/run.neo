@@ -24,5 +24,8 @@ fn main(): IO[U32] {
       + core::demo_eq_bad()
       + core::demo_j_eval()
       + core::demo_j_check()
+      + core::demo_positive_bool()
+      + core::demo_negative_positivity()
+      + core::demo_nested_positivity()
   )
 }

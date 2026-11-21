@@ -1404,3 +1404,253 @@ pub fn demo_j_check(): U32 {
     Err(_) => 0u32
   }
 }
+
+pub enum PositivityError {
+  Negative
+  Nested
+  Unknown
+}
+
+pub fn contains_enum(name: String, tm: Tm): Bool {
+  match tm {
+    Var(_) => False
+    Const(_) => False
+    Ty(_) => False
+    PropTy => False
+    TNil => False
+    TBrNil => False
+    TCons(head, tail) => match contains_enum(name, head) {
+      True => True
+      False => contains_enum(name, tail)
+    }
+    Ind(enum_name, args) => match enum_name == name {
+      True => True
+      False => contains_enum(name, args)
+    }
+    Ctor(_, _, args) => contains_enum(name, args)
+    Pi(_, dom, cod) => match contains_enum(name, dom) {
+      True => True
+      False => contains_enum(name, cod)
+    }
+    Lam(_, dom, body) => match contains_enum(name, dom) {
+      True => True
+      False => contains_enum(name, body)
+    }
+    App(f, a) => match contains_enum(name, f) {
+      True => True
+      False => contains_enum(name, a)
+    }
+    Match(scrut, branches) => match contains_enum(name, scrut) {
+      True => True
+      False => contains_enum(name, branches)
+    }
+    TBrCons(_, _, body, rest) => match contains_enum(name, body) {
+      True => True
+      False => contains_enum(name, rest)
+    }
+    Eq(lhs, rhs) => match contains_enum(name, lhs) {
+      True => True
+      False => contains_enum(name, rhs)
+    }
+    ReflTm(value) => contains_enum(name, value)
+    J(a, b, c, d, e, f) => match contains_enum(name, a) {
+      True => True
+      False => match contains_enum(name, b) {
+        True => True
+        False => match contains_enum(name, c) {
+          True => True
+          False => match contains_enum(name, d) {
+            True => True
+            False => match contains_enum(name, e) {
+              True => True
+              False => contains_enum(name, f)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn check_field_domain(name: String, dom: Tm): Result[Unit, PositivityError] {
+  match dom {
+    Ind(enum_name, args) => match enum_name == name {
+      True => match contains_enum(name, args) {
+        True => Err(Nested)
+        False => Ok(Unit)
+      }
+      False => match contains_enum(name, dom) {
+        True => Err(Nested)
+        False => Ok(Unit)
+      }
+    }
+    Pi(_, _, _) => match contains_enum(name, dom) {
+      True => Err(Negative)
+      False => Ok(Unit)
+    }
+    Var(_) => Ok(Unit)
+    Const(_) => Ok(Unit)
+    Ty(_) => Ok(Unit)
+    PropTy => Ok(Unit)
+    TNil => Ok(Unit)
+    TCons(_, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    Ctor(_, _, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    Lam(_, _, _) => match contains_enum(name, dom) {
+      True => Err(Negative)
+      False => Ok(Unit)
+    }
+    App(_, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    Match(_, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    TBrNil => Ok(Unit)
+    TBrCons(_, _, _, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    Eq(_, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    ReflTm(_) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+    J(_, _, _, _, _, _) => match contains_enum(name, dom) {
+      True => Err(Nested)
+      False => Ok(Unit)
+    }
+  }
+}
+
+fn check_ctor_positivity(name: String, ty: Tm): Result[Unit, PositivityError] {
+  match ty {
+    Pi(_, dom, cod) => match check_field_domain(name, dom) {
+      Ok(Unit) => check_ctor_positivity(name, cod)
+      Err(e) => Err(e)
+    }
+    Var(_) => Ok(Unit)
+    Const(_) => Ok(Unit)
+    Ty(_) => Ok(Unit)
+    PropTy => Ok(Unit)
+    TNil => Ok(Unit)
+    TCons(_, _) => Ok(Unit)
+    Ind(_, _) => Ok(Unit)
+    Ctor(_, _, _) => Ok(Unit)
+    Lam(_, _, _) => Ok(Unit)
+    App(_, _) => Ok(Unit)
+    Match(_, _) => Ok(Unit)
+    TBrNil => Ok(Unit)
+    TBrCons(_, _, _, _) => Ok(Unit)
+    Eq(_, _) => Ok(Unit)
+    ReflTm(_) => Ok(Unit)
+    J(_, _, _, _, _, _) => Ok(Unit)
+  }
+}
+
+fn check_ctors_positivity(name: String, ctors: CtorList): Result[Unit, PositivityError] {
+  match ctors {
+    CNil => Ok(Unit)
+    CCons(CtorData(_, _, _, _, _, ty), rest) => match check_ctor_positivity(name, ty) {
+      Ok(Unit) => check_ctors_positivity(name, rest)
+      Err(e) => Err(e)
+    }
+  }
+}
+
+pub fn check_positivity(
+  globals: fn(String) -> Option[EnumInfo],
+  name: String
+): Result[Unit, PositivityError] {
+  match globals(name) {
+    Some(EnumData(_, _, _, _, ctors)) => check_ctors_positivity(name, ctors)
+    None => Err(Unknown)
+  }
+}
+
+fn negative_globals(name: String): Option[EnumInfo] {
+  match name == "Bad" {
+    True => Some(
+      EnumData(
+        "Bad",
+        0u32,
+        SType(0u32),
+        False,
+        CCons(
+          CtorData(
+            "Mk",
+            "Bad",
+            0u32,
+            0u32,
+            1u32,
+            Pi("f", Pi("x", Ind("Bad", TNil), Ind("Bad", TNil)), Ind("Bad", TNil))
+          ),
+          CNil
+        )
+      )
+    )
+    False => None
+  }
+}
+
+fn nested_globals(name: String): Option[EnumInfo] {
+  match name == "Bad" {
+    True => Some(
+      EnumData(
+        "Bad",
+        0u32,
+        SType(0u32),
+        False,
+        CCons(
+          CtorData(
+            "Mk",
+            "Bad",
+            0u32,
+            0u32,
+            1u32,
+            Pi(
+              "f",
+              Ind("List", TCons(Ind("Bad", TNil), TNil)),
+              Ind("Bad", TNil)
+            )
+          ),
+          CNil
+        )
+      )
+    )
+    False => None
+  }
+}
+
+pub fn demo_positive_bool(): U32 {
+  match check_positivity(bool_globals, "Bool") {
+    Ok(Unit) => 1u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_negative_positivity(): U32 {
+  match check_positivity(negative_globals, "Bad") {
+    Err(Negative) => 1u32
+    Err(_) => 0u32
+    Ok(Unit) => 0u32
+  }
+}
+
+pub fn demo_nested_positivity(): U32 {
+  match check_positivity(nested_globals, "Bad") {
+    Err(Nested) => 1u32
+    Err(_) => 0u32
+    Ok(Unit) => 0u32
+  }
+}
