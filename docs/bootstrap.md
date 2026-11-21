@@ -80,6 +80,11 @@ commits and design notes.
 
 | D38 | **Direct calls, tail calls, and allocation.** A saturated application of a known top-level function calls an uncurried direct entry point instead of allocating and applying a curried closure. Tail-position self calls emit `return_call`. `neo-internal bench` measures component size and wasmtime wall time on `bench/list_workload.neo`. Free lists are deferred: Neo has no liveness signal, and the measured removable cost was call-site closure allocation; a generic free list needs an ownership model. |
 
+| D39 | **Fixed component shell.** The component wrapper is a committed binary shell produced once from the frozen world. Codegen parses the top-level component sections, replaces the first core-module section with the generated module, and leaves the shim modules and wrapper untouched. Runtime WIT parsing and `wit-component` are no longer dependencies; the shell is regenerated only when the world changes. |
+
+| D40 | **Source-attributed spans.** `Span` carries a `file` id, and `Program` carries the loader's file table. The loader assigns ids while parsing each module file, so diagnostics from child files print the correct path. In-memory `parse_source` uses id 0 and no file table. |
+| D41 | **Deep terms.** The native CLI and `neo-internal` run on a 64 MiB worker thread, and the `wasm32-wasip2` compiler links with a 16 MiB stack. This removes the observed aborts on large `Nat` literals without changing kernel semantics; an explicit recursion budget remains future work. |
+
 ## 3. The `Neo-B` subset
 
 The compiler is written in a subset of the language it accepts. The rule is
@@ -121,7 +126,7 @@ Parity against Stage 0 is added by M1 and applies from then on.
 | M5 | Direct calls, `return_call`, allocation review, benchmark | Self-compile-shaped workload in budget | ~700 Rust |
 | M6 | Modules, file modules, `pub use`, visibility, and `impl` blocks | Multi-file module builds and runs; module, visibility, and re-export tests | ~700 Rust |
 | M7 | Neo-written standard library (`Option`, `Result`, `Ordering`, `Map`, string utilities) | Library tests pass | ~1,500 Neo |
-| M8 | Canonical component emitter, frozen | Byte-identical to `wit-component` on the corpus, stable across processes | ~400 Rust |
+| M8 | Canonical component emitter, frozen | Stable components across processes; fixed shell with core-module splicing | ~400 Rust |
 | M9 | Kernel port: core, eval + fuel, conversion, checking, termination, positivity, pretty | Verdict and type parity on the soundness suite and adversarial cases | ~3,500 Neo |
 | M10 | Frontend port: lexer, parser, surface, elaborator | Parse/elaborate/type-dump parity, including implicit inference | ~5,000 Neo |
 | M11 | Codegen port | Byte-identical core modules against Stage 0 on the corpus | ~3,500 Neo |

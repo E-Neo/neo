@@ -61,6 +61,10 @@ pub struct Token {
 }
 
 pub fn lex(src: &str) -> Result<Vec<Token>> {
+    lex_in_file(src, 0)
+}
+
+pub fn lex_in_file(src: &str, file: u32) -> Result<Vec<Token>> {
     let chars: Vec<char> = src.chars().collect();
     let mut i = 0usize;
     let mut line = 1usize;
@@ -81,7 +85,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
 
     while i < chars.len() {
         let c = chars[i];
-        let span = Span::new(line, col);
+        let span = Span::in_file(file, line, col);
 
         if c == ' ' || c == '\t' || c == '\r' {
             advance(&mut i, &mut line, &mut col);
@@ -114,7 +118,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 QuoteKind::Str
             };
             advance(&mut i, &mut line, &mut col);
-            let bytes = lex_quoted(&chars, &mut i, &mut line, &mut col, span, kind)?;
+            let bytes = lex_quoted(&chars, &mut i, &mut line, &mut col, span, kind, file)?;
             let tok = match kind {
                 QuoteKind::Str => Tok::Str(bytes),
                 QuoteKind::Bytes => Tok::Bytes(bytes),
@@ -431,6 +435,7 @@ fn lex_quoted(
     col: &mut usize,
     span: Span,
     kind: QuoteKind,
+    file: u32,
 ) -> Result<Vec<u8>> {
     let advance = |i: &mut usize, line: &mut usize, col: &mut usize| {
         if chars[*i] == '\n' {
@@ -453,7 +458,7 @@ fn lex_quoted(
         }
         if ch == '\n' {
             return Err(Error::at(
-                Span::new(*line, *col),
+                Span::in_file(file, *line, *col),
                 "string literals cannot contain a newline",
             ));
         }
@@ -475,7 +480,7 @@ fn lex_quoted(
                     for _ in 0..2 {
                         let Some(digit) = chars.get(*i).and_then(|c| c.to_digit(16)) else {
                             return Err(Error::at(
-                                Span::new(*line, *col),
+                                Span::in_file(file, *line, *col),
                                 "expected two hex digits after `\\x`",
                             ));
                         };
@@ -484,7 +489,7 @@ fn lex_quoted(
                     }
                     if kind == QuoteKind::Str && value > 0x7f {
                         return Err(Error::at(
-                            Span::new(*line, *col),
+                            Span::in_file(file, *line, *col),
                             "`\\x` above `7f` is not valid UTF-8; use a bytes literal",
                         ));
                     }
@@ -493,7 +498,7 @@ fn lex_quoted(
                 }
                 other => {
                     return Err(Error::at(
-                        Span::new(*line, *col),
+                        Span::in_file(file, *line, *col),
                         format!("unknown string escape `\\{}`", other),
                     ));
                 }
@@ -503,7 +508,7 @@ fn lex_quoted(
         }
         if kind == QuoteKind::Bytes && !ch.is_ascii() {
             return Err(Error::at(
-                Span::new(*line, *col),
+                Span::in_file(file, *line, *col),
                 "bytes literals must contain only ASCII characters; use `\\x` escapes",
             ));
         }

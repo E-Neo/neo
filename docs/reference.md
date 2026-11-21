@@ -2109,7 +2109,8 @@ design:
   receiver's type head; see [methods](#methods);
 - package managers, module search paths, and path attributes for file
   modules; see [file modules](#file-modules);
-- file-attributed diagnostic spans for errors originating in a child module;
+- an explicit recursion budget for extremely deep terms; the current compiler
+  uses larger stacks instead;
 - characters, floats, networking, and I/O beyond argument, stdin, and regular-file access;
 - character-aware string slicing: `slice` indexes bytes;
 - mutual recursion and mutual inductive types;

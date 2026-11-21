@@ -14,13 +14,29 @@ use neo::value::{V, Val};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match run(&args) {
+    let result = run_with_stack(args);
+    match result {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn run_with_stack(args: Vec<String>) -> Result<u8> {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || run(&args))
+        .map_err(|e| Error::new(format!("cannot start compiler thread: {e}")))?
+        .join()
+        .map_err(|_| Error::new("compiler thread panicked"))?
+}
+
+#[cfg(target_family = "wasm")]
+fn run_with_stack(args: Vec<String>) -> Result<u8> {
+    run(&args)
 }
 
 fn run(args: &[String]) -> Result<u8> {
@@ -63,7 +79,7 @@ fn print_help() {
 fn interpret_file(path: &str) -> Result<u8> {
     let program = neo::load::parse_file(path)?;
     let mut globals = new_globals()?;
-    elaborate_program(&mut globals, &program).map_err(|e| add_file(path, e))?;
+    elaborate_program(&mut globals, &program).map_err(|e| with_file(&program, e))?;
     run_main(&globals)
 }
 
@@ -98,7 +114,7 @@ fn build_command(args: &[String]) -> Result<()> {
     });
     let program = neo::load::parse_file(&input)?;
     let mut globals = new_globals()?;
-    elaborate_program(&mut globals, &program).map_err(|e| add_file(&input, e))?;
+    elaborate_program(&mut globals, &program).map_err(|e| with_file(&program, e))?;
     ensure_main(&globals)?;
     neo::codegen::build_component(&globals, &output)
         .map_err(|e| Error::new(format!("code generation failed: {}", e)))?;
@@ -255,8 +271,12 @@ fn print_value(globals: &Globals, v: &V) -> Option<String> {
     }
 }
 
-fn add_file(path: &str, mut e: Error) -> Error {
-    e.message = format!("{}: {}", path, e.message);
+fn with_file(program: &neo::surface::Program, mut e: Error) -> Error {
+    if let Some(span) = e.span
+        && let Some(path) = program.files.get(span.file as usize)
+    {
+        e.file = Some(path.clone());
+    }
     e
 }
 

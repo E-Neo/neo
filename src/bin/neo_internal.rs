@@ -10,7 +10,7 @@ use neo::error::{Error, Result};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match run(&args) {
+    match run_with_stack(args) {
         Ok(text) => {
             print!("{text}");
             ExitCode::SUCCESS
@@ -20,6 +20,21 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn run_with_stack(args: Vec<String>) -> Result<String> {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || run(&args))
+        .map_err(|e| Error::new(format!("cannot start worker thread: {e}")))?
+        .join()
+        .map_err(|_| Error::new("worker thread panicked"))?
+}
+
+#[cfg(target_family = "wasm")]
+fn run_with_stack(args: Vec<String>) -> Result<String> {
+    run(&args)
 }
 
 fn run(args: &[String]) -> Result<String> {

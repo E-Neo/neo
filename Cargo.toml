@@ -45,5 +45,3 @@ neo-frontend = { path = "crates/neo-frontend" }
 neo-codegen = { path = "crates/neo-codegen" }
 neo-host = { path = "crates/neo-host" }
 wasm-encoder = "0.263.0"
-wit-component = "0.263.0"
-wit-parser = "0.263.0"

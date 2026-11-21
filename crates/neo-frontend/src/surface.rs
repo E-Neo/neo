@@ -3,6 +3,8 @@ use neo_common::error::Span;
 #[derive(Clone, Debug)]
 pub struct Program {
     pub items: Vec<Item>,
+    /// Source files by `Span::file`, in loader order.
+    pub files: Vec<String>,
 }
 
 /// A top-level or module-level item.

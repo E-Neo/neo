@@ -8,7 +8,11 @@ pub struct Parser {
 }
 
 pub fn parse_source(src: &str) -> Result<Program> {
-    let tokens = crate::lexer::lex(src)?;
+    parse_source_in_file(src, 0)
+}
+
+pub fn parse_source_in_file(src: &str, file: u32) -> Result<Program> {
+    let tokens = crate::lexer::lex_in_file(src, file)?;
     let mut p = Parser::new(tokens);
     p.parse_program()
 }
@@ -35,7 +39,10 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> Result<Program> {
         let items = self.parse_items_until_end()?;
-        Ok(Program { items })
+        Ok(Program {
+            items,
+            files: Vec::new(),
+        })
     }
 
     fn parse_items_until_end(&mut self) -> Result<Vec<Item>> {

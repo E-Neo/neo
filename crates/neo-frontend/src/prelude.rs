@@ -17,7 +17,10 @@ pub fn prelude_program() -> Result<Program> {
     for source in PRELUDE_FILES {
         items.extend(parse_source(source)?.items);
     }
-    Ok(Program { items })
+    Ok(Program {
+        items,
+        files: Vec::new(),
+    })
 }
 
 /// Install the prelude declarations into a fresh global environment.

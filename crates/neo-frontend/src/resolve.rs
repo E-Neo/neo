@@ -205,7 +205,10 @@ pub fn resolve(globals: &Globals, program: &Program, mode: Mode) -> Result<Resol
     visibility.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(Resolution {
-        program: Program { items },
+        program: Program {
+            items,
+            files: program.files.clone(),
+        },
         modules,
         visibility,
         root,

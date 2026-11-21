@@ -268,11 +268,41 @@ fn main(): Nat {
   match m {
     Map::New(_, tree) => match tree {
       Tip => 0
-      Bin(_, _, _, _) => 1
+      Bin(_, _, _, _, _) => 1
     }
   }
 }
 "#,
     );
     assert_eq!(as_nat(&globals, &call(&globals, "main", &[])), 1);
+}
+
+#[test]
+fn map_stays_balanced_under_sorted_inserts() {
+    assert_eq!(
+        nat_main(
+            r#"
+use map_empty
+use nat_cmp
+
+fn main(): Nat {
+  let m: Map[Nat, Nat] = map_empty(nat_cmp)
+  let m = m.insert(1, 0)
+  let m = m.insert(2, 0)
+  let m = m.insert(3, 0)
+  let m = m.insert(4, 0)
+  let m = m.insert(5, 0)
+  let m = m.insert(6, 0)
+  let m = m.insert(7, 0)
+  match m {
+    Map::New(_, tree) => match tree {
+      Tip => 0
+      Bin(h, _, _, _, _) => h
+    }
+  }
+}
+"#
+        ),
+        3
+    );
 }

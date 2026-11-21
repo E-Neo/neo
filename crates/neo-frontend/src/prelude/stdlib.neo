@@ -6,7 +6,7 @@ pub enum Ordering {
 
 pub enum MapTree[K: Type, V: Type] {
   Tip
-  Bin(K, V, MapTree[K, V], MapTree[K, V])
+  Bin(Nat, K, V, MapTree[K, V], MapTree[K, V])
 }
 
 pub enum Map[K: Type, V: Type] {
@@ -23,10 +23,84 @@ pub fn nat_cmp(a: Nat, b: Nat): Ordering {
   }
 }
 
+pub fn nat_max(a: Nat, b: Nat): Nat {
+  match nat_le(a, b) {
+    True => b
+    False => a
+  }
+}
+
 pub fn list_reverse[T: Type](xs: List[T], acc: List[T]): List[T] {
   match xs {
     Nil => acc
     Cons(x, rest) => list_reverse(rest, Cons(x, acc))
+  }
+}
+
+pub fn map_height[K: Type, V: Type](tree: MapTree[K, V]): Nat {
+  match tree {
+    Tip => Zero
+    Bin(h, _, _, _, _) => h
+  }
+}
+
+pub fn map_node[K: Type, V: Type](
+  key: K,
+  value: V,
+  left: MapTree[K, V],
+  right: MapTree[K, V]
+): MapTree[K, V] {
+  Bin(
+    Succ(nat_max(map_height(left), map_height(right))),
+    key,
+    value,
+    left,
+    right
+  )
+}
+
+pub fn map_balance[K: Type, V: Type](
+  key: K,
+  value: V,
+  left: MapTree[K, V],
+  right: MapTree[K, V]
+): MapTree[K, V] {
+  match nat_gt(map_height(left), nat_add(map_height(right), 1)) {
+    True => match left {
+      Tip => map_node(key, value, left, right)
+      Bin(_, lk, lv, ll, lr) => match nat_ge(map_height(ll), map_height(lr)) {
+        True => map_node(lk, lv, ll, map_node(key, value, lr, right))
+        False => match lr {
+          Tip => map_node(key, value, left, right)
+          Bin(_, rk, rv, rl, rr) =>
+            map_node(
+              rk,
+              rv,
+              map_node(lk, lv, ll, rl),
+              map_node(key, value, rr, right)
+            )
+        }
+      }
+    }
+    False => match nat_gt(map_height(right), nat_add(map_height(left), 1)) {
+      True => match right {
+        Tip => map_node(key, value, left, right)
+        Bin(_, rk, rv, rl, rr) => match nat_ge(map_height(rr), map_height(rl)) {
+          True => map_node(rk, rv, map_node(key, value, left, rl), rr)
+          False => match rl {
+            Tip => map_node(key, value, left, right)
+            Bin(_, lk, lv, ll, lr) =>
+              map_node(
+                lk,
+                lv,
+                map_node(key, value, left, ll),
+                map_node(rk, rv, lr, rr)
+              )
+          }
+        }
+      }
+      False => map_node(key, value, left, right)
+    }
   }
 }
 
@@ -37,7 +111,7 @@ pub fn map_get[K: Type, V: Type](
 ): Option[V] {
   match tree {
     Tip => None
-    Bin(k, v, left, right) => match compare(key, k) {
+    Bin(_, k, v, left, right) => match compare(key, k) {
       Less => map_get(compare, left, key)
       Equal => Some(v)
       Greater => map_get(compare, right, key)
@@ -52,11 +126,11 @@ pub fn map_insert[K: Type, V: Type](
   value: V
 ): MapTree[K, V] {
   match tree {
-    Tip => Bin(key, value, Tip, Tip)
-    Bin(k, v, left, right) => match compare(key, k) {
-      Less => Bin(k, v, map_insert(compare, left, key, value), right)
-      Equal => Bin(key, value, left, right)
-      Greater => Bin(k, v, left, map_insert(compare, right, key, value))
+    Tip => map_node(key, value, Tip, Tip)
+    Bin(_, k, v, left, right) => match compare(key, k) {
+      Less => map_balance(k, v, map_insert(compare, left, key, value), right)
+      Equal => map_node(key, value, left, right)
+      Greater => map_balance(k, v, left, map_insert(compare, right, key, value))
     }
   }
 }
@@ -68,7 +142,7 @@ pub fn map_empty[K: Type, V: Type](compare: fn(K, K) -> Ordering): Map[K, V] {
 pub fn map_size[K: Type, V: Type](tree: MapTree[K, V]): Nat {
   match tree {
     Tip => Zero
-    Bin(_, _, left, right) => Succ(nat_add(map_size(left), map_size(right)))
+    Bin(_, _, _, left, right) => Succ(nat_add(map_size(left), map_size(right)))
   }
 }
 
@@ -140,7 +214,7 @@ impl[K: Type, V: Type] Map[K, V] {
     match self {
       Map::New(_, tree) => match tree {
         Tip => True
-        Bin(_, _, _, _) => False
+        Bin(_, _, _, _, _) => False
       }
     }
   }

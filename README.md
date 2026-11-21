@@ -28,6 +28,8 @@ Implemented:
   comparison operations, compiled to unboxed WebAssembly `i32`s;
 - direct calls to saturated known functions, `return_call` for tail
   recursion, and a benchmark harness (`neo-internal bench`);
+- a frozen component shell that splices the generated core module, so
+  code generation no longer parses WIT;
 - modules with nested items, file modules (`mod name;`), `use` paths, aliases,
   constructor globs, and `pub use` re-exports; private-by-default visibility
   with `pub`;

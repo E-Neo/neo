@@ -8,8 +8,8 @@ use wasm_encoder::{
     Instruction as I, MemArg, MemArgTarget, MemorySection, MemoryType, Module, RefType,
     TableSection, TableType, TypeSection, ValType,
 };
-use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
-use wit_parser::{Resolve, UnresolvedPackageGroup, WorldId};
+/// The fixed component shell. Only its first core-module section is replaced.
+const COMPONENT_SHELL: &[u8] = include_bytes!("component_shell.wasm");
 
 use crate::core::{PrimLit, PrimOp, PrimTy, RcTm, Tm};
 use crate::env::Globals;
@@ -63,15 +63,6 @@ const IMPORT_CREATE_DIRECTORY_AT: u32 = 16;
 const IMPORT_READ_DIRECTORY: u32 = 17;
 const IMPORT_READ_DIRECTORY_ENTRY: u32 = 18;
 const IMPORT_DROP_DIRECTORY_ENTRY_STREAM: u32 = 19;
-
-const NEO_WIT: &str = include_str!("../wit/neo.wit");
-const WIT_IO: &str = include_str!("../wit/deps/io.wit");
-const WIT_CLOCKS: &str = include_str!("../wit/deps/clocks.wit");
-const WIT_RANDOM: &str = include_str!("../wit/deps/random.wit");
-const WIT_FILESYSTEM: &str = include_str!("../wit/deps/filesystem.wit");
-const WIT_HTTP: &str = include_str!("../wit/deps/http.wit");
-const WIT_SOCKETS: &str = include_str!("../wit/deps/sockets.wit");
-const WIT_CLI: &str = include_str!("../wit/deps/cli.wit");
 
 /// A local or a field loaded from a pointer-holding local.
 #[derive(Clone, Copy)]
@@ -3429,31 +3420,10 @@ fn neutral_has_var(n: &crate::value::Neutral) -> bool {
     }
 }
 
-fn resolve_wit() -> Result<(Resolve, WorldId)> {
-    let mut resolve = Resolve::new();
-    let parse = |path: &str, text: &str| {
-        UnresolvedPackageGroup::parse(path, text)
-            .map_err(|(_, e)| Error::new(format!("failed to parse {}: {:?}", path, e)))
-    };
-    let deps = vec![
-        parse("wit/deps/io.wit", WIT_IO)?,
-        parse("wit/deps/clocks.wit", WIT_CLOCKS)?,
-        parse("wit/deps/random.wit", WIT_RANDOM)?,
-        parse("wit/deps/filesystem.wit", WIT_FILESYSTEM)?,
-        parse("wit/deps/http.wit", WIT_HTTP)?,
-        parse("wit/deps/sockets.wit", WIT_SOCKETS)?,
-        parse("wit/deps/cli.wit", WIT_CLI)?,
-    ];
-    let main = parse("wit/neo.wit", NEO_WIT)?;
-    let pkg = resolve
-        .push_groups(main, deps)
-        .map_err(|e| Error::new(format!("failed to resolve WIT: {:?}", e)))?;
-    let world = resolve
-        .select_world(&[pkg], Some("neo"))
-        .map_err(|e| Error::new(format!("failed to select WIT world: {:?}", e)))?;
-    Ok((resolve, world))
-}
-
+/// Compile the elaborated program to component bytes without writing a file.
+///
+/// This is the byte-level entry point used by the bootstrap oracle, which
+/// hashes and compares builds.
 /// Compile the elaborated program to a WASI 0.2 component.
 pub fn build_component(globals: &Globals, output: &Path) -> Result<()> {
     let component = build_component_bytes(globals)?;
@@ -3462,24 +3432,73 @@ pub fn build_component(globals: &Globals, output: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Compile the elaborated program to component bytes without writing a file.
-///
-/// This is the byte-level entry point used by the bootstrap oracle, which
-/// hashes and compares builds.
 pub fn build_component_bytes(globals: &Globals) -> Result<Vec<u8>> {
     // The prelude defines no `main`; only the user's program is compiled.
     let cg = Codegen::new(globals);
     let core = cg.build()?;
+    splice_core_module(COMPONENT_SHELL, &core)
+}
 
-    let (resolve, world) = resolve_wit()?;
-    let mut bytes = core;
-    embed_component_metadata(&mut bytes, &resolve, world, StringEncoding::UTF8, true)
-        .map_err(|e| Error::new(format!("failed to embed component metadata: {}", e)))?;
+fn splice_core_module(shell: &[u8], core: &[u8]) -> Result<Vec<u8>> {
+    if shell.len() < 8 || &shell[..4] != b"\0asm" || core.len() < 8 || &core[..4] != b"\0asm" {
+        return Err(Error::new(
+            "internal: invalid component shell or core module",
+        ));
+    }
+    let mut out = shell[..8].to_vec();
+    let mut pos = 8;
+    let mut replaced = false;
+    while pos < shell.len() {
+        let start = pos;
+        let id = shell[pos];
+        pos += 1;
+        let (size, size_len) = read_leb(&shell[pos..])
+            .ok_or_else(|| Error::new("internal: invalid component section length"))?;
+        let payload_start = pos + size_len;
+        let payload_end = payload_start
+            .checked_add(size as usize)
+            .filter(|end| *end <= shell.len())
+            .ok_or_else(|| Error::new("internal: truncated component section"))?;
+        if id == 1 && !replaced {
+            out.push(1);
+            write_leb(core.len() as u64, &mut out);
+            out.extend_from_slice(core);
+            replaced = true;
+        } else {
+            out.extend_from_slice(&shell[start..payload_end]);
+        }
+        pos = payload_end;
+    }
+    if !replaced {
+        return Err(Error::new("internal: component shell has no core module"));
+    }
+    Ok(out)
+}
 
-    ComponentEncoder::default()
-        .module(&bytes)
-        .map_err(|e| Error::new(format!("failed to parse core module: {}", e)))?
-        .validate(true)
-        .encode()
-        .map_err(|e| Error::new(format!("failed to encode component: {:#}", e)))
+fn read_leb(bytes: &[u8]) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    let mut shift = 0;
+    for (i, byte) in bytes.iter().enumerate() {
+        value |= ((byte & 0x7f) as u64) << shift;
+        if byte & 0x80 == 0 {
+            return Some((value, i + 1));
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+    None
+}
+
+fn write_leb(mut value: u64, out: &mut Vec<u8>) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
 }

@@ -9,5 +9,3 @@ neo-common.workspace = true
 neo-kernel.workspace = true
 neo-host.workspace = true
 wasm-encoder.workspace = true
-wit-component.workspace = true
-wit-parser.workspace = true

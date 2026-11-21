@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::parser::parse_source;
+use crate::parser::parse_source_in_file;
 use crate::surface::{Item, ModDecl, Program};
 use neo_common::error::{Error, Result};
 
@@ -15,10 +15,17 @@ pub fn parse_file(path: impl AsRef<Path>) -> Result<Program> {
     let path = path.as_ref();
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut stack = Vec::new();
-    load_file(path, dir, &mut stack)
+    let mut files = Vec::new();
+    let items = load_file(path, dir, &mut stack, &mut files)?;
+    Ok(Program { items, files })
 }
 
-fn load_file(path: &Path, module_dir: &Path, stack: &mut Vec<PathBuf>) -> Result<Program> {
+fn load_file(
+    path: &Path,
+    module_dir: &Path,
+    stack: &mut Vec<PathBuf>,
+    files: &mut Vec<String>,
+) -> Result<Vec<Item>> {
     let identity = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if stack.contains(&identity) {
         let chain = stack
@@ -32,27 +39,35 @@ fn load_file(path: &Path, module_dir: &Path, stack: &mut Vec<PathBuf>) -> Result
     stack.push(identity);
     let source = std::fs::read_to_string(path)
         .map_err(|e| Error::new(format!("cannot read `{}`: {}", path.display(), e)))?;
-    let program = parse_source(&source).map_err(|e| in_file(path, e))?;
-    let items = expand_items(program.items, module_dir, stack)?;
+    let file = files.len() as u32;
+    files.push(path.display().to_string());
+    let program = parse_source_in_file(&source, file).map_err(|e| in_file(path, e))?;
+    let items = expand_items(program.items, module_dir, stack, files)?;
     stack.pop();
-    Ok(Program { items })
+    Ok(items)
 }
 
 fn expand_items(
     items: Vec<Item>,
     module_dir: &Path,
     stack: &mut Vec<PathBuf>,
+    files: &mut Vec<String>,
 ) -> Result<Vec<Item>> {
     items
         .into_iter()
         .map(|item| match item {
-            Item::Mod(decl) => expand_module(decl, module_dir, stack),
+            Item::Mod(decl) => expand_module(decl, module_dir, stack, files),
             other => Ok(other),
         })
         .collect()
 }
 
-fn expand_module(decl: ModDecl, module_dir: &Path, stack: &mut Vec<PathBuf>) -> Result<Item> {
+fn expand_module(
+    decl: ModDecl,
+    module_dir: &Path,
+    stack: &mut Vec<PathBuf>,
+    files: &mut Vec<String>,
+) -> Result<Item> {
     let ModDecl {
         name,
         is_pub,
@@ -61,10 +76,10 @@ fn expand_module(decl: ModDecl, module_dir: &Path, stack: &mut Vec<PathBuf>) -> 
     } = decl;
     let child_dir = module_dir.join(&name);
     let items = match items {
-        Some(items) => expand_items(items, &child_dir, stack)?,
+        Some(items) => expand_items(items, &child_dir, stack, files)?,
         None => {
             let file = module_file(module_dir, &name, span)?;
-            load_file(&file, &child_dir, stack)?.items
+            load_file(&file, &child_dir, stack, files)?
         }
     };
     Ok(Item::Mod(ModDecl {

@@ -262,3 +262,20 @@ fn main(): IO[U32] {
         error.message
     );
 }
+
+#[test]
+fn child_errors_carry_the_child_source_id() {
+    let dir = temp_dir("child-span");
+    write(&dir, "main.neo", "mod child;\n");
+    write(&dir, "child.neo", "pub fn bad(): U32 {\n  True\n}\n");
+    let program = neo::load::parse_file(dir.join("main.neo")).expect("load");
+    let mut globals = new_globals().expect("prelude");
+    let error = elaborate_program(&mut globals, &program).unwrap_err();
+    let span = error.span.expect("span");
+    assert!(span.file > 0, "the error comes from the child file");
+    assert!(
+        program.files[span.file as usize].ends_with("child.neo"),
+        "unexpected source map: {:?}",
+        program.files
+    );
+}
