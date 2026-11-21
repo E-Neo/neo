@@ -210,7 +210,7 @@ fn main(): U32 {
   outer::inner::answer()
 }
 "#,
-        "module `outer::inner` is private here",
+        "`outer::inner` is private here",
     );
 }
 
@@ -312,7 +312,7 @@ fn main(): Nat {
 }
 
 #[test]
-fn duplicate_and_re_exported_modules_are_rejected() {
+fn duplicate_modules_are_rejected() {
     assert_rejected(
         r#"
 mod a {}
@@ -320,6 +320,56 @@ mod a {}
 "#,
         "already defined in this module",
     );
+}
+
+#[test]
+fn public_re_exports_are_reachable() {
+    let n = main_u32(
+        r#"
+pub mod a {
+  pub fn f(): U32 { 41u32 }
+}
+
+mod b {
+  pub use super::a::f
+}
+
+fn main(): U32 {
+  b::f() + 1u32
+}
+"#,
+    );
+    assert_eq!(n, 42);
+}
+
+#[test]
+fn public_constructor_re_exports_are_reachable() {
+    let n = main_u32(
+        r#"
+pub mod shapes {
+  pub enum Shape {
+    Circle(U32)
+  }
+}
+
+mod re {
+  pub use super::shapes::Shape::{Circle}
+}
+
+use re::Circle
+
+fn main(): U32 {
+  match Circle(5u32) {
+    Circle(n) => n
+  }
+}
+"#,
+    );
+    assert_eq!(n, 5);
+}
+
+#[test]
+fn private_re_exports_are_rejected() {
     assert_rejected(
         r#"
 mod a {
@@ -327,7 +377,7 @@ mod a {
 }
 pub use a::f
 "#,
-        "re-exports are not supported",
+        "private and cannot be re-exported",
     );
 }
 

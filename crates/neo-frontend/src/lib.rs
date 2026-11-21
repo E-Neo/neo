@@ -6,6 +6,7 @@
 
 pub mod elab;
 pub mod lexer;
+pub mod load;
 pub mod parser;
 pub mod prelude;
 pub mod resolve;

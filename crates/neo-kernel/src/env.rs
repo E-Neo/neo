@@ -92,7 +92,10 @@ pub struct ItemVisibility {
 
 impl ItemVisibility {
     pub fn visible_from(&self, module: &str) -> bool {
-        self.public || module == self.module || module.starts_with(&format!("{}::", self.module))
+        self.public
+            || self.module.is_empty()
+            || module == self.module
+            || module.starts_with(&format!("{}::", self.module))
     }
 }
 

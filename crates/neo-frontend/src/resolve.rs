@@ -86,6 +86,8 @@ struct ModuleInfo {
     path: String,
     parent: Option<usize>,
     items: HashMap<String, NameTarget>,
+    /// Visibility of each name in `items`, including public re-exports.
+    item_vis: HashMap<String, ItemVisibility>,
     imports: HashMap<String, NameTarget>,
     uses: Vec<UseDecl>,
     decls: Vec<DeclRef>,
@@ -154,6 +156,7 @@ pub fn resolve(globals: &Globals, program: &Program, mode: Mode) -> Result<Resol
         path: String::new(),
         parent: None,
         items: HashMap::new(),
+        item_vis: HashMap::new(),
         imports: HashMap::new(),
         uses: Vec::new(),
         decls: Vec::new(),
@@ -268,14 +271,18 @@ impl Tree<'_> {
                         path: path.clone(),
                         parent: Some(module),
                         items: HashMap::new(),
+                        item_vis: HashMap::new(),
                         imports: HashMap::new(),
                         uses: Vec::new(),
                         decls: Vec::new(),
                     });
                     self.module_index.insert(path.clone(), index);
-                    self.modules[module]
-                        .items
-                        .insert(decl.name.clone(), NameTarget::Module(path.clone()));
+                    self.record_item(
+                        module,
+                        &decl.name,
+                        NameTarget::Module(path.clone()),
+                        decl.is_pub,
+                    );
                     self.module_vis.insert(
                         path,
                         ItemVisibility {
@@ -283,7 +290,16 @@ impl Tree<'_> {
                             public: decl.is_pub,
                         },
                     );
-                    self.build_items(index, &decl.items)?;
+                    let Some(items) = &decl.items else {
+                        return Err(Error::at(
+                            decl.span,
+                            format!(
+                                "file module `{}` was not loaded; use `load::parse_file`",
+                                decl.name
+                            ),
+                        ));
+                    };
+                    self.build_items(index, items)?;
                 }
                 Item::Use(decl) => {
                     self.modules[module].uses.push(decl.clone());
@@ -343,9 +359,7 @@ impl Tree<'_> {
                             public: decl.is_pub,
                         },
                     );
-                    self.modules[module]
-                        .items
-                        .insert(simple, NameTarget::Item(key));
+                    self.record_item(module, &simple, NameTarget::Item(key), decl.is_pub);
                     self.modules[module].decls.push(DeclRef::Enum(decl));
                 }
                 Item::Fn(decl) => {
@@ -372,9 +386,7 @@ impl Tree<'_> {
                             public: decl.is_pub,
                         },
                     );
-                    self.modules[module]
-                        .items
-                        .insert(decl.name.clone(), NameTarget::Item(key));
+                    self.record_item(module, &decl.name, NameTarget::Item(key), decl.is_pub);
                     self.modules[module].decls.push(DeclRef::Fn(decl));
                 }
                 Item::Extern(decl) => {
@@ -401,9 +413,7 @@ impl Tree<'_> {
                             public: decl.is_pub,
                         },
                     );
-                    self.modules[module]
-                        .items
-                        .insert(decl.name.clone(), NameTarget::Item(key));
+                    self.record_item(module, &decl.name, NameTarget::Item(key), decl.is_pub);
                     self.modules[module].decls.push(DeclRef::Extern(decl));
                 }
                 Item::Impl(decl) => {
@@ -414,26 +424,57 @@ impl Tree<'_> {
         Ok(())
     }
 
+    fn record_item(&mut self, module: usize, name: &str, target: NameTarget, public: bool) {
+        let path = self.modules[module].path.clone();
+        self.modules[module].items.insert(name.to_string(), target);
+        self.modules[module].item_vis.insert(
+            name.to_string(),
+            ItemVisibility {
+                module: path,
+                public,
+            },
+        );
+    }
+
     fn resolve_imports(&mut self) -> Result<()> {
+        // Re-exports make imports order-dependent: `use b::Circle` needs
+        // `b`'s own `pub use` first. Retry failed imports until a pass makes
+        // no progress, then report the first remaining error.
+        let mut pending: Vec<(usize, UseDecl, Option<Error>)> = Vec::new();
         for index in 0..self.modules.len() {
-            if self.modules[index].uses.is_empty() {
-                continue;
-            }
             let uses = std::mem::take(&mut self.modules[index].uses);
-            for use_decl in &uses {
-                if use_decl.is_pub {
-                    return Err(Error::at(
-                        use_decl.span,
-                        "`pub use` re-exports are not supported yet",
-                    ));
-                }
-                self.resolve_use_tree(index, &[], &use_decl.tree)?;
+            for use_decl in uses {
+                pending.push((index, use_decl, None));
             }
+        }
+        while !pending.is_empty() {
+            let mut next = Vec::new();
+            let mut progress = false;
+            for (index, use_decl, _) in pending {
+                match self.resolve_use_tree(index, &[], &use_decl.tree, use_decl.is_pub) {
+                    Ok(()) => progress = true,
+                    Err(error) => next.push((index, use_decl, Some(error))),
+                }
+            }
+            if next.is_empty() {
+                return Ok(());
+            }
+            if !progress {
+                let (_, _, error) = next.remove(0);
+                return Err(error.expect("failed import carries an error"));
+            }
+            pending = next;
         }
         Ok(())
     }
 
-    fn resolve_use_tree(&mut self, module: usize, prefix: &[String], tree: &UseTree) -> Result<()> {
+    fn resolve_use_tree(
+        &mut self,
+        module: usize,
+        prefix: &[String],
+        tree: &UseTree,
+        public: bool,
+    ) -> Result<()> {
         match tree {
             UseTree::Name {
                 segments,
@@ -444,22 +485,28 @@ impl Tree<'_> {
                 full.extend_from_slice(segments);
                 let from = self.modules[module].path.clone();
                 let target = self.resolve_path_ref(&from, &full)?;
+                if public {
+                    self.check_public_path(&from, &full, *span)?;
+                }
                 let name = alias
                     .clone()
                     .unwrap_or_else(|| full.last().cloned().unwrap_or_default());
-                self.add_import(module, &name, target, *span)
+                self.add_binding(module, &name, target, *span, public)
             }
             UseTree::Glob { segments, span } => {
                 let mut full = prefix.to_vec();
                 full.extend_from_slice(segments);
                 let from = self.modules[module].path.clone();
                 let target = self.resolve_path_ref(&from, &full)?;
+                if public {
+                    self.check_public_path(&from, &full, *span)?;
+                }
                 match target {
                     NameTarget::Module(path) => {
                         let mut bindings = Vec::new();
                         self.glob_module(&path, &from, &mut bindings)?;
                         for (name, target) in bindings {
-                            self.add_import(module, &name, target, *span)?;
+                            self.add_binding(module, &name, target, *span, public)?;
                         }
                         Ok(())
                     }
@@ -475,7 +522,13 @@ impl Tree<'_> {
                         };
                         for ctor in entry.ctors {
                             let ctor_key = format!("{}::{}", key, ctor);
-                            self.add_import(module, &ctor, NameTarget::Item(ctor_key), *span)?;
+                            self.add_binding(
+                                module,
+                                &ctor,
+                                NameTarget::Item(ctor_key),
+                                *span,
+                                public,
+                            )?;
                         }
                         Ok(())
                     }
@@ -489,7 +542,7 @@ impl Tree<'_> {
                 let mut next = prefix.to_vec();
                 next.extend_from_slice(group);
                 for item in items {
-                    self.resolve_use_tree(module, &next, item)?;
+                    self.resolve_use_tree(module, &next, item, public)?;
                 }
                 Ok(())
             }
@@ -506,18 +559,13 @@ impl Tree<'_> {
             let mut names: Vec<String> = self.modules[index].items.keys().cloned().collect();
             names.sort();
             for name in names {
-                let target = self.modules[index].items.get(&name).unwrap().clone();
-                match &target {
-                    NameTarget::Item(key) => {
-                        if self.visible(key, from) {
-                            out.push((name, target));
-                        }
-                    }
-                    NameTarget::Module(child) => {
-                        if self.module_visible(child, from) {
-                            out.push((name, target));
-                        }
-                    }
+                let visible = self.modules[index]
+                    .item_vis
+                    .get(&name)
+                    .is_some_and(|vis| vis.visible_from(from));
+                if visible {
+                    let target = self.modules[index].items.get(&name).unwrap().clone();
+                    out.push((name, target));
                 }
             }
             return Ok(());
@@ -559,42 +607,94 @@ impl Tree<'_> {
         Ok(())
     }
 
-    fn add_import(
+    fn add_binding(
         &mut self,
         module: usize,
         name: &str,
         target: NameTarget,
         span: Span,
+        public: bool,
     ) -> Result<()> {
-        if let Some(existing) = self.modules[module].imports.get(name) {
-            if same_target(existing, &target) {
-                return Ok(());
+        if public && !self.public_target(&target) {
+            return Err(Error::at(
+                span,
+                format!("`{}` is private and cannot be re-exported", name),
+            ));
+        }
+        let existing_item = self.modules[module].items.get(name).cloned();
+        let existing_import = self.modules[module].imports.get(name).cloned();
+        if let Some(existing) = &existing_item {
+            if !same_target(existing, &target) {
+                return Err(Error::at(
+                    span,
+                    format!("`{}` is already defined in this module", name),
+                ));
             }
+            if public {
+                let path = self.modules[module].path.clone();
+                self.modules[module].imports.remove(name);
+                self.modules[module].item_vis.insert(
+                    name.to_string(),
+                    ItemVisibility {
+                        module: path,
+                        public: true,
+                    },
+                );
+            }
+            return Ok(());
+        }
+        if let Some(existing) = &existing_import
+            && !same_target(existing, &target)
+        {
             return Err(Error::at(
                 span,
                 format!("`{}` is imported twice with different meanings", name),
             ));
         }
-        if let Some(local) = self.modules[module].items.get(name)
-            && !same_target(local, &target)
-        {
-            return Err(Error::at(
-                span,
-                format!(
-                    "`{}` is already defined in this module; use `as` to import it under another name",
-                    name
-                ),
-            ));
-        }
         if matches!(target, NameTarget::Item(ref key) if key == name)
+            && !public
+            && existing_import.is_none()
             && self.modules[module].items.contains_key(name)
         {
             return Ok(());
         }
-        self.modules[module]
-            .imports
-            .insert(name.to_string(), target);
+        if public {
+            self.modules[module].imports.remove(name);
+            self.record_item(module, name, target, true);
+        } else {
+            self.modules[module]
+                .imports
+                .insert(name.to_string(), target);
+        }
         Ok(())
+    }
+
+    fn check_public_path(&self, from: &str, segments: &[String], span: Span) -> Result<()> {
+        for k in 1..segments.len() {
+            match self.resolve_path_ref(from, &segments[..k]) {
+                Ok(NameTarget::Module(path)) => {
+                    if self.module_vis.get(&path).is_some_and(|vis| !vis.public) {
+                        return Err(Error::at(
+                            span,
+                            format!("module `{}` is private and cannot be re-exported", path),
+                        ));
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(())
+    }
+
+    fn public_target(&self, target: &NameTarget) -> bool {
+        match target {
+            NameTarget::Item(key) => self
+                .vis
+                .get(key)
+                .or_else(|| self.globals.names.visibility.get(key))
+                .is_some_and(|vis| vis.public),
+            NameTarget::Module(path) => self.module_vis.get(path).is_none_or(|vis| vis.public),
+        }
     }
 
     fn build_units(&mut self, module: usize, units: &mut Vec<Unit>) -> Result<()> {
@@ -1350,17 +1450,15 @@ impl Tree<'_> {
         let mut current = base.to_string();
         for (i, segment) in segments.iter().enumerate() {
             let last = i + 1 == segments.len();
-            if let Some(target) = self.item_in_module(&current, segment) {
+            if let Some(target) = self.item_in_module(&current, segment, from)? {
                 match target {
                     NameTarget::Module(path) => {
-                        self.check_module_visible(&path, from)?;
                         if last {
                             return Ok(NameTarget::Module(path));
                         }
                         current = path;
                     }
                     NameTarget::Item(key) => {
-                        self.check_item_visible(&key, from)?;
                         if last {
                             return Ok(NameTarget::Item(key));
                         }
@@ -1397,28 +1495,41 @@ impl Tree<'_> {
         )))
     }
 
-    fn item_in_module(&self, module: &str, name: &str) -> Option<NameTarget> {
+    fn item_in_module(&self, module: &str, name: &str, from: &str) -> Result<Option<NameTarget>> {
         if let Some(&index) = self.module_index.get(module) {
             if let Some(target) = self.modules[index].items.get(name) {
-                return Some(target.clone());
+                if let Some(vis) = self.modules[index].item_vis.get(name)
+                    && !vis.visible_from(from)
+                {
+                    let shown = match target {
+                        NameTarget::Item(key) => key.clone(),
+                        NameTarget::Module(path) => path.clone(),
+                    };
+                    return Err(Error::new(format!("`{}` is private here", shown)));
+                }
+                return Ok(Some(target.clone()));
             }
             let path = join_path(module, name);
             if self.known_modules.contains(&path) {
-                return Some(NameTarget::Module(path));
+                self.check_module_visible(&path, from)?;
+                return Ok(Some(NameTarget::Module(path)));
             }
             if self.globals_item(&path) {
-                return Some(NameTarget::Item(path));
+                self.check_item_visible(&path, from)?;
+                return Ok(Some(NameTarget::Item(path)));
             }
-            return None;
+            return Ok(None);
         }
         let path = join_path(module, name);
         if self.known_modules.contains(&path) {
-            return Some(NameTarget::Module(path));
+            self.check_module_visible(&path, from)?;
+            return Ok(Some(NameTarget::Module(path)));
         }
         if self.globals_item(&path) {
-            return Some(NameTarget::Item(path));
+            self.check_item_visible(&path, from)?;
+            return Ok(Some(NameTarget::Item(path)));
         }
-        None
+        Ok(None)
     }
 
     fn lookup(&self, module: &str, name: &str) -> Vec<NameTarget> {

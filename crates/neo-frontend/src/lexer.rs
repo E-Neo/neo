@@ -48,6 +48,7 @@ pub enum Tok {
     Dot,
     Colon,
     ColonColon,
+    Semicolon,
     Underscore,
     Newline,
     Eof,
@@ -249,6 +250,13 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
                 advance(&mut i, &mut line, &mut col);
                 out.push(Token {
                     tok: Tok::Dot,
+                    span,
+                });
+            }
+            ';' => {
+                advance(&mut i, &mut line, &mut col);
+                out.push(Token {
+                    tok: Tok::Semicolon,
                     span,
                 });
             }

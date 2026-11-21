@@ -61,11 +61,9 @@ fn print_help() {
 }
 
 fn interpret_file(path: &str) -> Result<()> {
-    let src = std::fs::read_to_string(path)
-        .map_err(|e| Error::new(format!("cannot read `{}`: {}", path, e)))?;
+    let program = neo::load::parse_file(path)?;
     let mut globals = new_globals()?;
-    let program = parse_source(&src).map_err(|e| add_file(&src, path, e))?;
-    elaborate_program(&mut globals, &program).map_err(|e| add_file(&src, path, e))?;
+    elaborate_program(&mut globals, &program).map_err(|e| add_file(path, e))?;
     run_main(&globals)
 }
 
@@ -98,11 +96,9 @@ fn build_command(args: &[String]) -> Result<()> {
         p.set_extension("wasm");
         p
     });
-    let src = std::fs::read_to_string(&input)
-        .map_err(|e| Error::new(format!("cannot read `{}`: {}", input, e)))?;
+    let program = neo::load::parse_file(&input)?;
     let mut globals = new_globals()?;
-    let program = parse_source(&src).map_err(|e| add_file(&src, &input, e))?;
-    elaborate_program(&mut globals, &program).map_err(|e| add_file(&src, &input, e))?;
+    elaborate_program(&mut globals, &program).map_err(|e| add_file(&input, e))?;
     ensure_main(&globals)?;
     neo::codegen::build_component(&globals, &output)
         .map_err(|e| Error::new(format!("code generation failed: {}", e)))?;
@@ -255,7 +251,7 @@ fn print_value(globals: &Globals, v: &V) -> Option<String> {
     }
 }
 
-fn add_file(_src: &str, path: &str, mut e: Error) -> Error {
+fn add_file(path: &str, mut e: Error) -> Error {
     e.message = format!("{}: {}", path, e.message);
     e
 }

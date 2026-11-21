@@ -26,8 +26,9 @@ Implemented:
   `Or`, `Exists`);
 - a primitive 32-bit word type `U32` with total arithmetic, bitwise, and
   comparison operations, compiled to unboxed WebAssembly `i32`s;
-- modules with nested items, `use` paths, aliases, and constructor globs;
-  private-by-default visibility with `pub`;
+- modules with nested items, file modules (`mod name;`), `use` paths, aliases,
+  constructor globs, and `pub use` re-exports; private-by-default visibility
+  with `pub`;
 - `impl` blocks and receiver-keyed methods: `impl Type { ... }` declarations,
   `x.name(args)` calls with static dispatch, generic receivers, and `pub`
   methods;
@@ -42,9 +43,9 @@ Implemented:
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
-and growable vectors (`Array[T, n]`, `Vec[T]`), multiple source files,
-`pub use` re-exports, networking, and I/O beyond arguments, stdin, and regular
-files. See the
+and growable vectors (`Array[T, n]`, `Vec[T]`), package management, module
+search paths, networking, and I/O beyond arguments, stdin, and regular files.
+See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 

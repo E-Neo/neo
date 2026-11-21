@@ -93,10 +93,19 @@ impl Parser {
         let span = self.peek().span;
         self.expect(&Tok::Mod, "expected `mod`")?;
         let name = self.expect_ident("expected a module name")?;
+        if self.at(&Tok::Semicolon) {
+            self.advance();
+            return Ok(ModDecl {
+                name,
+                is_pub,
+                items: None,
+                span,
+            });
+        }
         if !self.at(&Tok::LBrace) {
             return Err(Error::at(
                 self.peek().span,
-                "multi-file modules are not supported; write `mod name { ... }`",
+                "expected `{` or `;` after a module name",
             ));
         }
         self.advance();
@@ -104,7 +113,7 @@ impl Parser {
         Ok(ModDecl {
             name,
             is_pub,
-            items,
+            items: Some(items),
             span,
         })
     }

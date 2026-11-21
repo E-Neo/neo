@@ -332,7 +332,8 @@ fn main(): U32 {
 - A `use` path is resolved from the program root unless it starts with `self`
   or `super`: `use geometry::Shape::{Circle, Square}` imports constructors,
   `use geometry::Shape as S` renames a type, and `use geometry::Shape::*`
-  imports every constructor. `pub use` re-exports are not supported.
+  imports every constructor. Prefix a binding with `pub` to re-export it to
+  the enclosing module's users. A re-export may also re-export a module.
 - Inside a module, `self::name` names an item of the same module and
   `super::name` names an item of the enclosing module. A path may start with a
   module, or with a type when reaching one of its constructors.
@@ -343,6 +344,28 @@ fn main(): U32 {
   items, such as `nat_add`, must be imported with `use nat_add`.
 - Module paths use `::`; `.` is only for method calls. `geometry.area(x)` is
   therefore not a module access.
+
+### File modules
+
+`mod name;` loads a module from disk instead of an inline block:
+
+```neo
+mod geometry;
+```
+
+The loader looks for `geometry.neo` first and then `geometry/mod.neo` in the
+declaring module's directory. A module loaded from `geometry.neo` or
+`geometry/mod.neo` keeps `geometry/` as the directory for its own children.
+Inline modules also create a child directory: `mod outer { mod inner; }`
+loads `outer/inner.neo`.
+
+- Ambiguous layouts (both `name.neo` and `name/mod.neo`) and missing files are
+  errors.
+- A file may only be loaded once in an active chain; cycles are rejected.
+- `parse_source` is for in-memory programs. Use `load::parse_file` (or the CLI)
+  to expand file modules before elaboration.
+- Diagnostic spans currently identify a line and column within the root file;
+  errors from a child file do not yet carry that file's path.
 
 An item declared in the current module shadows an auto-imported prelude name.
 Constructors are namespaced, so this is valid:
@@ -1882,7 +1905,7 @@ program      ::= { NEWLINE } { item { NEWLINE } }
 item         ::= [ "pub" ] ( mod_decl | use_decl | enum_decl
                            | extern_decl | fn_decl )
                | impl_decl
-mod_decl     ::= "mod" IDENT "{" { NEWLINE } { item NEWLINE } "}"
+mod_decl     ::= "mod" IDENT ( ";" | "{" { NEWLINE } { item NEWLINE } "}" )
 use_decl     ::= "use" use_tree
 use_tree     ::= path [ "as" IDENT ]
                | path "::" "*"
@@ -2060,9 +2083,9 @@ design:
 - unqualified overloading (`concat(a, b)`), method values (`xs.length`), and
   user-defined operator overloading. Methods are selected only by the
   receiver's type head; see [methods](#methods);
-- multiple source files and `pub use` re-exports. Single-file `mod` blocks,
-  `use` imports, visibility, and `::` paths are supported; see
-  [modules and visibility](#modules-and-visibility);
+- package managers, module search paths, and path attributes for file
+  modules; see [file modules](#file-modules);
+- file-attributed diagnostic spans for errors originating in a child module;
 - characters, floats, networking, and I/O beyond argument, stdin, and regular-file access;
 - character-aware string slicing: `slice` indexes bytes;
 - mutual recursion and mutual inductive types;

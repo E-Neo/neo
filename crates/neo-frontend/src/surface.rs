@@ -20,7 +20,8 @@ pub enum Item {
 pub struct ModDecl {
     pub name: String,
     pub is_pub: bool,
-    pub items: Vec<Item>,
+    /// `None` for `mod name;`, which the file loader expands into items.
+    pub items: Option<Vec<Item>>,
     pub span: Span,
 }
 
