@@ -49,6 +49,10 @@ fn kernel_slices_pass() {
     assert_eq!(u32_of(&globals, "core::demo_infer_ind_bool"), 1);
     assert_eq!(u32_of(&globals, "core::demo_infer_ctor_bool"), 1);
     assert_eq!(u32_of(&globals, "core::demo_check_ctor_bool"), 1);
+    assert_eq!(u32_of(&globals, "core::demo_match_eval"), 1);
+    assert_eq!(u32_of(&globals, "core::demo_match_check"), 1);
+    assert_eq!(u32_of(&globals, "core::demo_match_missing"), 1);
+    assert_eq!(u32_of(&globals, "core::demo_match_arity"), 1);
 }
 
 #[test]
@@ -59,7 +63,7 @@ fn kernel_main_runs() {
         &globals,
         run_action(&globals, &mut StdioHost, &action).expect("run kernel main"),
     );
-    assert!(matches!(&*value, Val::PrimLit(PrimLit::U32(14))));
+    assert!(matches!(&*value, Val::PrimLit(PrimLit::U32(18))));
 }
 
 #[test]
@@ -72,6 +76,6 @@ fn kernel_component_runs() {
         .output()
         .expect("run wasmtime");
     let _ = std::fs::remove_file(&path);
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "14\n");
-    assert_eq!(out.status.code(), Some(14));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "18\n");
+    assert_eq!(out.status.code(), Some(18));
 }

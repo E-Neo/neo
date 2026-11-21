@@ -23,13 +23,16 @@ and conversion, written in Neo.
   application, with a `List[Val]` context and context-environment functions.
 - A Stage 1 global environment (`EnumInfo`/`CtorInfo`/`CtorList`) and typing
   for enum values and constructor applications via `apply_type`.
+- A `Match` term, encoded branch lists, non-dependent branch checking with
+  constructor field telescopes, exhaustiveness checks, and constructor
+  reduction during evaluation.
 - Alpha-renamed lambdas, different universes, unbound variables, fuel
   exhaustion, identity checking, a type error, Pi inference, and application
   inference are tested.
 
 ## Next
 
-- `match` and `J`, including dependent motives and branch refinement.
+- `J` and dependent match refinement.
 - Positivity, termination, and pretty printing.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.
 

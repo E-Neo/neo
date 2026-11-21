@@ -13,6 +13,8 @@ pub enum KernelError {
   Unsupported
   UnknownEnum
   UnknownCtor
+  NotExhaustive
+  BadBranch
 }
 
 pub enum Tm {
@@ -27,6 +29,9 @@ pub enum Tm {
   Pi(String, Tm, Tm)
   Lam(String, Tm, Tm)
   App(Tm, Tm)
+  Match(Tm, Tm)
+  TBrNil
+  TBrCons(U32, U32, Tm, Tm)
 }
 
 pub enum Val {
@@ -99,6 +104,16 @@ pub fn eval(fuel: Nat, env: fn(U32) -> Val, tm: Tm): Result[Val, KernelError] {
         }
         Err(e) => Err(e)
       }
+      Match(scrut, branches) => match eval(k, env, scrut) {
+        Ok(VCtor(_, index, args)) => match branch_at(branches, index) {
+          BSome(_, body) => eval(k, env_extend_list(k, env, args), body)
+          BNone => Err(Unsupported)
+        }
+        Ok(_) => Err(Unsupported)
+        Err(e) => Err(e)
+      }
+      TBrNil => Err(Unsupported)
+      TBrCons(_, _, _, _) => Err(Unsupported)
     }
   }
 }
@@ -184,6 +199,9 @@ pub fn demo_identity(): U32 {
     Ok(Pi(_, _, _)) => 0u32
     Ok(Lam(_, _, _)) => 0u32
     Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
     Ok(TNil) => 0u32
     Ok(TCons(_, _)) => 0u32
     Err(_) => 0u32
@@ -210,6 +228,9 @@ pub fn demo_pi(): U32 {
     Ok(Pi(_, _, _)) => 0u32
     Ok(Lam(_, _, _)) => 0u32
     Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
     Err(_) => 0u32
   }
 }
@@ -231,6 +252,9 @@ pub fn demo_list(): U32 {
     Ok(Pi(_, _, _)) => 0u32
     Ok(Lam(_, _, _)) => 0u32
     Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
     Err(_) => 0u32
   }
 }
@@ -245,6 +269,8 @@ pub fn demo_unbound(): U32 {
     Err(Unsupported) => 0u32
     Err(UnknownEnum) => 0u32
     Err(UnknownCtor) => 0u32
+    Err(NotExhaustive) => 0u32
+    Err(BadBranch) => 0u32
     Ok(TNil) => 0u32
     Ok(TCons(_, _)) => 0u32
     Ok(Var(_)) => 0u32
@@ -256,6 +282,9 @@ pub fn demo_unbound(): U32 {
     Ok(Pi(_, _, _)) => 0u32
     Ok(Lam(_, _, _)) => 0u32
     Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
   }
 }
 
@@ -269,6 +298,8 @@ pub fn demo_fuel(): U32 {
     Err(Unsupported) => 0u32
     Err(UnknownEnum) => 0u32
     Err(UnknownCtor) => 0u32
+    Err(NotExhaustive) => 0u32
+    Err(BadBranch) => 0u32
     Ok(TNil) => 0u32
     Ok(TCons(_, _)) => 0u32
     Ok(Var(_)) => 0u32
@@ -280,6 +311,9 @@ pub fn demo_fuel(): U32 {
     Ok(Pi(_, _, _)) => 0u32
     Ok(Lam(_, _, _)) => 0u32
     Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
   }
 }
 
@@ -663,6 +697,103 @@ fn sort_value(sort: Sort): Val {
   }
 }
 
+pub enum BranchLookup {
+  BSome(U32, Tm)
+  BNone
+}
+
+pub fn branch_at(branches: Tm, index: U32): BranchLookup {
+  match branches {
+    TBrNil => BNone
+    TBrCons(branch_index, binders, body, rest) => match branch_index == index {
+      True => BSome(binders, body)
+      False => branch_at(rest, index)
+    }
+    TNil => BNone
+    TCons(_, _) => BNone
+    Var(_) => BNone
+    Const(_) => BNone
+    Ty(_) => BNone
+    PropTy => BNone
+    Ind(_, _) => BNone
+    Ctor(_, _, _) => BNone
+    Pi(_, _, _) => BNone
+    Lam(_, _, _) => BNone
+    App(_, _) => BNone
+    Match(_, _) => BNone
+  }
+}
+
+pub fn env_extend_list(fuel: Nat, env: fn(U32) -> Val, args: Val): fn(U32) -> Val {
+  match fuel {
+    Zero => env
+    Succ(k) => match args {
+      VNil => env
+      VCons(arg, rest) => env_extend_list(k, env_ext(env, arg), rest)
+      VVar(_) => env
+      VConst(_) => env
+      VType(_) => env
+      VProp => env
+      VInd(_, _) => env
+      VCtor(_, _, _) => env
+      VPi(_, _, _, _) => env
+      VLam(_, _, _, _) => env
+      VApp(_, _) => env
+      VError(_) => env
+    }
+  }
+}
+
+pub fn ctor_fields(
+  fuel: Nat,
+  ty: Val,
+  level: U32,
+  acc: List[Val]
+): Result[List[Val], KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match ty {
+      VPi(_, dom, cod, env) => match eval(k, env_ext(env, VVar(level)), cod) {
+        Ok(next) => ctor_fields(k, next, level + 1u32, Cons(dom, acc))
+        Err(e) => Err(e)
+      }
+      VInd(_, _) => Ok(acc.reverse())
+      VError(e) => Err(e)
+      VNil => Err(Unsupported)
+      VCons(_, _) => Err(Unsupported)
+      VVar(_) => Err(Unsupported)
+      VConst(_) => Err(Unsupported)
+      VType(_) => Err(Unsupported)
+      VProp => Err(Unsupported)
+      VCtor(_, _, _) => Err(Unsupported)
+      VLam(_, _, _, _) => Err(Unsupported)
+      VApp(_, _) => Err(Unsupported)
+    }
+  }
+}
+
+pub fn constructor_fields(
+  fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
+  enum_name: String,
+  index: U32,
+  params: Val
+): Result[List[Val], KernelError] {
+  match globals(enum_name) {
+    Some(EnumData(_, _, _, _, ctors)) => match ctor_at(ctors, index) {
+      Some(CtorData(_, _, _, _, _, ty)) => match eval(fuel, env_empty, ty) {
+        Ok(vty) => match apply_type(fuel, vty, params) {
+          Ok(fields) => ctor_fields(fuel, fields, 0u32, Nil)
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      None => Err(UnknownCtor)
+    }
+    None => Err(UnknownEnum)
+  }
+}
+
 fn infer_sort(fuel: Nat, value: Val): Result[Sort, KernelError] {
   match fuel {
     Zero => Err(OutOfFuel)
@@ -756,6 +887,9 @@ pub fn infer(
         }
         None => Err(UnknownEnum)
       }
+      Match(_, _) => Err(Unsupported)
+      TBrNil => Err(Unsupported)
+      TBrCons(_, _, _, _) => Err(Unsupported)
     }
   }
 }
@@ -804,6 +938,86 @@ pub fn check(
       TCons(_, _) => check_infer(k, globals, ctx, tm, expected)
       Ind(_, _) => check_infer(k, globals, ctx, tm, expected)
       Ctor(_, _, _) => check_infer(k, globals, ctx, tm, expected)
+      Match(scrut, branches) => check_match(k, globals, ctx, scrut, branches, expected)
+      TBrNil => check_infer(k, globals, ctx, tm, expected)
+      TBrCons(_, _, _, _) => check_infer(k, globals, ctx, tm, expected)
+    }
+  }
+}
+
+fn check_match(
+  fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
+  ctx: List[Val],
+  scrut: Tm,
+  branches: Tm,
+  expected: Val
+): Result[Unit, KernelError] {
+  match infer(fuel, globals, ctx, scrut) {
+    Ok(VInd(enum_name, params)) => match globals(enum_name) {
+      Some(EnumData(_, _, _, _, ctors)) => check_ctors(
+        fuel,
+        globals,
+        ctx,
+        expected,
+        enum_name,
+        params,
+        ctors,
+        branches
+      )
+      None => Err(UnknownEnum)
+    }
+    Ok(VError(e)) => Err(e)
+    Ok(VNil) => Err(Unsupported)
+    Ok(VCons(_, _)) => Err(Unsupported)
+    Ok(VVar(_)) => Err(Unsupported)
+    Ok(VConst(_)) => Err(Unsupported)
+    Ok(VType(_)) => Err(Unsupported)
+    Ok(VProp) => Err(Unsupported)
+    Ok(VCtor(_, _, _)) => Err(Unsupported)
+    Ok(VPi(_, _, _, _)) => Err(Unsupported)
+    Ok(VLam(_, _, _, _)) => Err(Unsupported)
+    Ok(VApp(_, _)) => Err(Unsupported)
+    Err(e) => Err(e)
+  }
+}
+
+fn check_ctors(
+  fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
+  ctx: List[Val],
+  expected: Val,
+  enum_name: String,
+  params: Val,
+  ctors: CtorList,
+  branches: Tm
+): Result[Unit, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match ctors {
+      CNil => Ok(Unit)
+      CCons(CtorData(_, _, index, _, num_fields, _), rest) => match branch_at(branches, index) {
+        BSome(binders, body) => match binders == num_fields {
+          True => match constructor_fields(k, globals, enum_name, index, params) {
+            Ok(fields) => match check(k, globals, fields.reverse().append(ctx), body, expected) {
+              Ok(Unit) => check_ctors(
+                k,
+                globals,
+                ctx,
+                expected,
+                enum_name,
+                params,
+                rest,
+                branches
+              )
+              Err(e) => Err(e)
+            }
+            Err(e) => Err(e)
+          }
+          False => Err(BadBranch)
+        }
+        BNone => Err(NotExhaustive)
+      }
     }
   }
 }
@@ -936,5 +1150,78 @@ pub fn demo_check_ctor_bool(): U32 {
   ) {
     Ok(Unit) => 1u32
     Err(_) => 0u32
+  }
+}
+
+fn bool_branches(): Tm {
+  TBrCons(1u32, 0u32, Ty(0u32), TBrCons(0u32, 0u32, Ty(0u32), TBrNil))
+}
+
+pub fn demo_match_eval(): U32 {
+  match normalize(100, Match(Ctor("Bool", 1u32, TNil), bool_branches())) {
+    Ok(Ty(level)) => match level == 0u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Const(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_match_check(): U32 {
+  match check(
+    100,
+    bool_globals,
+    Nil,
+    Match(Ctor("Bool", 1u32, TNil), bool_branches()),
+    VType(1u32)
+  ) {
+    Ok(Unit) => 1u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_match_missing(): U32 {
+  let branches = TBrCons(1u32, 0u32, Ty(0u32), TBrNil)
+  match check(
+    100,
+    bool_globals,
+    Nil,
+    Match(Ctor("Bool", 1u32, TNil), branches),
+    VType(1u32)
+  ) {
+    Err(NotExhaustive) => 1u32
+    Err(_) => 0u32
+    Ok(Unit) => 0u32
+  }
+}
+
+pub fn demo_match_arity(): U32 {
+  let branches = TBrCons(1u32, 1u32, Ty(0u32), TBrCons(0u32, 0u32, Ty(0u32), TBrNil))
+  match check(
+    100,
+    bool_globals,
+    Nil,
+    Match(Ctor("Bool", 1u32, TNil), branches),
+    VType(1u32)
+  ) {
+    Err(BadBranch) => 1u32
+    Err(NotExhaustive) => 2u32
+    Err(Unsupported) => 3u32
+    Err(_) => 4u32
+    Ok(Unit) => 0u32
   }
 }
