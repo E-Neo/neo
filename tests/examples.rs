@@ -21,6 +21,7 @@ impl neo::host::Host for SilentHost {
             neo::host::Lowering::StderrWrite => {
                 Ok(neo::host::stderr_result(neo::host::StderrOutcome::Ok))
             }
+            _ => Err(neo::error::Error::new("unexpected capability")),
         }
     }
 }

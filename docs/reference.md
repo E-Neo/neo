@@ -1674,13 +1674,29 @@ impl Bytes {
 }
 ```
 
-The prelude also declares the `stderr` module:
+The prelude also declares host-capability modules:
 
 ```neo
 mod stderr {
   pub extern fn write(s: String): IO[Result[Unit, IoError]]
 }
+
+mod env {
+  pub extern fn argv(): IO[List[String]]
+}
+
+mod stdin {
+  pub extern fn read_all(): IO[Result[Bytes, IoError]]
+}
+
+mod file {
+  pub extern fn read(path: String): IO[Result[Bytes, IoError]]
+  pub extern fn write(path: String, data: Bytes): IO[Result[Unit, IoError]]
+}
 ```
+
+`file` paths are resolved relative to a preopened directory. Under `wasmtime`,
+grant one with `--dir .`; the interpreter uses the process working directory.
 
 Notes:
 
@@ -1794,8 +1810,9 @@ allocator; memory grows on demand. There is no garbage collector and no
 reference counting.
 
 The I/O API is `IO::pure`, `IO::bind`, and the `extern` capabilities in the
-closed registry. This milestone provides `stderr::write`; `argv`, standard
-input, and files arrive with M4b.3.
+closed registry. The prelude provides `stderr::write`, `env::argv`,
+`stdin::read_all`, `file::read`, and `file::write`. File paths are relative to
+a preopened directory; pass `--dir .` to `wasmtime` to grant the current one.
 
 ---
 
@@ -2046,7 +2063,7 @@ design:
 - multiple source files and `pub use` re-exports. Single-file `mod` blocks,
   `use` imports, visibility, and `::` paths are supported; see
   [modules and visibility](#modules-and-visibility);
-- characters, floats, and general I/O;
+- characters, floats, networking, and I/O beyond argument, stdin, and regular-file access;
 - character-aware string slicing: `slice` indexes bytes;
 - mutual recursion and mutual inductive types;
 - nested or higher-order inductive occurrences;

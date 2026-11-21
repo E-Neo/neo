@@ -21,16 +21,21 @@ use neo_common::error::{Error, Result};
 /// small, so this cannot collide with an enum tag.
 const TAG_CLOSURE: i32 = 0x7fff_ffffu32 as i32;
 
-/// Reserved low-memory scratch space. The first 32 bytes hold WASI return
-/// areas, bytes 64..96 hold the decimal conversion buffer.
+/// Reserved low-memory scratch space for WASI return areas. The decimal
+/// conversion buffer ends at 96, so these areas start above it.
 const RETPTR: i32 = 0;
+const ARGV_RET: i32 = 256;
+const DIRS_RET: i32 = 272;
+const OPEN_RET: i32 = 288;
+const READ_RET: i32 = 304;
+const WRITE_RET: i32 = 320;
 const DIGIT_END: i32 = 96;
 
 /// Static strings are placed here, above the scratch area.
 const DATA_BASE: u32 = 1024;
 
 /// The number of imported WASI functions. Function indices start after these.
-const NUM_IMPORTS: u32 = 5;
+const NUM_IMPORTS: u32 = 14;
 
 const HEAP_START: u32 = 65_536;
 
@@ -38,7 +43,16 @@ const IMPORT_GET_STDOUT: u32 = 0;
 const IMPORT_GET_STDERR: u32 = 1;
 const IMPORT_WRITE_FLUSH: u32 = 2;
 const IMPORT_DROP_ERROR: u32 = 3;
-const IMPORT_DROP_STREAM: u32 = 4;
+const IMPORT_DROP_OUTPUT_STREAM: u32 = 4;
+const IMPORT_GET_ARGUMENTS: u32 = 5;
+const IMPORT_GET_STDIN: u32 = 6;
+const IMPORT_INPUT_READ: u32 = 7;
+const IMPORT_DROP_INPUT_STREAM: u32 = 8;
+const IMPORT_GET_DIRECTORIES: u32 = 9;
+const IMPORT_OPEN_AT: u32 = 10;
+const IMPORT_DESCRIPTOR_READ: u32 = 11;
+const IMPORT_DESCRIPTOR_WRITE: u32 = 12;
+const IMPORT_DROP_DESCRIPTOR: u32 = 13;
 
 const NEO_WIT: &str = include_str!("../wit/neo.wit");
 const WIT_IO: &str = include_str!("../wit/deps/io.wit");
@@ -141,6 +155,7 @@ struct Codegen<'g> {
     print_str_id: usize,
     print_literal_bytes_id: usize,
     write_stream_id: usize,
+    realloc_id: usize,
     run_id: usize,
 
     succ_index: i32,
@@ -180,6 +195,7 @@ impl<'g> Codegen<'g> {
             print_str_id: 0,
             print_literal_bytes_id: 0,
             write_stream_id: 0,
+            realloc_id: 0,
             run_id: 0,
             succ_index,
         }
@@ -269,10 +285,12 @@ impl<'g> Codegen<'g> {
         self.print_literal_bytes_id = self.new_func(&[ValType::I32], &[]);
         self.write_stream_id =
             self.new_func(&[ValType::I32, ValType::I32, ValType::I32], &[ValType::I32]);
+        self.realloc_id = self.new_func(&[ValType::I32; 4], &[ValType::I32]);
         self.run_id = self.new_func(&[], &[ValType::I32]);
 
         self.gen_alloc();
         self.gen_runtime();
+        self.gen_realloc();
         self.gen_write_stream();
         self.gen_print_bytes();
         self.gen_print_u32();
@@ -416,7 +434,7 @@ impl<'g> Codegen<'g> {
         fc.emit(I::Call(write_stream));
         fc.emit(I::Drop);
         fc.emit(I::LocalGet(out));
-        fc.emit(I::Call(IMPORT_DROP_STREAM));
+        fc.emit(I::Call(IMPORT_DROP_OUTPUT_STREAM));
         let body = fc.finish();
         let id = self.print_bytes_id;
         self.set_body(id, body);
@@ -562,6 +580,78 @@ impl<'g> Codegen<'g> {
         self.gen_eq();
         self.gen_get();
         self.gen_utf8_check();
+    }
+
+    fn gen_realloc(&mut self) {
+        let memcpy = defined(self.memcpy_id);
+        let mut fc = FnCompiler::new(self, 4);
+        let ptr = fc.local();
+        let copy = fc.local();
+        // A zero-sized allocation still returns an aligned, non-null pointer.
+        fc.emit(I::LocalGet(3));
+        fc.emit(I::I32Eqz);
+        fc.emit(I::If(BlockType::Result(ValType::I32)));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::Else);
+        fc.emit(I::GlobalGet(0));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Const(1));
+        fc.emit(I::I32Sub);
+        fc.emit(I::I32Const(0));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::I32Sub);
+        fc.emit(I::I32And);
+        fc.emit(I::LocalSet(ptr));
+        fc.emit(I::LocalGet(ptr));
+        fc.emit(I::LocalGet(3));
+        fc.emit(I::I32Add);
+        fc.emit(I::GlobalSet(0));
+
+        fc.emit(I::GlobalGet(0));
+        fc.emit(I::MemorySize(0));
+        fc.emit(I::I32Const(65_536));
+        fc.emit(I::I32Mul);
+        fc.emit(I::I32GtU);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::GlobalGet(0));
+        fc.emit(I::MemorySize(0));
+        fc.emit(I::I32Const(65_536));
+        fc.emit(I::I32Mul);
+        fc.emit(I::I32Sub);
+        fc.emit(I::I32Const(65_535));
+        fc.emit(I::I32Add);
+        fc.emit(I::I32Const(16));
+        fc.emit(I::I32ShrU);
+        fc.emit(I::MemoryGrow(0));
+        fc.emit(I::Drop);
+        fc.emit(I::End);
+
+        // A bump allocator cannot free, so only the live prefix is copied.
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::I32Eqz);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::Else);
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::LocalGet(3));
+        fc.emit(I::I32LtU);
+        fc.emit(I::If(BlockType::Result(ValType::I32)));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::Else);
+        fc.emit(I::LocalGet(3));
+        fc.emit(I::End);
+        fc.emit(I::LocalSet(copy));
+        fc.emit(I::LocalGet(ptr));
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::LocalGet(copy));
+        fc.emit(I::Call(memcpy));
+        fc.emit(I::End);
+
+        fc.emit(I::LocalGet(ptr));
+        fc.emit(I::End);
+        let body = fc.finish();
+        let id = self.realloc_id;
+        self.set_body(id, body);
     }
 
     fn gen_memcpy(&mut self) {
@@ -1332,6 +1422,24 @@ impl<'g> Codegen<'g> {
             &[],
         );
         let drop_ty = self.ty(&[ValType::I32], &[]);
+        let get_stdin_ty = self.ty(&[], &[ValType::I32]);
+        let retptr_ty = self.ty(&[ValType::I32], &[]);
+        let input_read_ty = self.ty(&[ValType::I32, ValType::I64, ValType::I32], &[]);
+        let open_at_ty = self.ty(&[ValType::I32; 7], &[]);
+        let descriptor_read_ty = self.ty(
+            &[ValType::I32, ValType::I64, ValType::I64, ValType::I32],
+            &[],
+        );
+        let descriptor_write_ty = self.ty(
+            &[
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I64,
+                ValType::I32,
+            ],
+            &[],
+        );
 
         let heap_start = {
             let end = DATA_BASE + self.data.len() as u32 + 16;
@@ -1371,6 +1479,51 @@ impl<'g> Codegen<'g> {
         imports.import(
             "wasi:io/streams@0.2.9",
             "[resource-drop]output-stream",
+            EntityType::Function(drop_ty),
+        );
+        imports.import(
+            "wasi:cli/environment@0.2.9",
+            "get-arguments",
+            EntityType::Function(retptr_ty),
+        );
+        imports.import(
+            "wasi:cli/stdin@0.2.9",
+            "get-stdin",
+            EntityType::Function(get_stdin_ty),
+        );
+        imports.import(
+            "wasi:io/streams@0.2.9",
+            "[method]input-stream.blocking-read",
+            EntityType::Function(input_read_ty),
+        );
+        imports.import(
+            "wasi:io/streams@0.2.9",
+            "[resource-drop]input-stream",
+            EntityType::Function(drop_ty),
+        );
+        imports.import(
+            "wasi:filesystem/preopens@0.2.9",
+            "get-directories",
+            EntityType::Function(retptr_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[method]descriptor.open-at",
+            EntityType::Function(open_at_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[method]descriptor.read",
+            EntityType::Function(descriptor_read_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[method]descriptor.write",
+            EntityType::Function(descriptor_write_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[resource-drop]descriptor",
             EntityType::Function(drop_ty),
         );
 
@@ -1415,6 +1568,7 @@ impl<'g> Codegen<'g> {
             ExportKind::Func,
             defined(self.run_id),
         );
+        exports.export("cabi_realloc", ExportKind::Func, defined(self.realloc_id));
 
         let mut elements = ElementSection::new();
         elements.active(
@@ -1664,6 +1818,10 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             .ok_or_else(|| Error::new(format!("unknown host capability `{}`", import)))?;
         self.compile_thunk_with(|child| match capability.lowering {
             neo_host::Lowering::StderrWrite => child.compile_stderr_write(args),
+            neo_host::Lowering::Argv => child.compile_argv(),
+            neo_host::Lowering::StdinReadAll => child.compile_stdin_read_all(),
+            neo_host::Lowering::FileRead => child.compile_file_read(args),
+            neo_host::Lowering::FileWrite => child.compile_file_write(args),
         })
     }
 
@@ -1693,7 +1851,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.emit(I::Call(self.cg.write_stream_fn()));
         self.emit(I::LocalSet(status));
         self.emit(I::LocalGet(handle));
-        self.emit(I::Call(IMPORT_DROP_STREAM));
+        self.emit(I::Call(IMPORT_DROP_OUTPUT_STREAM));
 
         let globals = self.cg.globals;
         let ok = ctor_index(globals, "Result", "Ok")?;
@@ -1742,6 +1900,511 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             }],
         );
         self.emit(I::End);
+        self.emit(I::End);
+        Ok(())
+    }
+
+    fn load_mem(&mut self, addr: i32, offset: u32) {
+        self.emit(I::I32Const(addr));
+        self.emit(I::I32Load(mem(offset)));
+    }
+
+    fn load_u8_mem(&mut self, addr: i32, offset: u32) {
+        self.emit(I::I32Const(addr));
+        self.emit(I::I32Load8U(mem8(offset)));
+    }
+
+    fn build_io_ok(&mut self, payload: Option<u32>) -> Result<()> {
+        let ok = ctor_index(self.cg.globals, "Result", "Ok")?;
+        let unit = ctor_index(self.cg.globals, "Unit", "Unit")?;
+        match payload {
+            Some(local) => self.build_ctor(
+                ok,
+                &[Place {
+                    local,
+                    offset: None,
+                }],
+            ),
+            None => {
+                let unit_local = self.local();
+                self.build_ctor(unit, &[]);
+                self.emit(I::LocalSet(unit_local));
+                self.build_ctor(
+                    ok,
+                    &[Place {
+                        local: unit_local,
+                        offset: None,
+                    }],
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn build_io_err(&mut self, ctor: &str) -> Result<()> {
+        let err = ctor_index(self.cg.globals, "Result", "Err")?;
+        let error = ctor_index(self.cg.globals, "IoError", ctor)?;
+        let error_local = self.local();
+        self.build_ctor(error, &[]);
+        self.emit(I::LocalSet(error_local));
+        self.build_ctor(
+            err,
+            &[Place {
+                local: error_local,
+                offset: None,
+            }],
+        );
+        Ok(())
+    }
+
+    fn make_bytes_descriptor(&mut self, ptr: u32, len: u32) -> u32 {
+        self.emit(I::I32Const(12));
+        self.emit(I::Call(self.cg.alloc_fn()));
+        let desc = self.local();
+        self.emit(I::LocalSet(desc));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::LocalGet(ptr));
+        self.emit(I::I32Store(mem(0)));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I32Const(0));
+        self.emit(I::I32Store(mem(4)));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::LocalGet(len));
+        self.emit(I::I32Store(mem(8)));
+        desc
+    }
+
+    /// Read the process argument vector and build a `List[String]`.
+    fn compile_argv(&mut self) -> Result<()> {
+        self.emit(I::I32Const(ARGV_RET));
+        self.emit(I::Call(IMPORT_GET_ARGUMENTS));
+        let base = self.local();
+        self.load_mem(ARGV_RET, 0);
+        self.emit(I::LocalSet(base));
+        let len = self.local();
+        self.load_mem(ARGV_RET, 4);
+        self.emit(I::LocalSet(len));
+
+        let index = self.local();
+        self.emit(I::LocalGet(len));
+        self.emit(I::LocalSet(index));
+        let acc = self.local();
+        let nil = ctor_index(self.cg.globals, "List", "Nil")?;
+        let cons = ctor_index(self.cg.globals, "List", "Cons")?;
+        self.build_ctor(nil, &[]);
+        self.emit(I::LocalSet(acc));
+
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Eqz);
+        self.emit(I::BrIf(1));
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(1));
+        self.emit(I::I32Sub);
+        self.emit(I::LocalSet(index));
+
+        let offset = self.local();
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(8));
+        self.emit(I::I32Mul);
+        self.emit(I::LocalSet(offset));
+        let ptr = self.local();
+        self.emit(I::LocalGet(base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalSet(ptr));
+        let text_len = self.local();
+        self.emit(I::LocalGet(base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::LocalSet(text_len));
+
+        let desc = self.make_bytes_descriptor(ptr, text_len);
+        self.build_ctor(
+            cons,
+            &[
+                Place {
+                    local: desc,
+                    offset: None,
+                },
+                Place {
+                    local: acc,
+                    offset: None,
+                },
+            ],
+        );
+        self.emit(I::LocalSet(acc));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit(I::LocalGet(acc));
+        Ok(())
+    }
+
+    /// Read standard input to end and build a `Bytes` value.
+    fn compile_stdin_read_all(&mut self) -> Result<()> {
+        let handle = self.local();
+        self.emit(I::Call(IMPORT_GET_STDIN));
+        self.emit(I::LocalSet(handle));
+        let acc = self.local();
+        let empty = self.cg.intern_literal(b"");
+        self.emit(I::I32Const(empty));
+        self.emit(I::LocalSet(acc));
+        let failed = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(failed));
+
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(handle));
+        self.emit(I::I64Const(4096));
+        self.emit(I::I32Const(READ_RET));
+        self.emit(I::Call(IMPORT_INPUT_READ));
+
+        let tag = self.local();
+        self.load_u8_mem(READ_RET, 0);
+        self.emit(I::LocalSet(tag));
+        self.emit(I::LocalGet(tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Else);
+        let inner = self.local();
+        self.load_u8_mem(READ_RET, 4);
+        self.emit(I::LocalSet(inner));
+        // `closed` is the normal end-of-stream condition.
+        self.emit(I::LocalGet(inner));
+        self.emit(I::I32Const(1));
+        self.emit(I::I32Eq);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Br(3));
+        self.emit(I::End);
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(failed));
+        let error = self.local();
+        self.load_mem(READ_RET, 8);
+        self.emit(I::LocalSet(error));
+        self.emit(I::LocalGet(error));
+        self.emit(I::Call(IMPORT_DROP_ERROR));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+
+        let ptr = self.local();
+        self.load_mem(READ_RET, 4);
+        self.emit(I::LocalSet(ptr));
+        let len = self.local();
+        self.load_mem(READ_RET, 8);
+        self.emit(I::LocalSet(len));
+        self.emit(I::LocalGet(len));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+
+        let chunk = self.make_bytes_descriptor(ptr, len);
+        self.emit(I::LocalGet(acc));
+        self.emit(I::LocalGet(chunk));
+        self.emit(I::Call(defined(self.cg.concat_id)));
+        self.emit(I::LocalSet(acc));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+
+        self.emit(I::LocalGet(handle));
+        self.emit(I::Call(IMPORT_DROP_INPUT_STREAM));
+        self.emit(I::LocalGet(failed));
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_err("Failed")?;
+        self.emit(I::Else);
+        self.build_io_ok(Some(acc))?;
+        self.emit(I::End);
+        Ok(())
+    }
+
+    fn emit_open(
+        &mut self,
+        dirs_base: u32,
+        dirs_len: u32,
+        path_ptr: u32,
+        path_len: u32,
+        open_flags: i32,
+        desc_flags: i32,
+    ) -> u32 {
+        let desc = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(desc));
+        let index = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(index));
+
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(index));
+        self.emit(I::LocalGet(dirs_len));
+        self.emit(I::I32GeU);
+        self.emit(I::BrIf(1));
+        let offset = self.local();
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(12));
+        self.emit(I::I32Mul);
+        self.emit(I::LocalSet(offset));
+        let dir = self.local();
+        self.emit(I::LocalGet(dirs_base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalSet(dir));
+        self.emit(I::LocalGet(dir));
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalGet(path_ptr));
+        self.emit(I::LocalGet(path_len));
+        self.emit(I::I32Const(open_flags));
+        self.emit(I::I32Const(desc_flags));
+        self.emit(I::I32Const(OPEN_RET));
+        self.emit(I::Call(IMPORT_OPEN_AT));
+        let tag = self.local();
+        self.load_u8_mem(OPEN_RET, 0);
+        self.emit(I::LocalSet(tag));
+        self.emit(I::LocalGet(tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.load_mem(OPEN_RET, 4);
+        self.emit(I::LocalSet(desc));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(1));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(index));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+        desc
+    }
+
+    fn compile_file_read(&mut self, args: &[RcTm]) -> Result<()> {
+        let [path] = args else {
+            return Err(Error::new("`file.read` takes one argument"));
+        };
+        self.compile(path)?;
+        let path_desc = self.local();
+        self.emit(I::LocalSet(path_desc));
+        let path_ptr = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(path_ptr));
+        let path_len = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::LocalSet(path_len));
+
+        let failed = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(failed));
+        let acc = self.local();
+        let empty = self.cg.intern_literal(b"");
+        self.emit(I::I32Const(empty));
+        self.emit(I::LocalSet(acc));
+        let offset = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(offset));
+
+        self.emit(I::I32Const(DIRS_RET));
+        self.emit(I::Call(IMPORT_GET_DIRECTORIES));
+        let dirs_base = self.local();
+        self.load_mem(DIRS_RET, 0);
+        self.emit(I::LocalSet(dirs_base));
+        let dirs_len = self.local();
+        self.load_mem(DIRS_RET, 4);
+        self.emit(I::LocalSet(dirs_len));
+        let desc = self.emit_open(dirs_base, dirs_len, path_ptr, path_len, 0, 1);
+
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(failed));
+        self.emit(I::Else);
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I64Const(4096));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I64ExtendI32U);
+        self.emit(I::I32Const(READ_RET));
+        self.emit(I::Call(IMPORT_DESCRIPTOR_READ));
+        let read_tag = self.local();
+        self.load_u8_mem(READ_RET, 0);
+        self.emit(I::LocalSet(read_tag));
+        self.emit(I::LocalGet(read_tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Else);
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(failed));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+
+        let ptr = self.local();
+        self.load_mem(READ_RET, 4);
+        self.emit(I::LocalSet(ptr));
+        let len = self.local();
+        self.load_mem(READ_RET, 8);
+        self.emit(I::LocalSet(len));
+        let eof = self.local();
+        self.load_u8_mem(READ_RET, 12);
+        self.emit(I::LocalSet(eof));
+
+        self.emit(I::LocalGet(len));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        let chunk = self.make_bytes_descriptor(ptr, len);
+        self.emit(I::LocalGet(acc));
+        self.emit(I::LocalGet(chunk));
+        self.emit(I::Call(defined(self.cg.concat_id)));
+        self.emit(I::LocalSet(acc));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::LocalGet(len));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(offset));
+        self.emit(I::LocalGet(eof));
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit(I::LocalGet(desc));
+        self.emit(I::Call(IMPORT_DROP_DESCRIPTOR));
+        self.emit(I::End);
+
+        self.emit(I::LocalGet(failed));
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_err("Failed")?;
+        self.emit(I::Else);
+        self.build_io_ok(Some(acc))?;
+        self.emit(I::End);
+        Ok(())
+    }
+
+    fn compile_file_write(&mut self, args: &[RcTm]) -> Result<()> {
+        let [path, data] = args else {
+            return Err(Error::new("`file.write` takes two arguments"));
+        };
+        self.compile(path)?;
+        let path_desc = self.local();
+        self.emit(I::LocalSet(path_desc));
+        let path_ptr = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(path_ptr));
+        let path_len = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::LocalSet(path_len));
+
+        self.compile(data)?;
+        let data_desc = self.local();
+        self.emit(I::LocalSet(data_desc));
+        let data_ptr = self.local();
+        self.emit(I::LocalGet(data_desc));
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalGet(data_desc));
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(data_ptr));
+        let data_len = self.local();
+        self.emit(I::LocalGet(data_desc));
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::LocalSet(data_len));
+
+        let failed = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(failed));
+        let written = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(written));
+
+        self.emit(I::I32Const(DIRS_RET));
+        self.emit(I::Call(IMPORT_GET_DIRECTORIES));
+        let dirs_base = self.local();
+        self.load_mem(DIRS_RET, 0);
+        self.emit(I::LocalSet(dirs_base));
+        let dirs_len = self.local();
+        self.load_mem(DIRS_RET, 4);
+        self.emit(I::LocalSet(dirs_len));
+        let desc = self.emit_open(dirs_base, dirs_len, path_ptr, path_len, 9, 2);
+
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(failed));
+        self.emit(I::Else);
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(written));
+        self.emit(I::LocalGet(data_len));
+        self.emit(I::I32GeU);
+        self.emit(I::BrIf(1));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::LocalGet(data_ptr));
+        self.emit(I::LocalGet(written));
+        self.emit(I::I32Add);
+        self.emit(I::LocalGet(data_len));
+        self.emit(I::LocalGet(written));
+        self.emit(I::I32Sub);
+        self.emit(I::LocalGet(written));
+        self.emit(I::I64ExtendI32U);
+        self.emit(I::I32Const(WRITE_RET));
+        self.emit(I::Call(IMPORT_DESCRIPTOR_WRITE));
+        let write_tag = self.local();
+        self.load_u8_mem(WRITE_RET, 0);
+        self.emit(I::LocalSet(write_tag));
+        self.emit(I::LocalGet(write_tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Else);
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(failed));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        let n = self.local();
+        self.load_mem(WRITE_RET, 8);
+        self.emit(I::LocalSet(n));
+        self.emit(I::LocalGet(n));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(failed));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        self.emit(I::LocalGet(written));
+        self.emit(I::LocalGet(n));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(written));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit(I::LocalGet(desc));
+        self.emit(I::Call(IMPORT_DROP_DESCRIPTOR));
+        self.emit(I::End);
+
+        self.emit(I::LocalGet(failed));
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_err("Failed")?;
+        self.emit(I::Else);
+        self.build_io_ok(None)?;
         self.emit(I::End);
         Ok(())
     }

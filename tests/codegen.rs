@@ -537,3 +537,99 @@ fn main(): IO[U32] {
         assert_eq!(stderr, "hello\n");
     }
 }
+
+/// Run a component with a given working directory, arguments, and stdin.
+fn run_capability(path: &Path, dir: Option<&Path>, args: &[&str], stdin: &[u8]) -> Option<String> {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let mut command = Command::new("wasmtime");
+    command
+        .arg("--argv0")
+        .arg("neo-program")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = dir {
+        command.current_dir(dir).arg("--dir").arg(".");
+    }
+    command.arg(path).args(args);
+    let mut child = command.spawn().ok()?;
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(stdin)
+        .expect("write stdin");
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        panic!(
+            "wasmtime failed for {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[test]
+fn builds_argv() {
+    let path = build(
+        r#"
+fn main(): IO[List[String]] {
+  env::argv()
+}
+"#,
+        "argv",
+    );
+    if let Some(stdout) = run_capability(&path, None, &["a", "b"], b"") {
+        assert_eq!(stdout, "Cons(neo-program, Cons(a, Cons(b, Nil)))\n");
+    }
+}
+
+#[test]
+fn builds_stdin_read_all() {
+    let path = build(
+        r#"
+fn main(): IO[Result[Bytes, IoError]] {
+  stdin::read_all()
+}
+"#,
+        "stdin-read-all",
+    );
+    if let Some(stdout) = run_capability(&path, None, &[], b"abc") {
+        assert_eq!(stdout, "Ok(b\"\\x61\\x62\\x63\")\n");
+    }
+}
+
+#[test]
+fn builds_file_round_trip() {
+    let dir = std::env::temp_dir().join(format!("neo-file-codegen-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = build(
+        r#"
+fn after(r: Result[Unit, IoError]): IO[Result[Bytes, IoError]] {
+  match r {
+    Ok(_) => file::read("round-trip.bin")
+    Err(_) => IO::pure(Err(Closed))
+  }
+}
+
+fn main(): IO[Result[Bytes, IoError]] {
+  IO::bind(file::write("round-trip.bin", b"neo\x00file"), after)
+}
+"#,
+        "file-round-trip",
+    );
+    if let Some(stdout) = run_capability(&path, Some(&dir), &[], b"") {
+        assert_eq!(
+            stdout,
+            "Ok(b\"\\x6e\\x65\\x6f\\x00\\x66\\x69\\x6c\\x65\")\n"
+        );
+    }
+    assert_eq!(
+        std::fs::read(dir.join("round-trip.bin")).expect("written file"),
+        b"neo\x00file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

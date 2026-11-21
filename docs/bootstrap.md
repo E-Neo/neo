@@ -72,6 +72,8 @@ commits and design notes.
 
 | D34 | **Modules, visibility, and `impl`.** A module is `mod name { ... }`; modules and items form one namespace per module and may be nested. `use` takes root-relative paths with `self`/`super`, supports `as` aliases, `Type::{A, B}` groups, and `Type::*` constructor globs; `pub use` re-exports are deferred. Items and methods are private by default and visible from their module and its descendants; `pub` is the only widening. `impl Type { ... }` and `impl[T: Type] Type[T] { ... }` add methods, and several impl blocks may target one type as long as method names do not collide. Items within a module are elaborated in dependency order. Prelude types and constructors are auto-imported, while other prelude items require `use`. Constructors are namespaced (`Nat::Succ`), the prelude uses CamelCase variants, and `IO::pure`/`IO::bind` are associated forms on the built-in `IO`. |
 
+| D35 | **Process and file I/O.** `env::argv(): IO[List[String]]` lowers to `wasi:cli/environment#get-arguments`; `stdin::read_all(): IO[Result[Bytes, IoError]]` lowers to `get-stdin` plus blocking reads and treats `stream-error::closed` as end of stream; `file::read(path)` and `file::write(path, data)` lower to preopens plus `descriptor.open-at` and `descriptor.read`/`write`. File paths are relative to a preopened directory, granted with `wasmtime --dir .` in the tests. The emitter exports `cabi_realloc` for list-returning imports. `argv` is infallible; file and stdin failures become `IoError::Failed`. |
+
 ## 3. The `Neo-B` subset
 
 The compiler is written in a subset of the language it accepts. The rule is

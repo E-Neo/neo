@@ -314,6 +314,20 @@ pub mod stderr {
   pub extern fn write(s: String): IO[super::Result[super::Unit, super::IoError]] = "wasi:cli/stderr@0.2.9#write"
 }
 
+pub mod env {
+  pub extern fn argv(): IO[super::List[String]] = "wasi:cli/environment@0.2.9#get-arguments"
+}
+
+pub mod stdin {
+  pub extern fn read_all(): IO[super::Result[Bytes, super::IoError]] = "neo:stdin@0.1.0#read-all"
+}
+
+pub mod file {
+  pub extern fn read(path: String): IO[super::Result[Bytes, super::IoError]] = "neo:file@0.1.0#read"
+
+  pub extern fn write(path: String, data: Bytes): IO[super::Result[super::Unit, super::IoError]] = "neo:file@0.1.0#write"
+}
+
 impl String {
   pub fn length(self: String): U32 {
     str_length(self)

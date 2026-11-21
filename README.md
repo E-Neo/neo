@@ -35,12 +35,16 @@ Implemented:
   concatenation, equality, and printing, exposed as methods;
 - prelude `Option` and `Result` types, and checked `Bytes.to_str` with a
   `Utf8Error` that reports the first invalid byte;
+- host capabilities for standard error, the argument vector, standard input,
+  and regular files (`stderr::write`, `env::argv`, `stdin::read_all`,
+  `file::read`, `file::write`);
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
 and growable vectors (`Array[T, n]`, `Vec[T]`), multiple source files,
-`pub use` re-exports, and general I/O. See the
+`pub use` re-exports, networking, and I/O beyond arguments, stdin, and regular
+files. See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 
