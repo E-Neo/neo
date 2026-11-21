@@ -10,22 +10,22 @@ impl Bool {
 }
 
 enum Shape {
-  circle(U32)
-  rect(U32, U32)
+  Circle(U32)
+  Rect(U32, U32)
 }
 
 impl Shape {
   pub fn area(self: Shape): U32 {
     match self {
-      circle(r) => r * r * 3u32
-      rect(w, h) => w * h
+      Circle(r) => r * r * 3u32
+      Rect(w, h) => w * h
     }
   }
 }
 
 fn main(): IO[U32] {
   match Bool::False.not() {
-    True => IO::pure(rect(3u32, 4u32).area())
+    True => IO::pure(Rect(3u32, 4u32).area())
     False => IO::pure(0u32)
   }
 }

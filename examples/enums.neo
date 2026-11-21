@@ -14,17 +14,17 @@ fn mul(a: Nat, b: Nat): Nat {
 }
 
 enum Shape {
-  circle(Nat)
-  rect(Nat, Nat)
+  Circle(Nat)
+  Rect(Nat, Nat)
 }
 
 fn area(s: Shape): Nat {
   match s {
-    circle(r) => mul(r, r)
-    rect(w, h) => mul(w, h)
+    Circle(r) => mul(r, r)
+    Rect(w, h) => mul(w, h)
   }
 }
 
 fn main(): IO[Nat] {
-  IO::pure(area(rect(3, 4)))
+  IO::pure(area(Rect(3, 4)))
 }

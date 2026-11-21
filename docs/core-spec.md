@@ -462,7 +462,7 @@ corresponding `s*`. Refinement is deliberately first-order:
   proofs) together with the constructor's fields.
 - A flexible variable may be solved by any index term, including one that
   mentions constructor fields. For example, matching `Vec[A, n]` against
-  `vcons` solves the context index `n := Succ(m)`.
+  `Vcons` solves the context index `n := Succ(m)`.
 - A constructor clash (`Zero` against `Succ(n)`, two different constructors, or
   two different enum names) means the branch is **impossible**.
 - Any equation that is neither already definitionally equal nor a solvable

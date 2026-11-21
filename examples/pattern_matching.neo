@@ -3,8 +3,8 @@
 // The pattern matrix is compiled into nested matches. Arms are tried in source
 // order, and each nested match must be exhaustive for the values it inspects.
 enum Tree {
-  leaf
-  node(Tree, Tree)
+  Leaf
+  Node(Tree, Tree)
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -16,14 +16,14 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn count(t: Tree): Nat {
   match t {
-    leaf => Zero
-    node(leaf, r) => Succ(count(r))
-    node(node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
+    Leaf => Zero
+    Node(Leaf, r) => Succ(count(r))
+    Node(Node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
   }
 }
 
 fn sample(): Tree {
-  node(node(leaf, leaf), node(leaf, node(leaf, leaf)))
+  Node(Node(Leaf, Leaf), Node(Leaf, Node(Leaf, Leaf)))
 }
 
 fn main(): IO[Nat] {

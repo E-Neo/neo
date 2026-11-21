@@ -11,7 +11,7 @@ use neo::parser::parse_source;
 use neo::prelude::new_globals;
 use neo::value::{V, Val};
 
-/// The examples only need to produce their values; host writes are discarded
+/// The examples Only need to produce their values; host writes are discarded
 /// instead of touching the test process's stderr.
 struct SilentHost;
 

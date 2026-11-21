@@ -158,14 +158,14 @@ fn rejects_prop_large_elimination() {
     let err = elaborate_error(
         r#"
 enum Two : Prop {
-  a
-  b
+  A
+  B
 }
 
 fn bad(p: Two): Nat {
   match p {
-    a => 0
-    b => 1
+    A => 0
+    B => 1
   }
 }
 "#,
@@ -182,7 +182,7 @@ fn rejects_foreign_constructor_result() {
     let err = elaborate_error(
         r#"
 enum E {
-  c : Nat
+  C : Nat
 }
 "#,
     );
@@ -290,19 +290,19 @@ fn refines_indexed_branch_fields() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn tail[T: Type, n: Nat](v: Vec[T, Succ(n)]): Vec[T, n] {
   match v {
-    vcons(m, x, xs) => xs
+    Vcons(m, x, xs) => xs
   }
 }
 
 fn demo(): Nat {
-  match tail(vcons(0, (5 : Nat), vnil)) {
-    vnil => 9
+  match tail(Vcons(0, (5 : Nat), Vnil)) {
+    Vnil => 9
   }
 }
 "#,
@@ -316,18 +316,18 @@ fn refines_field_from_context_index() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
-    vcons(m, x, xs) => x
+    Vcons(m, x, xs) => x
   }
 }
 
 fn demo(): Nat {
-  head(vcons(0, (7 : Nat), vnil))
+  head(Vcons(0, (7 : Nat), Vnil))
 }
 "#,
     );
@@ -340,8 +340,8 @@ fn refines_context_index_in_append() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -353,24 +353,24 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 
 fn two(): Vec[Nat, 2] {
-  vcons(1, 4, vcons(0, 3, vnil))
+  Vcons(1, 4, Vcons(0, 3, Vnil))
 }
 
 fn demo(): Nat {
-  length(append(two(), vcons(0, 7, vnil)))
+  length(append(two(), Vcons(0, 7, Vnil)))
 }
 "#,
     );
@@ -383,8 +383,8 @@ fn infers_implicit_arguments() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -396,24 +396,24 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 
 fn v1(): Vec[Nat, 1] {
-  vcons(0, 10, vnil)
+  Vcons(0, 10, Vnil)
 }
 
 fn v2(): Vec[Nat, 2] {
-  vcons(1, 20, vcons(0, 30, vnil))
+  Vcons(1, 20, Vcons(0, 30, Vnil))
 }
 
 fn both(): Vec[Nat, 3] {
@@ -434,18 +434,18 @@ fn infers_index_under_a_constructor() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
-    vcons(m, x, xs) => x
+    Vcons(m, x, xs) => x
   }
 }
 
 fn v2(): Vec[Nat, 2] {
-  vcons(1, 20, vcons(0, 30, vnil))
+  Vcons(1, 20, Vcons(0, 30, Vnil))
 }
 
 fn main(): Nat {
@@ -542,19 +542,19 @@ fn supplies_a_prefix_of_implicit_arguments() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn two(): Vec[Nat, 2] {
-  vcons(1, 20, vcons(0, 30, vnil))
+  Vcons(1, 20, Vcons(0, 30, Vnil))
 }
 
 fn main(): Nat {
@@ -820,8 +820,8 @@ fn nested_patterns_decompose_indexed_values() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -833,13 +833,13 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn two(v: Vec[Nat, 2]): Nat {
   match v {
-    vcons(Succ(Zero), x, vcons(Zero, y, vnil)) => add(x, y)
-    vcons(Succ(Zero), x, vcons(Zero, y, vcons(k, z, zs))) => z
+    Vcons(Succ(Zero), x, Vcons(Zero, y, Vnil)) => add(x, y)
+    Vcons(Succ(Zero), x, Vcons(Zero, y, Vcons(k, z, zs))) => z
   }
 }
 
 fn v2(): Vec[Nat, 2] {
-  vcons(1, 10, vcons(0, 20, vnil))
+  Vcons(1, 10, Vcons(0, 20, Vnil))
 }
 
 fn main(): Nat {
@@ -856,24 +856,24 @@ fn nested_patterns_infer_dependent_index() {
     let globals = define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
-    vcons(m, x, xs) => x
+    Vcons(m, x, xs) => x
   }
 }
 
 fn tail2[T: Type, n: Nat](v: Vec[T, Succ(Succ(n))]): Vec[T, n] {
   match v {
-    vcons(m, x, vcons(k, y, ys)) => ys
+    Vcons(m, x, Vcons(k, y, ys)) => ys
   }
 }
 
 fn v3(): Vec[Nat, 3] {
-  vcons(2, 10, vcons(1, 20, vcons(0, 30, vnil)))
+  Vcons(2, 10, Vcons(1, 20, Vcons(0, 30, Vnil)))
 }
 
 fn main(): Nat {
@@ -890,8 +890,8 @@ fn nested_patterns_recursing_on_inner_fields() {
     let globals = define(
         r#"
 enum Tree {
-  leaf
-  node(Tree, Tree)
+  Leaf
+  Node(Tree, Tree)
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -903,14 +903,14 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn count(t: Tree): Nat {
   match t {
-    leaf => Zero
-    node(leaf, r) => Succ(count(r))
-    node(node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
+    Leaf => Zero
+    Node(Leaf, r) => Succ(count(r))
+    Node(Node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
   }
 }
 
 fn sample(): Tree {
-  node(node(leaf, leaf), node(leaf, node(leaf, leaf)))
+  Node(Node(Leaf, Leaf), Node(Leaf, Node(Leaf, Leaf)))
 }
 
 fn main(): Nat {
@@ -927,19 +927,19 @@ fn omits_impossible_indexed_branch() {
     define(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn only_nil(v: Vec[Nat, Zero]): Nat {
   match v {
-    vnil => 1
+    Vnil => 1
   }
 }
 
 enum Fin[n: Nat] {
-  fzero(m: Nat) : Fin[Succ(m)]
-  fsucc(m: Nat, x: Fin[m]) : Fin[Succ(m)]
+  FinZero(m: Nat) : Fin[Succ(m)]
+  FinSucc(m: Nat, x: Fin[m]) : Fin[Succ(m)]
 }
 
 fn absurd(f: Fin[Zero]): Nat {

@@ -139,7 +139,7 @@ fn u32_can_index_an_enum() {
     let globals = elaborate(
         r#"
 enum Vec[T: Type, n: U32] {
-  vnil : Vec[T, 0u32]
+  Vnil : Vec[T, 0u32]
   vone(x: T) : Vec[T, 1u32]
 }
 
@@ -182,7 +182,7 @@ fn rejects_primitive_redeclarations() {
         "is a primitive operation",
     );
     assert_rejected(
-        "enum U32 { only }
+        "enum U32 { Only }
 fn main(): U32 { 1u32 }",
         "is a primitive type",
     );

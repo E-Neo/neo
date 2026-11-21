@@ -91,7 +91,7 @@ fn a_later_declaration_cannot_take_a_namespace() {
         "already defined",
     );
     assert_error(
-        &format!("{STDERR_WRITE}\nenum log {{ x }}"),
+        &format!("{STDERR_WRITE}\nenum log {{ X }}"),
         "already defined",
     );
 }

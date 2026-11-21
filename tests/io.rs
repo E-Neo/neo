@@ -1,4 +1,4 @@
-//! Tests for the `IO` modality: actions are values, and only the entry point
+//! Tests for the `IO` modality: actions are values, and Only the entry point
 //! interprets them.
 
 #![cfg(not(target_family = "wasm"))]

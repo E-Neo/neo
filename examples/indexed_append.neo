@@ -1,11 +1,11 @@
 // Context index refinement in `append`.
 //
-// Matching `xs : Vec[T, n]` against `vcons(k, x, tail)` solves the context
+// Matching `xs : Vec[T, n]` against `Vcons(k, x, tail)` solves the context
 // index `n := succ(k)`. The branch may therefore build a vector of index
 // `add(succ(k), m)`, which converts to `succ(add(k, m))` by unfolding `add`.
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, Zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
+  Vnil : Vec[T, Zero]
+  Vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -17,8 +17,8 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -27,11 +27,11 @@ fn append[T: Type, n: Nat, m: Nat](
   ys: Vec[T, m]
 ): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 
 fn main(): IO[Nat] {
-  IO::pure(length(append(vcons(1, (10 : Nat), vcons(0, (20 : Nat), vnil)), vcons(0, (30 : Nat), vnil))))
+  IO::pure(length(append(Vcons(1, (10 : Nat), Vcons(0, (20 : Nat), Vnil)), Vcons(0, (30 : Nat), Vnil))))
 }

@@ -152,6 +152,11 @@ x   foo   Nat   Succ'   _tmp   x1
 
 The single token `_` is the wildcard, not an identifier.
 
+The style is Rust-like: enum and type names and constructors are CamelCase
+(`Shape`, `Vec`, `Circle`, `Vnil`); modules, functions, parameters, and local
+bindings are lowercase snake_case (`geometry`, `nat_add`, `index`). This is a
+convention, not a parser rule.
+
 ### Keywords
 
 ```
@@ -643,18 +648,18 @@ Named fields and explicit result types let you write indexed types:
 
 ```neo
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, Zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
+  Vnil : Vec[T, Zero]
+  Vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn two(): Vec[Nat, 2] {
-  vcons(1, 4, vcons(0, 3, vnil))
+  Vcons(1, 4, Vcons(0, 3, Vnil))
 }
 ```
 
 Here `m` is an ordinary runtime field that records the length of the tail,
 and the constructor's result type connects it to `Succ(m)`. Because `Vec` has
-parameters, `vcons(...)` must be used where the expected type is known.
+parameters, `Vcons(...)` must be used where the expected type is known.
 
 Indexed families support **index refinement**. Matching refines both constructor
 fields and ordinary context parameters that the scrutinee's indices determine.
@@ -662,19 +667,19 @@ Constructors whose result indices cannot match become impossible branches:
 
 ```neo
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, Zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
+  Vnil : Vec[T, Zero]
+  Vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn tail[T: Type, n: Nat](v: Vec[T, Succ(n)]): Vec[T, n] {
   match v {
-    vcons(m, x, xs) => xs
+    Vcons(m, x, xs) => xs
   }
 }
 ```
 
-The scrutinee `Vec[Nat, Succ(n)]` cannot be built by `vnil`, so the `vnil` arm
-may be omitted. In the `vcons` branch, the equation `Succ(m) = Succ(n)`
+The scrutinee `Vec[Nat, Succ(n)]` cannot be built by `Vnil`, so the `Vnil` arm
+may be omitted. In the `Vcons` branch, the equation `Succ(m) = Succ(n)`
 refines the field `m` to `n`, so `xs` has type `Vec[Nat, n]`. An arm written for
 an impossible constructor is accepted but never checked, and the generated code
 omits it.
@@ -692,21 +697,21 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 ```
 
-In the `vnil` branch of `length`, the equation `n = Zero` refines `n`; in the
-`vcons` branch it refines `n` to `Succ(m)`. In `append`, the `vcons` branch
+In the `Vnil` branch of `length`, the equation `n = Zero` refines `n`; in the
+`Vcons` branch it refines `n` to `Succ(m)`. In `append`, the `Vcons` branch
 learns `n = Succ(k)`, so the constructed vector has index
 `Succ(add(k, m))`, convertible to `add(Succ(k), m)`.
 
@@ -1816,7 +1821,7 @@ b"\x00\xff"                        // Bytes print as escaped bytes
 ```
 
 Index fields declared as normal fields are printed too. The `Vec` example
-prints `vcons(1, 4, vcons(0, 3, vnil))`, where `1` is the recorded tail
+prints `Vcons(1, 4, Vcons(0, 3, Vnil))`, where `1` is the recorded tail
 length.
 
 The runtime prints one newline after the value.
@@ -2241,19 +2246,19 @@ defined at the top of that file):
 
 ```neo
 enum Shape {
-  circle(Nat)
-  rect(Nat, Nat)
+  Circle(Nat)
+  Rect(Nat, Nat)
 }
 
 fn area(s: Shape): Nat {
   match s {
-    circle(r) => mul(r, r)
-    rect(w, h) => mul(w, h)
+    Circle(r) => mul(r, r)
+    Rect(w, h) => mul(w, h)
   }
 }
 ```
 
-With `main` returning `IO::pure(area(rect(3, 4)))`, the output is `12`.
+With `main` returning `IO::pure(area(Rect(3, 4)))`, the output is `12`.
 
 ### Equality proofs
 
@@ -2283,8 +2288,8 @@ Output: `7`. The proof is checked and erased.
 
 ```neo
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, Zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
+  Vnil : Vec[T, Zero]
+  Vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -2296,24 +2301,24 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 
 fn two(): Vec[Nat, 2] {
-  vcons(1, 4, vcons(0, 3, vnil))
+  Vcons(1, 4, Vcons(0, 3, Vnil))
 }
 
 fn three(): Vec[Nat, 3] {
-  append(two(), vcons(0, 7, vnil))
+  append(two(), Vcons(0, 7, Vnil))
 }
 
 fn main(): IO[Nat] {
@@ -2321,11 +2326,11 @@ fn main(): IO[Nat] {
 }
 ```
 
-The REPL can display `two()` as `vcons(1, 4, vcons(0, 3, vnil))`. The program
+The REPL can display `two()` as `Vcons(1, 4, Vcons(0, 3, Vnil))`. The program
 builds because `main`'s action produces `Nat`; a `main` producing `Vec` itself
 is not printable. `length` matches on its implicit index `n`; refinement learns `n` is
 `Zero` or `Succ(m)` in the two branches, which is what makes the recursive call
-`length(xs)` well typed. `append` learns `n := Succ(k)` in its `vcons` branch.
+`length(xs)` well typed. `append` learns `n := Succ(k)` in its `Vcons` branch.
 Output: `3`.
 
 `examples/indexed_match.neo` shows branch-field refinement:
@@ -2333,20 +2338,20 @@ Output: `3`.
 ```neo
 fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
-    vcons(m, x, xs) => x
+    Vcons(m, x, xs) => x
   }
 }
 
 fn tail[T: Type, n: Nat](v: Vec[T, Succ(n)]): Vec[T, n] {
   match v {
-    vcons(m, x, xs) => xs
+    Vcons(m, x, xs) => xs
   }
 }
 ```
 
-The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
+The `Vnil` constructor is impossible for the scrutinee type, so it is omitted.
 The `m` field is refined to `n`, which gives `xs` the type `Vec[Nat, n]`. With
-`main` returning `IO::pure(head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil))))`,
+`main` returning `IO::pure(head(Vcons(1, (4 : Nat), Vcons(0, (3 : Nat), Vnil))))`,
 the output is `4`. The ascriptions are needed because `head`'s type parameters are
 inferred, so the elements have no expected type of their own.
 
@@ -2355,20 +2360,20 @@ constructor:
 
 ```neo
 enum Tree {
-  leaf
-  node(Tree, Tree)
+  Leaf
+  Node(Tree, Tree)
 }
 
 fn count(t: Tree): Nat {
   match t {
-    leaf => Zero
-    node(leaf, r) => Succ(count(r))
-    node(node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
+    Leaf => Zero
+    Node(Leaf, r) => Succ(count(r))
+    Node(Node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
   }
 }
 ```
 
-The nested `node(a, b)` pattern exposes the inner subtree's fields, and
+The nested `Node(a, b)` pattern exposes the inner subtree's fields, and
 recursion on `a`, `b`, and `r` is accepted because all three are structural
 subterms of `t`. Output: `4`.
 
@@ -2377,15 +2382,15 @@ subterms of `t`. Output: `4`.
 ```neo
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 
@@ -2441,21 +2446,21 @@ impl Bool {
 }
 
 enum Shape {
-  circle(U32)
-  rect(U32, U32)
+  Circle(U32)
+  Rect(U32, U32)
 }
 
 impl Shape {
   pub fn area(self: Shape): U32 {
     match self {
-      circle(r) => r * r * 3u32
-      rect(w, h) => w * h
+      Circle(r) => r * r * 3u32
+      Rect(w, h) => w * h
     }
   }
 }
 ```
 
-`rect(3u32, 4u32).area()` is `12`. A method's name is qualified by its
+`Rect(3u32, 4u32).area()` is `12`. A method's name is qualified by its
 receiver type, so `String.length`, `Bytes.length`, and a user `List.length` may
 all exist at once.
 

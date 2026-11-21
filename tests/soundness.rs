@@ -140,7 +140,7 @@ fn rejects_type_field_in_small_enum() {
     assert_rejected(
         r#"
 enum E[A: Type 1] : Type 0 {
-  c(x: A)
+  C(x: A)
 }
 "#,
         "larger than its enum",
@@ -152,7 +152,7 @@ fn rejects_negative_occurrence_in_constructor_index() {
     assert_rejected(
         r#"
 enum Bad[F: Type 1] : Type 1 {
-  mk(g: F) : Bad[fn(x: Bad[F]) -> Type 0]
+  Mk(g: F) : Bad[fn(x: Bad[F]) -> Type 0]
 }
 "#,
         "result index",
@@ -164,8 +164,8 @@ fn accepts_indexed_vec() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 "#,
     );
@@ -176,14 +176,14 @@ fn accepts_indexed_length() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 "#,
@@ -195,8 +195,8 @@ fn accepts_indexed_append() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -208,8 +208,8 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 "#,
@@ -221,14 +221,14 @@ fn accepts_fin_elimination() {
     elaborate_ok(
         r#"
 enum Fin[n: Nat] {
-  fzero(m: Nat) : Fin[Succ(m)]
-  fsucc(m: Nat, f: Fin[m]) : Fin[Succ(m)]
+  FinZero(m: Nat) : Fin[Succ(m)]
+  FinSucc(m: Nat, f: Fin[m]) : Fin[Succ(m)]
 }
 
 fn fin_to_nat[n: Nat](f: Fin[n]): Nat {
   match f {
-    fzero(m) => Zero
-    fsucc(m, g) => Succ(fin_to_nat(g))
+    FinZero(m) => Zero
+    FinSucc(m, g) => Succ(fin_to_nat(g))
   }
 }
 "#,
@@ -240,14 +240,14 @@ fn accepts_impossible_branch_with_unchecked_body() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
-    vnil => False
-    vcons(m, x, xs) => x
+    Vnil => False
+    Vcons(m, x, xs) => x
   }
 }
 "#,
@@ -284,19 +284,19 @@ fn accepts_implicit_arguments() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
 fn v2(): Vec[Nat, 2] {
-  vcons(1, 20, vcons(0, 30, vnil))
+  Vcons(1, 20, Vcons(0, 30, Vnil))
 }
 
 fn main(): Nat {
@@ -431,12 +431,12 @@ fn rejects_cyclic_index_refinement() {
     assert_rejected(
         r#"
 enum T[a: Nat, b: Nat] {
-  c(m: Nat) : T[m, Succ(m)]
+  C(m: Nat) : T[m, Succ(m)]
 }
 
 fn bad[n: Nat](x: T[Succ(n), n]): Nat {
   match x {
-    c(m) => Zero
+    C(m) => Zero
   }
 }
 "#,
@@ -456,14 +456,14 @@ fn pred(n: Nat): Nat {
 }
 
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn bad[n: Nat](v: Vec[Nat, pred(n)]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Zero
+    Vnil => Zero
+    Vcons(m, x, xs) => Zero
   }
 }
 "#,
@@ -476,13 +476,13 @@ fn rejects_missing_reachable_indexed_constructor() {
     assert_rejected(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn bad(v: Vec[Nat, Zero]): Nat {
   match v {
-    vcons(m, x, xs) => x
+    Vcons(m, x, xs) => x
   }
 }
 "#,
@@ -495,12 +495,12 @@ fn rejects_indexed_constructor_with_wrong_index() {
     assert_rejected(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, Zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
+  Vnil : Vec[A, Zero]
+  Vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn bad(): Vec[Nat, 1] {
-  vnil
+  Vnil
 }
 "#,
         "produce the expected type",
@@ -574,7 +574,7 @@ fn main(): Bytes {
 #[test]
 fn rejects_text_primitive_redeclarations() {
     assert_rejected(
-        "enum String { only }\nfn main(): Nat { 0 }",
+        "enum String { Only }\nfn main(): Nat { 0 }",
         "is a primitive type",
     );
     assert_rejected(

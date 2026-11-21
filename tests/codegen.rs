@@ -99,17 +99,17 @@ fn prints_enum_values() {
     check(
         r#"
 enum Color {
-  red
-  green
-  blue
+  Red
+  Green
+  Blue
 }
 
 fn main(): IO[Color] {
-  IO::pure(green)
+  IO::pure(Green)
 }
 "#,
         "color",
-        "green\n",
+        "Green\n",
     );
 }
 

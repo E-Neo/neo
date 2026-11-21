@@ -323,19 +323,19 @@ fn generic_receiver_on_a_user_enum() {
     let globals = define(
         r#"
 enum Box[T: Type] {
-  box(T)
+  Boxed(T)
 }
 
 impl[T: Type] Box[T] {
   pub fn get(self: Box[T]): T {
     match self {
-      box(n) => n
+      Boxed(n) => n
     }
   }
 }
 
 fn main(): Nat {
-  let b: Box[Nat] = box(3)
+  let b: Box[Nat] = Boxed(3)
   b.get()
 }
 "#,
@@ -348,21 +348,21 @@ fn method_dispatch_needs_an_inferable_receiver() {
     assert_rejected(
         r#"
 enum Box[T: Type] {
-  box(T)
+  Boxed(T)
 }
 
 impl[T: Type] Box[T] {
   pub fn get(self: Box[T]): T {
     match self {
-      box(n) => n
+      Boxed(n) => n
     }
   }
 }
 
 fn main(): Nat {
-  box(3).get()
+  Boxed(3).get()
 }
 "#,
-        "cannot infer the type arguments of `Box::box`",
+        "cannot infer the type arguments of `Box::Boxed`",
     );
 }

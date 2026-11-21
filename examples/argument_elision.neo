@@ -4,8 +4,8 @@
 // from the types of the explicit arguments and from the expected type. The
 // explicit form `append[Nat, 1, 2](v1(), v2())` is also accepted.
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, Zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
+  Vnil : Vec[T, Zero]
+  Vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
@@ -17,8 +17,8 @@ fn add(a: Nat, b: Nat): Nat {
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => Zero
-    vcons(m, x, xs) => Succ(length(xs))
+    Vnil => Zero
+    Vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -27,17 +27,17 @@ fn append[T: Type, n: Nat, m: Nat](
   ys: Vec[T, m]
 ): Vec[T, add(n, m)] {
   match xs {
-    vnil => ys
-    vcons(k, x, tail) => vcons(add(k, m), x, append(tail, ys))
+    Vnil => ys
+    Vcons(k, x, tail) => Vcons(add(k, m), x, append(tail, ys))
   }
 }
 
 fn v1(): Vec[Nat, 1] {
-  vcons(0, 10, vnil)
+  Vcons(0, 10, Vnil)
 }
 
 fn v2(): Vec[Nat, 2] {
-  vcons(1, 20, vcons(0, 30, vnil))
+  Vcons(1, 20, Vcons(0, 30, Vnil))
 }
 
 fn main(): IO[Nat] {
