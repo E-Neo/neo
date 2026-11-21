@@ -1,10 +1,10 @@
 use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
 use crate::core::{
-    Branch, PrimLit, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, ind, io, io_bind,
-    io_pure, lam, pi, pi_with, prim_lit, prim_op, prim_ty, rc, shift, var,
+    Branch, PrimLit, PrimOp, PrimTy, RcTm, Tm, abstract_term, app, const_, eq, extern_call, ind,
+    io, io_bind, io_pure, lam, pi, pi_with, prim_lit, prim_op, prim_ty, rc, shift, var,
 };
-use crate::env::{CtorInfo, EnumInfo, GlobalDef, Globals, Sort};
+use crate::env::{CtorInfo, EnumInfo, ExternInfo, GlobalDef, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
 use crate::surface::*;
@@ -16,6 +16,7 @@ pub fn elaborate_program(globals: &mut Globals, program: &Program) -> Result<()>
     for decl in &program.decls {
         match decl {
             Decl::Enum(e) => elab_enum(globals, e)?,
+            Decl::Extern(e) => elab_extern(globals, e)?,
             Decl::Fn(f) => elab_fn(globals, f)?,
         }
     }
@@ -54,10 +55,22 @@ fn elab_enum(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
 }
 
 fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
-    if globals.enums.contains_key(&decl.name) || globals.defs.contains_key(&decl.name) {
+    if globals.enums.contains_key(&decl.name)
+        || globals.defs.contains_key(&decl.name)
+        || globals.externs.contains_key(&decl.name)
+    {
         return Err(Error::at(
             decl.span,
             format!("`{}` is already defined", decl.name),
+        ));
+    }
+    if let Some(full) = globals.extern_namespace(&decl.name) {
+        return Err(Error::at(
+            decl.span,
+            format!(
+                "`{}` is a capability namespace (`{}`); choose another name",
+                decl.name, full
+            ),
         ));
     }
     if let Some(message) = reserved_name(&decl.name) {
@@ -117,10 +130,22 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
     let mut ctor_infos: Vec<CtorInfo> = Vec::new();
     let mut ctor_singleton_ok = Vec::new();
     for (idx, c) in decl.ctors.iter().enumerate() {
-        if globals.defs.contains_key(&c.name) || globals.enums.contains_key(&c.name) {
+        if globals.defs.contains_key(&c.name)
+            || globals.enums.contains_key(&c.name)
+            || globals.externs.contains_key(&c.name)
+        {
             return Err(Error::at(
                 c.span,
                 format!("`{}` is already defined", c.name),
+            ));
+        }
+        if let Some(full) = globals.extern_namespace(&c.name) {
+            return Err(Error::at(
+                c.span,
+                format!(
+                    "`{}` is a capability namespace (`{}`); choose another name",
+                    c.name, full
+                ),
             ));
         }
         if ctor_infos.iter().any(|info| info.name == c.name) {
@@ -276,15 +301,19 @@ struct FnTypeInfo {
 }
 
 fn build_fn_type(globals: &Globals, decl: &FnDecl) -> Result<FnTypeInfo> {
+    build_sig_type(globals, &decl.params, &decl.ret)
+}
+
+fn build_sig_type(globals: &Globals, params: &[Param], ret: &Expr) -> Result<FnTypeInfo> {
     let mut ctx = Ctx::new();
     let mut domains = Vec::new();
-    for p in &decl.params {
+    for p in params {
         let tm = elab_type(globals, &mut ctx, &p.ty)?;
         let v = eval(globals, &ctx.env, &tm);
         domains.push((p.name.clone(), tm, p.implicit));
         ctx.push(p.name.clone(), v);
     }
-    let ret = elab_type(globals, &mut ctx, &decl.ret)?;
+    let ret = elab_type(globals, &mut ctx, ret)?;
     let mut ty = ret.clone();
     for (name, dom, implicit) in domains.iter().rev() {
         ty = pi_with(name.clone(), dom.clone(), ty, *implicit);
@@ -350,13 +379,112 @@ fn internal_primitive_error(op: PrimOp, span: Span) -> Option<Error> {
     ))
 }
 
-fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
-    let name = fn_global_name(decl);
-    check_method_decl(globals, decl, &name)?;
-    if globals.defs.contains_key(&name) || globals.enums.contains_key(&name) {
+fn elab_extern(globals: &mut Globals, decl: &ExternDecl) -> Result<()> {
+    let name = decl.full_name();
+    if PrimTy::from_name(&decl.namespace).is_some() || globals.get_enum(&decl.namespace).is_some() {
+        return Err(Error::at(
+            decl.span,
+            format!(
+                "`{}` is a type, so it cannot be a capability namespace",
+                decl.namespace
+            ),
+        ));
+    }
+    if globals.defs.contains_key(&decl.namespace) {
+        return Err(Error::at(
+            decl.span,
+            format!(
+                "`{}` is already a value; choose another capability namespace",
+                decl.namespace
+            ),
+        ));
+    }
+    if let Some(message) = reserved_name(&decl.namespace) {
+        return Err(Error::at(decl.span, message));
+    }
+    if globals.defs.contains_key(&name)
+        || globals.enums.contains_key(&name)
+        || globals.externs.contains_key(&name)
+    {
         return Err(Error::at(
             decl.span,
             format!("`{}` is already defined", name),
+        ));
+    }
+
+    let info = build_sig_type(globals, &decl.params, &decl.ret)?;
+    if let Some((param, _, _)) = info.domains.iter().find(|(_, _, implicit)| *implicit) {
+        return Err(Error::at(
+            decl.span,
+            format!("extern parameter `{}` may not be implicit", param),
+        ));
+    }
+    for (param, dom, _) in &info.domains {
+        let dom = force(globals, eval(globals, &Vec::new(), dom));
+        if !matches!(&*dom, Val::PrimTy(_)) {
+            return Err(Error::at(
+                decl.span,
+                format!(
+                    "extern parameter `{}` must have a primitive type (`U32`, `String`, or `Bytes`)",
+                    param
+                ),
+            ));
+        }
+    }
+    let ret = force(globals, eval(globals, &Vec::new(), &info.ret));
+    if !matches!(&*ret, Val::Io(_)) {
+        return Err(Error::at(decl.span, "an extern must return an `IO` action"));
+    }
+
+    let capability = neo_host::lookup(&decl.import).ok_or_else(|| {
+        Error::at(
+            decl.span,
+            format!("unknown host capability `{}`", decl.import),
+        )
+    })?;
+    let declared = force(globals, eval(globals, &Vec::new(), &info.ty));
+    let expected = eval(globals, &Vec::new(), &(capability.ty)());
+    if !conv(globals, 0, &declared, &expected) {
+        let want = crate::pretty::show_val(globals, 0, &expected);
+        return Err(Error::at(
+            decl.span,
+            format!(
+                "`{}` must have type `{}` to match capability `{}`",
+                name, want, decl.import
+            ),
+        ));
+    }
+    globals.add_extern(
+        name,
+        ExternInfo {
+            ty: info.ty,
+            import: decl.import.clone(),
+        },
+    );
+    Ok(())
+}
+
+fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
+    let name = fn_global_name(decl);
+    check_method_decl(globals, decl, &name)?;
+    if globals.defs.contains_key(&name)
+        || globals.enums.contains_key(&name)
+        || globals.externs.contains_key(&name)
+    {
+        return Err(Error::at(
+            decl.span,
+            format!("`{}` is already defined", name),
+        ));
+    }
+    if decl.namespace.is_none()
+        && let Some(full) = globals.extern_namespace(&name)
+    {
+        return Err(Error::at(
+            decl.span,
+            format!(
+                "`{}` is a capability namespace (`{}`); choose another name",
+                name, full
+            ),
         ));
     }
     if let Some(message) = reserved_name(&name) {
@@ -537,6 +665,15 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
         let ty = eval(globals, &Vec::new(), ty);
         return Ok((const_(name), ty));
     }
+    if let Some(full) = globals.extern_namespace(name) {
+        return Err(Error::at(
+            span,
+            format!(
+                "`{}` is a capability namespace; call `{}` with `(...)`",
+                name, full
+            ),
+        ));
+    }
     Err(Error::at(span, format!("unknown name `{}`", name)))
 }
 
@@ -705,6 +842,74 @@ fn elab_io_bind(
         ));
     }
     Ok((io_bind(action_tm, next_tm), vio(b)))
+}
+
+/// Elaborate a saturated capability call such as `stderr.write("x")`.
+fn elab_extern_call(
+    globals: &Globals,
+    ctx: &mut Ctx,
+    name: &str,
+    implicit: &[Expr],
+    args: &[Expr],
+    expected: Option<&V>,
+    span: Span,
+) -> Result<(RcTm, V)> {
+    if !implicit.is_empty() {
+        return Err(Error::at(span, "an extern takes no implicit arguments"));
+    }
+    let info = globals
+        .get_extern(name)
+        .ok_or_else(|| Error::at(span, format!("unknown extern `{}`", name)))?;
+    let mut ty = force(globals, eval(globals, &Vec::new(), &info.ty));
+    let mut tms = Vec::with_capacity(args.len());
+    for arg in args {
+        let (dom, closure) = match &*ty {
+            Val::Pi(dom, closure, false) => (dom.clone(), closure.clone()),
+            Val::Pi(..) => {
+                return Err(Error::at(
+                    span,
+                    format!("extern `{}` takes no implicit arguments", name),
+                ));
+            }
+            _ => {
+                return Err(Error::at(
+                    span,
+                    format!("too many arguments for extern `{}`", name),
+                ));
+            }
+        };
+        let tm = elab_check(globals, ctx, arg, &dom)?;
+        let v = eval(globals, &ctx.env, &tm);
+        ty = force(globals, eval_closure(globals, &closure, v));
+        tms.push(tm);
+    }
+    if let Val::Pi(..) = &*ty {
+        return Err(Error::at(
+            span,
+            format!("too few arguments for extern `{}`", name),
+        ));
+    }
+    let result = match &*ty {
+        Val::Io(t) => t.clone(),
+        _ => {
+            return Err(Error::at(
+                span,
+                format!("extern `{}` does not return an `IO` action", name),
+            ));
+        }
+    };
+    let ty = vio(result);
+    if let Some(expected) = expected
+        && !conv_ty(globals, ctx.level(), &ty, expected)
+    {
+        let found = crate::pretty::show_val(globals, ctx.level(), &ty);
+        let want = crate::pretty::show_val(globals, ctx.level(), expected);
+        return Err(Error::at(
+            span,
+            format!("type mismatch: expected `{}`, found `{}`", want, found),
+        ));
+    }
+    Ok((extern_call(name.to_string(), tms), ty))
 }
 
 fn elab_app(
@@ -876,6 +1081,14 @@ fn elab_method(
         return Err(Error::new("internal: expected a method call"));
     };
     let span = *span;
+    if let Expr::Var(ns, _) = &**receiver
+        && ctx.lookup_index(ns).is_none()
+    {
+        let full = format!("{}.{}", ns, name);
+        if globals.is_extern(&full) {
+            return elab_extern_call(globals, ctx, &full, implicit, args, expected, span);
+        }
+    }
     let method = method_global_name(globals, ctx, receiver, name, span)?;
     let arity = globals
         .get_fn_num_explicit(&method)
@@ -1323,6 +1536,11 @@ fn collect_free_levels(tm: &RcTm, level: usize, depth: usize, out: &mut Vec<usiz
         Tm::IoBind { m, k } => {
             collect_free_levels(m, level, depth, out);
             collect_free_levels(k, level, depth, out);
+        }
+        Tm::Extern { args, .. } => {
+            for arg in args {
+                collect_free_levels(arg, level, depth, out);
+            }
         }
         Tm::Pi { dom, cod, .. } | Tm::Lam { dom, body: cod, .. } => {
             collect_free_levels(dom, level, depth, out);

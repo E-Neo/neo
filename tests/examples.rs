@@ -9,7 +9,21 @@ use neo::elab::elaborate_program;
 use neo::eval::{eval, force};
 use neo::parser::parse_source;
 use neo::prelude::new_globals;
-use neo::value::Val;
+use neo::value::{V, Val};
+
+/// The examples only need to produce their values; host writes are discarded
+/// instead of touching the test process's stderr.
+struct SilentHost;
+
+impl neo::host::Host for SilentHost {
+    fn run(&mut self, capability: &neo::host::Capability, _args: &[V]) -> neo::error::Result<V> {
+        match capability.lowering {
+            neo::host::Lowering::StderrWrite => {
+                Ok(neo::host::stderr_result(neo::host::StderrOutcome::Ok))
+            }
+        }
+    }
+}
 
 #[test]
 fn examples_elaborate_and_evaluate() {
@@ -37,7 +51,7 @@ fn examples_elaborate_and_evaluate() {
         let action = eval(&globals, &Vec::new(), &neo::core::const_("main"));
         let value = force(
             &globals,
-            neo::eval::run_action(&globals, &action)
+            neo::host::run_action(&globals, &mut SilentHost, &action)
                 .unwrap_or_else(|e| panic!("{}: {}", path.display(), e)),
         );
         assert!(

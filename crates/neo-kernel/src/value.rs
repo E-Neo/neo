@@ -40,6 +40,12 @@ pub enum Action {
     Pure(V),
     /// `io_bind(m, k)`.
     Bind(V, V),
+    /// A saturated host capability call.
+    Extern {
+        name: String,
+        import: String,
+        args: Vec<V>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +133,14 @@ pub fn vpure(v: V) -> V {
 
 pub fn vbind(m: V, k: V) -> V {
     Rc::new(Val::Action(Rc::new(Action::Bind(m, k))))
+}
+
+pub fn vextern(name: impl Into<String>, import: impl Into<String>, args: Vec<V>) -> V {
+    Rc::new(Val::Action(Rc::new(Action::Extern {
+        name: name.into(),
+        import: import.into(),
+        args,
+    })))
 }
 
 pub fn vvar(level: usize) -> V {

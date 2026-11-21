@@ -79,9 +79,9 @@ fn main(): IO[Nat] {
 ```
 
 `main` produces an `IO` action. `io_pure(v)` produces `v`; `io_bind(m, k)`
-runs `m` and passes its result to `k`. Host I/O arrives with `extern`
-declarations. The runtime runs `main`'s action once and prints its result,
-including strings.
+runs `m` and passes its result to `k`. Host I/O arrives through `extern`
+capabilities; this milestone provides `stderr.write`. The runtime runs
+`main`'s action once and prints its result, including strings.
 
 More examples live in [`examples/`](examples):
 
@@ -89,6 +89,7 @@ More examples live in [`examples/`](examples):
 | --- | --- | --- |
 | `hello.neo` | minimal program | `5` |
 | `io.neo` | `IO` actions and `io_bind` | `42` |
+| `stderr.neo` | `extern` host capability | `0` |
 | `nat.neo` | structural recursion | `42` |
 | `bool.neo` | booleans, `match` | `true` |
 | `list.neo` | generics, lists | `cons(2, cons(1, cons(0, cons(1, cons(0, nil)))))` |

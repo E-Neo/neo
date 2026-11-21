@@ -72,10 +72,20 @@ pub enum GlobalDef {
     },
 }
 
+#[derive(Clone, Debug)]
+pub struct ExternInfo {
+    /// The declared type of the capability. Its result must be `IO[T]`.
+    pub ty: RcTm,
+    /// The capability import string, for example
+    /// `wasi:cli/stderr@0.2.9#write`.
+    pub import: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Globals {
     pub defs: HashMap<String, GlobalDef>,
     pub enums: HashMap<String, EnumInfo>,
+    pub externs: HashMap<String, ExternInfo>,
 }
 
 impl Globals {
@@ -177,6 +187,33 @@ impl Globals {
             Some(GlobalDef::Ctor { ty, .. }) => Some(ty),
             None => None,
         }
+    }
+
+    pub fn add_extern(&mut self, name: impl Into<String>, info: ExternInfo) {
+        self.externs.insert(name.into(), info);
+    }
+
+    pub fn get_extern(&self, name: &str) -> Option<&ExternInfo> {
+        self.externs.get(name)
+    }
+
+    pub fn is_extern(&self, name: &str) -> bool {
+        self.externs.contains_key(name)
+    }
+
+    /// Extern names in deterministic order.
+    pub fn extern_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.externs.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    pub fn extern_namespace(&self, namespace: &str) -> Option<&str> {
+        let prefix = format!("{}.", namespace);
+        self.externs
+            .keys()
+            .find(|name| name.starts_with(&prefix))
+            .map(|name| name.as_str())
     }
 
     pub fn get_ctor(&self, name: &str) -> Option<&CtorInfo> {

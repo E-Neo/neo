@@ -6,7 +6,8 @@
 use neo::core::const_;
 use neo::elab::elaborate_program;
 use neo::env::Globals;
-use neo::eval::{eval, force, run_action};
+use neo::eval::{eval, force};
+use neo::host::{Host, run_action};
 use neo::parser::parse_source;
 use neo::prelude::new_globals;
 use neo::pretty::show_val;
@@ -27,7 +28,20 @@ fn elaborate_error(src: &str) -> neo::error::Error {
 
 fn run(globals: &Globals, name: &str) -> V {
     let action = force(globals, eval(globals, &Vec::new(), &const_(name)));
-    force(globals, run_action(globals, &action).expect("run action"))
+    let mut host = NoHost;
+    force(
+        globals,
+        run_action(globals, &mut host, &action).expect("run action"),
+    )
+}
+
+/// The `IO` tests do not use host capabilities.
+struct NoHost;
+
+impl Host for NoHost {
+    fn run(&mut self, _capability: &neo::host::Capability, _args: &[V]) -> neo::error::Result<V> {
+        Err(neo::error::Error::new("unexpected host capability"))
+    }
 }
 
 #[test]

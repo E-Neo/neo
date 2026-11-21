@@ -56,8 +56,8 @@ wasmtime hello.wasm                # runs the component: prints 5
 `neo build` writes `hello.wasm` next to the input by default.
 
 `main` produces an `IO` action. `io_pure(v)` is an action that produces `v`;
-`io_bind(m, k)` runs `m` and passes its result to the function `k`. Stage 0 has
-no host I/O yet, so these two forms are the whole API for now. Neo runs
+`io_bind(m, k)` runs `m` and passes its result to the function `k`. Host
+operations are declared with `extern`, such as `stderr.write`. Neo runs
 `main`'s action once and prints its result, including `String` results.
 
 ---
@@ -264,12 +264,13 @@ A program is a sequence of top-level declarations:
 
 ```neo
 enum Name { ... }
+extern fn capability.name(parameter, ...): IO[T] = "import"
 fn name[implicit, ...](parameter, ...): Result { ... }
 ```
 
 Rules:
 
-- Only `enum` and `fn` may appear at the top level.
+- Only `enum`, `extern fn`, and `fn` may appear at the top level.
 - Type and function names live in one global namespace. Reusing a name is an
   error, and prelude names are already taken. A method's full name is
   `Type.name`, so the same simple method name may exist on different types.
@@ -305,6 +306,53 @@ fn and(a: Bool, b: Bool): Bool { ... }  // `and` is already defined
 
 The prelude's `and` is the constructor of `And[P, Q]`. Use another name such
 as `both`.
+
+### Host capabilities
+
+`extern` declares a capability provided by the runtime:
+
+```neo
+extern fn stderr.write(s: String): IO[Result[Unit, IoError]] =
+  "wasi:cli/stderr@0.2.9#write"
+```
+
+Rules:
+
+- The name has a capability namespace: `stderr.write`, not `stderr_write`.
+  The namespace is not a value, so `stderr` alone is an error.
+- There is no body; instead, `= "import"` names the capability explicitly.
+- The result must be `IO[T]`, with no implicit parameters. Parameters must be
+  `U32`, `String`, or `Bytes`.
+- Import strings come from a closed registry the compiler knows how to lower.
+  An unknown import, or a declared type that does not match the registered
+  capability type, is an error.
+- Externs are not first-class values. Only a fully applied call is valid:
+  `stderr.write("x")`, never `let f = stderr.write`.
+- `stderr.write` returns `IO[Result[Unit, IoError]]`. The runtime writes the
+  string to standard error and reports `ok(unit)`, `err(closed)`, or
+  `err(failed)`. `failed` covers any other host error; the opaque WASI error
+  handle is dropped rather than exposed.
+
+A complete program:
+
+```neo
+extern fn stderr.write(s: String): IO[Result[Unit, IoError]] =
+  "wasi:cli/stderr@0.2.9#write"
+
+fn exit_code(r: Result[Unit, IoError]): IO[U32] {
+  match r {
+    ok(_) => io_pure(0u32)
+    err(_) => io_pure(1u32)
+  }
+}
+
+fn main(): IO[U32] {
+  io_bind(stderr.write("hello\n"), exit_code)
+}
+```
+
+The interpreter performs the same write and builds the same `Result` value,
+so programs agree between `neo file.neo` and the compiled component.
 
 ---
 
@@ -380,8 +428,9 @@ IO[List[Nat]]
 ```
 
 `IO[T]` lives in the same universe as `T`. It has no constructors, no matcher,
-and no `run`; an action is built with `io_pure(v)` or `io_bind(m, k)`. The
-runtime runs `main`'s action once. `T` must be a type, not a proposition.
+and no `run`; an action is built with `io_pure(v)`, `io_bind(m, k)`, or a
+saturated `extern` call. The runtime runs `main`'s action once. `T` must be a
+type, not a proposition.
 
 ### Equality types
 
@@ -1509,6 +1558,11 @@ enum Result[T: Type, E: Type] {
 enum Utf8Error {
   invalid_utf8(U32)
 }
+
+enum IoError {
+  closed
+  failed
+}
 ```
 
 The prelude also defines these numeric, boolean, and unit functions:
@@ -1641,7 +1695,8 @@ The runtime prints one newline after the value.
 `neo build` produces a **WASI 0.2 component**, not a core module:
 
 - export: `wasi:cli/run@0.2.9#run`;
-- imports: `wasi:cli/stdout@0.2.9` and `wasi:io/streams@0.2.9` for printing;
+- imports: `wasi:cli/stdout@0.2.9` and `wasi:cli/stderr@0.2.9` for printing
+  and host writes, plus `wasi:io/streams@0.2.9` and `wasi:io/error@0.2.9`;
 - memory is exported;
 - the runtime runs `main`'s action once, prints the produced value, and returns
   exit code 0.
@@ -1659,9 +1714,9 @@ remain ordinary values and can be printed. The runtime allocates with a bump
 allocator; memory grows on demand. There is no garbage collector and no
 reference counting.
 
-The only I/O API in this milestone is `io_pure` and `io_bind`. Host
-operations (`argv`, standard input, files, standard error) arrive with
-`extern` declarations.
+The I/O API is `io_pure`, `io_bind`, and the `extern` capabilities in the
+closed registry. This milestone provides `stderr.write`; `argv`, standard
+input, and files arrive with M4b.3.
 
 ---
 
@@ -1676,8 +1731,8 @@ neo>
 
 The REPL accepts two kinds of input:
 
-1. **Declarations** starting with `enum ` or `fn <name>(`. They are added to
-   the current environment:
+1. **Declarations** starting with `enum `, `extern fn `, or `fn <name>(`. They
+   are added to the current environment:
    ```neo
    neo> fn inc(x: Nat): Nat { succ(x) }
    ok

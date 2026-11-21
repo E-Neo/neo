@@ -9,7 +9,8 @@ work. Milestones **M0–M4a** are implemented: the decision record, the
 deterministic corpus oracle, the primitive `U32` layer, the surface-syntax
 revision, primitive `String`/`Bytes`, receiver-keyed methods, and
 `Option`/`Result` with checked UTF-8 conversion. The first I/O step, **M4b.1**,
-adds the `IO` modality and the `main(): IO[T]` entry point.
+adds the `IO` modality and the `main(): IO[T]` entry point. **M4b.2** adds
+`extern` host capabilities and `stderr.write`.
 
 ## 1. Stages and gates
 
@@ -67,6 +68,7 @@ commits and design notes.
 | D30 | **Checked UTF-8.** `bytes_utf8_check` returns `0` for valid bytes and otherwise the 1-based index of the first byte of the first invalid sequence; `str_from_bytes` is the unchecked inverse of `str_to_bytes`. `Bytes.to_str` combines them into `Result[String, Utf8Error]`, whose error carries the 0-based start of the offending sequence. Validation is strict: overlong forms, surrogates, code points above `U+10FFFF`, and truncated sequences are rejected. |
 | D31 | **Primitive results stay primitive.** A primitive operation returns only a primitive type, so structured results are assembled in Neo. `Bytes.to_str` is the model: a `U32` check code plus a prelude `match`. This also applies to `IO`: a primitive cannot return an action. Host functions that produce structured results are declared `extern` with an `IO` type and are introduced in M4b.2. |
 | D32 | **`IO` is the effect design.** `IO[T]` is a type former with no constructors, no eliminator, and no surface `run`. The kernel provides `io_pure : {A} -> A -> IO[A]` and `io_bind : {A,B} -> IO[A] -> (A -> IO[B]) -> IO[B]`; neither has a computation rule, so actions are compared structurally. `extern` declarations are typed in `IO`, and only the program entry point interprets `main`'s action, once. This keeps every data type canonical: no effectful term is ever a stuck neutral at a data type, and no primitive smuggles an action through a status-code side channel. Effect rows were rejected as unnecessary, and a world-token model was rejected because Neo has no linearity. |
+| D33 | **Closed host capabilities.** `extern fn ns.name(params): IO[T] = "import"` declares a capability. Externs are not values: the kernel stores each declaration in `Globals::externs`, checks saturated calls against that type, and evaluates them to an opaque `Action::Extern`. Bare or partial use is rejected, so a well-typed program's actions are always executable. Import strings are validated against a closed registry shared by the elaborator, interpreter, and WASM backend (`neo-host`): unknown imports and mismatched declared types are rejected before either backend runs. The registry lowers `wasi:cli/stderr@0.2.9#write` to `get-stderr` plus a chunked `blocking-write-and-flush` loop. Host errors are returned as host-built `Result[Unit, IoError]` values, and a `stream-error` resource is dropped before reporting `closed` or `failed`. Extern parameters are restricted to primitives, and the emitter imports the full fixed capability set. |
 
 ## 3. The `Neo-B` subset
 

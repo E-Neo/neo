@@ -146,6 +146,40 @@ pub fn infer(globals: &Globals, ctx: &mut Ctx, tm: &RcTm) -> Result<V> {
             }
             Ok(vio(b))
         }
+        Extern { name, args } => {
+            let info = globals
+                .get_extern(name)
+                .ok_or_else(|| Error::new(format!("unknown extern `{}`", name)))?;
+            let mut ty = force(globals, eval(globals, &Vec::new(), &info.ty));
+            for arg in args {
+                let (dom, closure) = match &*ty {
+                    Val::Pi(dom, closure, false) => (dom.clone(), closure.clone()),
+                    Val::Pi(..) => {
+                        return Err(Error::new("an extern may not have implicit parameters"));
+                    }
+                    _ => {
+                        return Err(Error::new(format!(
+                            "too many arguments for extern `{}`",
+                            name
+                        )));
+                    }
+                };
+                check(globals, ctx, arg, &dom)?;
+                let arg_v = eval(globals, &ctx.env, arg);
+                ty = force(globals, eval_closure(globals, &closure, arg_v));
+            }
+            match &*ty {
+                Val::Io(t) => Ok(vio(t.clone())),
+                Val::Pi(..) => Err(Error::new(format!(
+                    "too few arguments for extern `{}`",
+                    name
+                ))),
+                _ => Err(Error::new(format!(
+                    "extern `{}` must return an `IO` action",
+                    name
+                ))),
+            }
+        }
         Pi { dom, cod, name, .. } => {
             let dom_sort = infer_sort(globals, ctx, dom)?;
             let dom_v = eval(globals, &ctx.env, dom);
@@ -719,6 +753,7 @@ fn occurs(globals: &Globals, var: usize, value: &V) -> bool {
         Val::Action(a) => match &**a {
             Action::Pure(v) => occurs(globals, var, v),
             Action::Bind(m, k) => occurs(globals, var, m) || occurs(globals, var, k),
+            Action::Extern { args, .. } => args.iter().any(|a| occurs(globals, var, a)),
         },
         Val::Type(_) | Val::Prop | Val::PrimTy(_) | Val::PrimLit(_) | Val::Glob(_) => false,
     }

@@ -1,0 +1,15 @@
+// `extern` declares a host capability. The compiler lowers `stderr.write` to
+// `wasi:cli/stderr@0.2.9#get-stderr` plus
+// `output-stream.blocking-write-and-flush`.
+extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+
+fn exit_code(r: Result[Unit, IoError]): IO[U32] {
+  match r {
+    ok(_) => io_pure(0u32)
+    err(_) => io_pure(1u32)
+  }
+}
+
+fn main(): IO[U32] {
+  io_bind(stderr.write("hello from stderr\n"), exit_code)
+}

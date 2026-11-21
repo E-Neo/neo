@@ -64,6 +64,10 @@ fn quote_action(globals: &Globals, level: usize, action: &Action) -> RcTm {
             m: quote(globals, level, m),
             k: quote(globals, level, k),
         }),
+        Action::Extern { name, args, .. } => Rc::new(Tm::Extern {
+            name: name.clone(),
+            args: args.iter().map(|a| quote(globals, level, a)).collect(),
+        }),
     }
 }
 
@@ -177,6 +181,13 @@ fn close_under(globals: &Globals, level: usize, env: &Env, tm: &RcTm, extra: usi
         Tm::IoBind { m, k } => Rc::new(Tm::IoBind {
             m: close_under(globals, level, env, m, extra),
             k: close_under(globals, level, env, k, extra),
+        }),
+        Tm::Extern { name, args } => Rc::new(Tm::Extern {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|a| close_under(globals, level, env, a, extra))
+                .collect(),
         }),
         Tm::Pi {
             name,

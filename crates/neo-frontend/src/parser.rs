@@ -42,11 +42,12 @@ impl Parser {
             }
             let decl = match &self.peek().tok {
                 Tok::Enum => Decl::Enum(self.parse_enum()?),
+                Tok::Extern => Decl::Extern(self.parse_extern()?),
                 Tok::Fn => Decl::Fn(self.parse_fn()?),
                 _ => {
                     return Err(Error::at(
                         self.peek().span,
-                        "expected an `enum` or `fn` declaration",
+                        "expected an `enum`, `extern fn`, or `fn` declaration",
                     ));
                 }
             };
@@ -156,6 +157,58 @@ impl Parser {
             params,
             ret,
             body,
+            span,
+        })
+    }
+
+    /// `extern fn stderr.write(s: String): IO[T] = "import"`.
+    fn parse_extern(&mut self) -> Result<ExternDecl> {
+        let span = self.peek().span;
+        self.expect(&Tok::Extern, "expected `extern`")?;
+        self.expect(&Tok::Fn, "expected `fn` after `extern`")?;
+        let namespace = self.expect_ident("expected a capability namespace")?;
+        if !self.at(&Tok::Dot) {
+            return Err(Error::at(
+                self.peek().span,
+                "an extern name needs a capability namespace, such as `stderr.write`",
+            ));
+        }
+        self.advance();
+        let name = self.expect_ident("expected a capability name after `.`")?;
+        let mut params = Vec::new();
+        if self.at(&Tok::LBracket) {
+            params.extend(self.parse_params(Tok::LBracket, Tok::RBracket, true)?);
+        }
+        params.extend(self.parse_params(Tok::LParen, Tok::RParen, false)?);
+        self.expect(&Tok::Colon, "expected `:` after extern parameters")?;
+        self.skip_newlines();
+        // The return type is a type, so stop before a top-level `=`. The `=`
+        // token is otherwise the equality-type former.
+        let ret = self.parse_cmp()?;
+        self.skip_newlines();
+        self.expect(&Tok::Eq, "expected `=` and an import string")?;
+        self.skip_newlines();
+        let import = match &self.peek().tok {
+            Tok::Str(bytes) => {
+                let text = std::str::from_utf8(bytes).map_err(|_| {
+                    Error::at(self.peek().span, "the import string must be valid UTF-8")
+                })?;
+                text.to_string()
+            }
+            _ => {
+                return Err(Error::at(
+                    self.peek().span,
+                    "expected an import string after `=`",
+                ));
+            }
+        };
+        self.advance();
+        Ok(ExternDecl {
+            namespace,
+            name,
+            params,
+            ret,
+            import,
             span,
         })
     }

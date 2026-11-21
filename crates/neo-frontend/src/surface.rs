@@ -8,6 +8,7 @@ pub struct Program {
 #[derive(Clone, Debug)]
 pub enum Decl {
     Enum(EnumDecl),
+    Extern(ExternDecl),
     Fn(FnDecl),
 }
 
@@ -44,6 +45,25 @@ pub struct FnDecl {
     pub ret: Expr,
     pub body: Block,
     pub span: Span,
+}
+
+/// A host capability declaration:
+/// `extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:..."`.
+/// The capability namespace is not a value; only saturated calls are terms.
+#[derive(Clone, Debug)]
+pub struct ExternDecl {
+    pub namespace: String,
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: Expr,
+    pub import: String,
+    pub span: Span,
+}
+
+impl ExternDecl {
+    pub fn full_name(&self) -> String {
+        format!("{}.{}", self.namespace, self.name)
+    }
 }
 
 #[derive(Clone, Debug)]

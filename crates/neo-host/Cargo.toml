@@ -1,0 +1,9 @@
+[package]
+name = "neo-host"
+description = "Host capabilities and action interpretation for Neo"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+neo-common.workspace = true
+neo-kernel.workspace = true

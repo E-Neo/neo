@@ -350,6 +350,25 @@ of an enum, primitive, function, or equality type is canonical, while a closed
 by an `extern` declaration. The program entry point, outside the kernel,
 interprets `main`'s action once; that interpretation is not part of typing.
 
+#### Extern calls
+
+An `extern` declaration registers a closed type. It is not a global constant
+and has no value:
+
+```text
+extern(ns.name) = (import, (x1: A1) -> ... -> (xn: An) -> IO[T])
+Gamma |- a1 <= A1    ...    Gamma |- an <= An
+----------------------------------------------
+Gamma |- ns.name(a1, ..., an) : IO[T]
+```
+
+Only the saturated call form is a term. The kernel re-checks the arguments
+against the stored telescope, requires the result to be `IO[T]`, and evaluates
+the call to `Action::Extern { name, import, args }`. There is no computation
+rule. Host actions compare by import string and argument conversion, and the
+kernel never executes one. Import strings and declared types are validated
+against the compiler's closed capability registry before elaboration finishes.
+
 ## 5. Positivity and enum well-formedness
 
 The kernel re-validates every enum from its stored telescope. These checks are

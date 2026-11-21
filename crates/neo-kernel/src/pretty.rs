@@ -40,6 +40,10 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
             term_at(globals, names, m),
             term_at(globals, names, k)
         ),
+        Tm::Extern { name, args } => {
+            let args: Vec<String> = args.iter().map(|a| term_at(globals, names, a)).collect();
+            format!("{}({})", name, args.join(", "))
+        }
         Tm::Pi {
             name,
             dom,

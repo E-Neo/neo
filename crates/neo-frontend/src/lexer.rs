@@ -8,6 +8,7 @@ pub enum Tok {
     Str(Vec<u8>),
     Bytes(Vec<u8>),
     Enum,
+    Extern,
     Fn,
     Let,
     Match,
@@ -126,6 +127,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
             let tok = match text.as_str() {
                 "_" => Tok::Underscore,
                 "enum" => Tok::Enum,
+                "extern" => Tok::Extern,
                 "fn" => Tok::Fn,
                 "let" => Tok::Let,
                 "match" => Tok::Match,

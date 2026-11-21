@@ -77,6 +77,22 @@ fn conv_action(globals: &Globals, level: usize, a: &Action, b: &Action) -> bool 
         (Action::Bind(m1, k1), Action::Bind(m2, k2)) => {
             conv(globals, level, m1, m2) && conv(globals, level, k1, k2)
         }
+        (
+            Action::Extern {
+                import: i1,
+                args: a1,
+                ..
+            },
+            Action::Extern {
+                import: i2,
+                args: a2,
+                ..
+            },
+        ) => {
+            i1 == i2
+                && a1.len() == a2.len()
+                && a1.iter().zip(a2).all(|(x, y)| conv(globals, level, x, y))
+        }
         _ => false,
     }
 }

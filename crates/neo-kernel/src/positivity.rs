@@ -35,6 +35,7 @@ fn contains(enum_name: &str, tm: &RcTm) -> bool {
         Tm::Io(t) => contains(enum_name, t),
         Tm::IoPure(v) => contains(enum_name, v),
         Tm::IoBind { m, k } => contains(enum_name, m) || contains(enum_name, k),
+        Tm::Extern { args, .. } => args.iter().any(|a| contains(enum_name, a)),
         Tm::Pi { dom, cod, .. } => contains(enum_name, dom) || contains(enum_name, cod),
         Tm::Lam { dom, body, .. } => contains(enum_name, dom) || contains(enum_name, body),
         Tm::App(f, a) => contains(enum_name, f) || contains(enum_name, a),
@@ -80,6 +81,7 @@ fn bad_occurrence(enum_name: &str, tm: &RcTm) -> bool {
         Tm::Io(t) => contains(enum_name, t),
         Tm::IoPure(v) => contains(enum_name, v),
         Tm::IoBind { m, k } => contains(enum_name, m) || contains(enum_name, k),
+        Tm::Extern { args, .. } => args.iter().any(|a| contains(enum_name, a)),
         Tm::Pi { dom, cod, .. } => contains(enum_name, dom) || bad_occurrence(enum_name, cod),
         Tm::Lam { body, .. } => bad_occurrence(enum_name, body),
         // A direct occurrence, `Ind(enum, args)`, is positive as long as the

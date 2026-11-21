@@ -425,6 +425,12 @@ pub enum Tm {
         m: RcTm,
         k: RcTm,
     },
+    /// A fully applied `extern` capability call. Externs are not values:
+    /// only a saturated call denotes an action.
+    Extern {
+        name: String,
+        args: Vec<RcTm>,
+    },
     Pi {
         name: String,
         dom: RcTm,
@@ -499,6 +505,13 @@ pub fn io_bind(m: RcTm, k: RcTm) -> RcTm {
     rc(Tm::IoBind { m, k })
 }
 
+pub fn extern_call(name: impl Into<String>, args: Vec<RcTm>) -> RcTm {
+    rc(Tm::Extern {
+        name: name.into(),
+        args,
+    })
+}
+
 pub fn app(f: RcTm, a: RcTm) -> RcTm {
     rc(Tm::App(f, a))
 }
@@ -561,6 +574,10 @@ pub fn shift(tm: &RcTm, delta: isize, cutoff: usize) -> RcTm {
         Tm::Io(t) => io(shift(t, delta, cutoff)),
         Tm::IoPure(v) => io_pure(shift(v, delta, cutoff)),
         Tm::IoBind { m, k } => io_bind(shift(m, delta, cutoff), shift(k, delta, cutoff)),
+        Tm::Extern { name, args } => extern_call(
+            name.clone(),
+            args.iter().map(|a| shift(a, delta, cutoff)).collect(),
+        ),
         Tm::Pi {
             name,
             dom,
@@ -656,6 +673,12 @@ fn subst_at(tm: &RcTm, index: usize, replacement: &RcTm, depth: usize) -> RcTm {
         Tm::IoBind { m, k } => io_bind(
             subst_at(m, index, replacement, depth),
             subst_at(k, index, replacement, depth),
+        ),
+        Tm::Extern { name, args } => extern_call(
+            name.clone(),
+            args.iter()
+                .map(|a| subst_at(a, index, replacement, depth))
+                .collect(),
         ),
         Tm::Pi {
             name,
@@ -759,6 +782,12 @@ fn abstract_at(target: &RcTm, replacement: &RcTm, tm: &RcTm, depth: usize) -> Rc
             abstract_at(target, replacement, m, depth),
             abstract_at(target, replacement, k, depth),
         ),
+        Tm::Extern { name, args } => extern_call(
+            name.clone(),
+            args.iter()
+                .map(|a| abstract_at(target, replacement, a, depth))
+                .collect(),
+        ),
         Tm::Pi {
             name,
             dom,
@@ -850,6 +879,9 @@ pub fn same_tm(a: &RcTm, b: &RcTm) -> bool {
         (Tm::IoPure(a), Tm::IoPure(b)) => same_tm(a, b),
         (Tm::IoBind { m: m1, k: k1 }, Tm::IoBind { m: m2, k: k2 }) => {
             same_tm(m1, m2) && same_tm(k1, k2)
+        }
+        (Tm::Extern { name: n1, args: a1 }, Tm::Extern { name: n2, args: a2 }) => {
+            n1 == n2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| same_tm(x, y))
         }
         (
             Tm::Pi {

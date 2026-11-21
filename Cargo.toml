@@ -21,6 +21,7 @@ neo-common.workspace = true
 neo-kernel.workspace = true
 neo-frontend.workspace = true
 neo-codegen.workspace = true
+neo-host.workspace = true
 
 [workspace]
 resolver = "3"
@@ -30,6 +31,7 @@ members = [
   "crates/neo-kernel",
   "crates/neo-frontend",
   "crates/neo-codegen",
+  "crates/neo-host",
 ]
 
 [workspace.package]
@@ -41,6 +43,7 @@ neo-common = { path = "crates/neo-common" }
 neo-kernel = { path = "crates/neo-kernel" }
 neo-frontend = { path = "crates/neo-frontend" }
 neo-codegen = { path = "crates/neo-codegen" }
+neo-host = { path = "crates/neo-host" }
 wasm-encoder = "0.263.0"
 wit-component = "0.263.0"
 wit-parser = "0.263.0"

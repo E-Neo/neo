@@ -113,7 +113,10 @@ fn build_command(args: &[String]) -> Result<()> {
 fn run_main(globals: &Globals) -> Result<()> {
     let ty = ensure_main(globals)?;
     let action = eval(globals, &Vec::new(), &neo::core::const_("main"));
-    let value = whnf(globals, neo::eval::run_action(globals, &action)?);
+    let value = whnf(
+        globals,
+        neo::host::run_action(globals, &mut neo::host::StdioHost, &action)?,
+    );
     let text = print_value(globals, &value).ok_or_else(|| {
         Error::new(format!(
             "`main` has a type that cannot be printed: `{}`",
@@ -325,7 +328,7 @@ fn brace_depth(s: &str) -> i32 {
 
 fn is_declaration(s: &str) -> bool {
     let t = s.trim_start();
-    if t.starts_with("enum ") {
+    if t.starts_with("enum ") || t.starts_with("extern fn ") {
         return true;
     }
     // `fn name(` is a declaration; `fn(` is a lambda expression.

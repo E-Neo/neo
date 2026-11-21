@@ -482,3 +482,45 @@ fn main(): U32 {
         error.message
     );
 }
+
+/// Run a component with wasmtime and return both streams.
+fn run_streams(path: &Path) -> Option<(String, String)> {
+    let out = Command::new("wasmtime").arg(path).output().ok()?;
+    if !out.status.success() {
+        panic!(
+            "wasmtime failed for {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Some((
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    ))
+}
+
+#[test]
+fn builds_stderr_write() {
+    let path = build(
+        r#"
+extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+
+fn exit_code(r: Result[Unit, IoError]): IO[U32] {
+  match r {
+    ok(_) => io_pure(0u32)
+    err(_) => io_pure(1u32)
+  }
+}
+
+fn main(): IO[U32] {
+  io_bind(stderr.write("hello\n"), exit_code)
+}
+"#,
+        "stderr-write",
+    );
+    assert!(is_component(&path), "{} is not a component", path.display());
+    if let Some((stdout, stderr)) = run_streams(&path) {
+        assert_eq!(stdout, "0\n");
+        assert_eq!(stderr, "hello\n");
+    }
+}

@@ -7,3 +7,4 @@ edition.workspace = true
 [dependencies]
 neo-common.workspace = true
 neo-kernel.workspace = true
+neo-host.workspace = true

@@ -57,6 +57,11 @@ enum Utf8Error {
   invalid_utf8(U32)
 }
 
+enum IoError {
+  closed
+  failed
+}
+
 fn bool_not(b: Bool): Bool {
   match b {
     true => false

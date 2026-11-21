@@ -30,13 +30,15 @@ const DIGIT_END: i32 = 96;
 const DATA_BASE: u32 = 1024;
 
 /// The number of imported WASI functions. Function indices start after these.
-const NUM_IMPORTS: u32 = 3;
+const NUM_IMPORTS: u32 = 5;
 
 const HEAP_START: u32 = 65_536;
 
 const IMPORT_GET_STDOUT: u32 = 0;
-const IMPORT_WRITE: u32 = 1;
-const IMPORT_FLUSH: u32 = 2;
+const IMPORT_GET_STDERR: u32 = 1;
+const IMPORT_WRITE_FLUSH: u32 = 2;
+const IMPORT_DROP_ERROR: u32 = 3;
+const IMPORT_DROP_STREAM: u32 = 4;
 
 const NEO_WIT: &str = include_str!("../wit/neo.wit");
 const WIT_IO: &str = include_str!("../wit/deps/io.wit");
@@ -89,6 +91,20 @@ fn defined(id: usize) -> u32 {
     NUM_IMPORTS + id as u32
 }
 
+/// The constructor index of `ctor_name` in `enum_name`, or an internal error
+/// when the prelude is missing it.
+fn ctor_index(globals: &Globals, enum_name: &str, ctor_name: &str) -> Result<usize> {
+    globals
+        .get_enum(enum_name)
+        .and_then(|info| info.ctors.iter().position(|c| c.name == ctor_name))
+        .ok_or_else(|| {
+            Error::new(format!(
+                "internal: the prelude is missing `{}` constructor `{}`",
+                enum_name, ctor_name
+            ))
+        })
+}
+
 struct Codegen<'g> {
     globals: &'g Globals,
     types: Vec<(Vec<ValType>, Vec<ValType>)>,
@@ -124,6 +140,7 @@ struct Codegen<'g> {
     print_unit_id: usize,
     print_str_id: usize,
     print_literal_bytes_id: usize,
+    write_stream_id: usize,
     run_id: usize,
 
     succ_index: i32,
@@ -162,6 +179,7 @@ impl<'g> Codegen<'g> {
             print_unit_id: 0,
             print_str_id: 0,
             print_literal_bytes_id: 0,
+            write_stream_id: 0,
             run_id: 0,
             succ_index,
         }
@@ -249,10 +267,13 @@ impl<'g> Codegen<'g> {
         self.print_unit_id = self.new_func(&[ValType::I32], &[]);
         self.print_str_id = self.new_func(&[ValType::I32], &[]);
         self.print_literal_bytes_id = self.new_func(&[ValType::I32], &[]);
+        self.write_stream_id =
+            self.new_func(&[ValType::I32, ValType::I32, ValType::I32], &[ValType::I32]);
         self.run_id = self.new_func(&[], &[ValType::I32]);
 
         self.gen_alloc();
         self.gen_runtime();
+        self.gen_write_stream();
         self.gen_print_bytes();
         self.gen_print_u32();
         self.gen_print_nat();
@@ -299,7 +320,92 @@ impl<'g> Codegen<'g> {
         self.set_body(id, body);
     }
 
+    fn write_stream_fn(&self) -> u32 {
+        defined(self.write_stream_id)
+    }
+
+    /// Write a byte range to an output stream, chunking with
+    /// `blocking-write-and-flush` and dropping a failed stream's error
+    /// resource. Returns 0 on success, 1 when the stream is closed, and 2 for
+    /// any other error.
+    fn gen_write_stream(&mut self) {
+        let mut fc = FnCompiler::new(self, 3);
+        let handle = fc.local();
+        let ptr = fc.local();
+        let rem = fc.local();
+        let chunk = fc.local();
+
+        fc.emit(I::LocalGet(0));
+        fc.emit(I::LocalSet(handle));
+        fc.emit(I::LocalGet(1));
+        fc.emit(I::LocalSet(ptr));
+        fc.emit(I::LocalGet(2));
+        fc.emit(I::LocalSet(rem));
+
+        fc.emit(I::Block(BlockType::Empty));
+        fc.emit(I::Loop(BlockType::Empty));
+        fc.emit(I::LocalGet(rem));
+        fc.emit(I::I32Eqz);
+        fc.emit(I::BrIf(1));
+
+        // chunk = min(rem, 4096)
+        fc.emit(I::LocalGet(rem));
+        fc.emit(I::I32Const(4096));
+        fc.emit(I::I32LtU);
+        fc.emit(I::If(BlockType::Result(ValType::I32)));
+        fc.emit(I::LocalGet(rem));
+        fc.emit(I::Else);
+        fc.emit(I::I32Const(4096));
+        fc.emit(I::End);
+        fc.emit(I::LocalSet(chunk));
+
+        fc.emit(I::LocalGet(handle));
+        fc.emit(I::LocalGet(ptr));
+        fc.emit(I::LocalGet(chunk));
+        fc.emit(I::I32Const(RETPTR));
+        fc.emit(I::Call(IMPORT_WRITE_FLUSH));
+
+        fc.emit(I::I32Const(RETPTR));
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::If(BlockType::Empty));
+        // A non-`closed` stream error owns an `error` resource that must be
+        // dropped before the status is returned.
+        fc.emit(I::I32Const(RETPTR + 4));
+        fc.emit(I::I32Load8U(mem8(0)));
+        fc.emit(I::I32Eqz);
+        fc.emit(I::If(BlockType::Empty));
+        fc.emit(I::I32Const(RETPTR + 8));
+        fc.emit(I::I32Load(mem(0)));
+        fc.emit(I::Call(IMPORT_DROP_ERROR));
+        fc.emit(I::I32Const(2));
+        fc.emit(I::Return);
+        fc.emit(I::Else);
+        fc.emit(I::I32Const(1));
+        fc.emit(I::Return);
+        fc.emit(I::End);
+        fc.emit(I::End);
+
+        fc.emit(I::LocalGet(ptr));
+        fc.emit(I::LocalGet(chunk));
+        fc.emit(I::I32Add);
+        fc.emit(I::LocalSet(ptr));
+        fc.emit(I::LocalGet(rem));
+        fc.emit(I::LocalGet(chunk));
+        fc.emit(I::I32Sub);
+        fc.emit(I::LocalSet(rem));
+        fc.emit(I::Br(0));
+        fc.emit(I::End);
+        fc.emit(I::End);
+
+        fc.emit(I::I32Const(0));
+
+        let body = fc.finish();
+        let id = self.write_stream_id;
+        self.set_body(id, body);
+    }
+
     fn gen_print_bytes(&mut self) {
+        let write_stream = self.write_stream_fn();
         let mut fc = FnCompiler::new(self, 2);
         let out = fc.local();
         fc.emit(I::Call(IMPORT_GET_STDOUT));
@@ -307,11 +413,10 @@ impl<'g> Codegen<'g> {
         fc.emit(I::LocalGet(out));
         fc.emit(I::LocalGet(0));
         fc.emit(I::LocalGet(1));
-        fc.emit(I::I32Const(RETPTR));
-        fc.emit(I::Call(IMPORT_WRITE));
+        fc.emit(I::Call(write_stream));
+        fc.emit(I::Drop);
         fc.emit(I::LocalGet(out));
-        fc.emit(I::I32Const(RETPTR));
-        fc.emit(I::Call(IMPORT_FLUSH));
+        fc.emit(I::Call(IMPORT_DROP_STREAM));
         let body = fc.finish();
         let id = self.print_bytes_id;
         self.set_body(id, body);
@@ -1221,11 +1326,12 @@ impl<'g> Codegen<'g> {
 
         // Allocate the import types before writing the type section.
         let get_stdout_ty = self.ty(&[], &[ValType::I32]);
+        let get_stderr_ty = self.ty(&[], &[ValType::I32]);
         let write_ty = self.ty(
             &[ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             &[],
         );
-        let flush_ty = self.ty(&[ValType::I32, ValType::I32], &[]);
+        let drop_ty = self.ty(&[ValType::I32], &[]);
 
         let heap_start = {
             let end = DATA_BASE + self.data.len() as u32 + 16;
@@ -1248,14 +1354,24 @@ impl<'g> Codegen<'g> {
             EntityType::Function(get_stdout_ty),
         );
         imports.import(
-            "wasi:io/streams@0.2.9",
-            "[method]output-stream.write",
-            EntityType::Function(write_ty),
+            "wasi:cli/stderr@0.2.9",
+            "get-stderr",
+            EntityType::Function(get_stderr_ty),
         );
         imports.import(
             "wasi:io/streams@0.2.9",
-            "[method]output-stream.blocking-flush",
-            EntityType::Function(flush_ty),
+            "[method]output-stream.blocking-write-and-flush",
+            EntityType::Function(write_ty),
+        );
+        imports.import(
+            "wasi:io/error@0.2.9",
+            "[resource-drop]error",
+            EntityType::Function(drop_ty),
+        );
+        imports.import(
+            "wasi:io/streams@0.2.9",
+            "[resource-drop]output-stream",
+            EntityType::Function(drop_ty),
         );
 
         let mut functions = FunctionSection::new();
@@ -1522,6 +1638,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             Tm::Io(_) => self.emit(I::I32Const(0)),
             Tm::IoPure(v) => self.compile_thunk(v)?,
             Tm::IoBind { m, k } => self.compile_bind(m, k)?,
+            Tm::Extern { name, args } => self.compile_extern(name, args)?,
             Tm::Const(name) => self.compile_const(name)?,
             Tm::Ctor(enum_name, index, args) => self.compile_ctor(enum_name, *index, args)?,
             Tm::App(f, a) => self.compile_app(f, a)?,
@@ -1533,6 +1650,99 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             Tm::J { refl_case, .. } => self.compile(refl_case)?,
             Tm::Lam { body, .. } => self.compile_lambda(body)?,
         }
+        Ok(())
+    }
+
+    fn compile_extern(&mut self, name: &str, args: &[RcTm]) -> Result<()> {
+        let import = self
+            .cg
+            .globals
+            .get_extern(name)
+            .map(|info| info.import.clone())
+            .ok_or_else(|| Error::new(format!("unknown extern `{}`", name)))?;
+        let capability = neo_host::lookup(&import)
+            .ok_or_else(|| Error::new(format!("unknown host capability `{}`", import)))?;
+        self.compile_thunk_with(|child| match capability.lowering {
+            neo_host::Lowering::StderrWrite => child.compile_stderr_write(args),
+        })
+    }
+
+    fn compile_stderr_write(&mut self, args: &[RcTm]) -> Result<()> {
+        let [arg] = args else {
+            return Err(Error::new("`stderr.write` takes one argument"));
+        };
+        self.compile(arg)?;
+        let desc = self.local();
+        self.emit(I::LocalSet(desc));
+        let ptr = self.local();
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(ptr));
+
+        let handle = self.local();
+        self.emit(I::Call(IMPORT_GET_STDERR));
+        self.emit(I::LocalSet(handle));
+        let status = self.local();
+        self.emit(I::LocalGet(handle));
+        self.emit(I::LocalGet(ptr));
+        self.emit(I::LocalGet(desc));
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::Call(self.cg.write_stream_fn()));
+        self.emit(I::LocalSet(status));
+        self.emit(I::LocalGet(handle));
+        self.emit(I::Call(IMPORT_DROP_STREAM));
+
+        let globals = self.cg.globals;
+        let ok = ctor_index(globals, "Result", "ok")?;
+        let err = ctor_index(globals, "Result", "err")?;
+        let unit = ctor_index(globals, "Unit", "unit")?;
+        let closed = ctor_index(globals, "IoError", "closed")?;
+        let failed = ctor_index(globals, "IoError", "failed")?;
+
+        self.emit(I::LocalGet(status));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        let unit_local = self.local();
+        self.build_ctor(unit, &[]);
+        self.emit(I::LocalSet(unit_local));
+        self.build_ctor(
+            ok,
+            &[Place {
+                local: unit_local,
+                offset: None,
+            }],
+        );
+        self.emit(I::Else);
+        self.emit(I::LocalGet(status));
+        self.emit(I::I32Const(1));
+        self.emit(I::I32Eq);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        let closed_local = self.local();
+        self.build_ctor(closed, &[]);
+        self.emit(I::LocalSet(closed_local));
+        self.build_ctor(
+            err,
+            &[Place {
+                local: closed_local,
+                offset: None,
+            }],
+        );
+        self.emit(I::Else);
+        let failed_local = self.local();
+        self.build_ctor(failed, &[]);
+        self.emit(I::LocalSet(failed_local));
+        self.build_ctor(
+            err,
+            &[Place {
+                local: failed_local,
+                offset: None,
+            }],
+        );
+        self.emit(I::End);
+        self.emit(I::End);
         Ok(())
     }
 
@@ -1768,6 +1978,14 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
     /// argument but the body is compiled in the current environment, not under
     /// a binder.
     fn compile_thunk(&mut self, body: &RcTm) -> Result<()> {
+        self.compile_thunk_with(|child| child.compile(body))
+    }
+
+    /// Build a zero-argument action thunk whose body is emitted by `emit`.
+    fn compile_thunk_with(
+        &mut self,
+        emit: impl FnOnce(&mut FnCompiler<'_, 'g>) -> Result<()>,
+    ) -> Result<()> {
         let caps = self.env.clone();
         let (id, slot) = self.cg.new_lambda_func();
         self.make_closure(slot, &caps);
@@ -1775,7 +1993,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         let fin = {
             let mut child = FnCompiler::new(&mut *self.cg, 2);
             child.env = captured_env(caps.len());
-            child.compile(body)?;
+            emit(&mut child)?;
             child.finish()
         };
         self.cg.set_body(id, fin);

@@ -1,22 +1,23 @@
-examples/argument_elision.neo	ok	IO[Nat]	6399	0xa96907db5a7f2d39
-examples/bool.neo	ok	IO[Bool]	4051	0x8ec54322cb01eea2
-examples/bytes.neo	ok	IO[Bytes]	3910	0xb093256002a77e52
-examples/closures.neo	ok	IO[Nat]	4335	0xc4d2af1e81bad5ec
-examples/enums.neo	ok	IO[Nat]	4524	0x2bd25ed88ea82fce
-examples/hello.neo	ok	IO[Nat]	3886	0x16040cc5849ffa4f
-examples/indexed_append.neo	ok	IO[Nat]	6381	0xf1aae2ce92b990df
-examples/indexed_match.neo	ok	IO[Nat]	4285	0x372ab1dd3e8b9a24
-examples/indexed_vec.neo	ok	IO[Nat]	5479	0xd806b42daf0e40a6
-examples/io.neo	ok	IO[U32]	4042	0x90737b7317168a50
-examples/list.neo	ok	IO[List(Nat)]	4491	0x072c7b23a97384ff
-examples/methods.neo	ok	IO[U32]	4079	0x76b16719456ef270
-examples/nat.neo	ok	IO[Nat]	4474	0x19e41d5e1e78cc0e
-examples/operators.neo	ok	IO[Nat]	12785	0x74f2fcfc18c40526
-examples/pattern_matching.neo	ok	IO[Nat]	4567	0x5a06d91c16f9f71c
-examples/proofs.neo	ok	IO[Nat]	4133	0x2ea718f3917114ef
-examples/strings.neo	ok	IO[String]	4093	0x62995bbc5565dd1b
-examples/u32.neo	ok	IO[U32]	3963	0x8fea28eb0e02f340
-examples/utf8.neo	ok	IO[Result(String, Utf8Error)]	4175	0x2e752a24f89283c1
+examples/argument_elision.neo	ok	IO[Nat]	6832	0x355cb75a54ecec39
+examples/bool.neo	ok	IO[Bool]	4484	0xe795163083cf7f71
+examples/bytes.neo	ok	IO[Bytes]	4343	0xd6835ce965826934
+examples/closures.neo	ok	IO[Nat]	4768	0xe1e6c0baaba72d40
+examples/enums.neo	ok	IO[Nat]	4957	0x3be3368db656d676
+examples/hello.neo	ok	IO[Nat]	4319	0x0cb8ce64bcda0176
+examples/indexed_append.neo	ok	IO[Nat]	6814	0x67eb78251645489b
+examples/indexed_match.neo	ok	IO[Nat]	4718	0x1237e41036006eac
+examples/indexed_vec.neo	ok	IO[Nat]	5912	0x44a1ca5087313704
+examples/io.neo	ok	IO[U32]	4475	0x028cd6352cdb21f8
+examples/list.neo	ok	IO[List(Nat)]	4924	0x0fbc30f8824c470e
+examples/methods.neo	ok	IO[U32]	4512	0xe7c31c74ec093c71
+examples/nat.neo	ok	IO[Nat]	4907	0x71a1c474cb77c1f4
+examples/operators.neo	ok	IO[Nat]	13218	0xa989aa003a7dc791
+examples/pattern_matching.neo	ok	IO[Nat]	5000	0x0c1e7d04f40f8b2d
+examples/proofs.neo	ok	IO[Nat]	4566	0xe599b02d6c7e17fc
+examples/stderr.neo	ok	IO[U32]	4646	0x4c44f733465aafc5
+examples/strings.neo	ok	IO[String]	4526	0xe6df60186dcc054e
+examples/u32.neo	ok	IO[U32]	4396	0x27fabf5729747f02
+examples/utf8.neo	ok	IO[Result(String, Utf8Error)]	4608	0xb9ee45589539398a
 tests/corpus/ambiguous_numeral.neo	reject	cannot infer the type of this numeral; add an annotation, an ascription, or the `u32` suffix	-	-
 tests/corpus/bytes_literal_non_ascii.neo	reject	bytes literals must contain only ASCII characters; use `\\x` escapes	-	-
 tests/corpus/chained_comparison.neo	reject	comparison operators are not associative; parenthesize	-	-

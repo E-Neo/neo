@@ -84,6 +84,7 @@ dependencies = [
  "neo-codegen",
  "neo-common",
  "neo-frontend",
+ "neo-host",
  "neo-kernel",
 ]
 
@@ -92,6 +93,7 @@ name = "neo-codegen"
 version = "0.1.0"
 dependencies = [
  "neo-common",
+ "neo-host",
  "neo-kernel",
  "wasm-encoder",
  "wit-component",
@@ -104,6 +106,15 @@ version = "0.1.0"
 
 [[package]]
 name = "neo-frontend"
+version = "0.1.0"
+dependencies = [
+ "neo-common",
+ "neo-host",
+ "neo-kernel",
+]
+
+[[package]]
+name = "neo-host"
 version = "0.1.0"
 dependencies = [
  "neo-common",

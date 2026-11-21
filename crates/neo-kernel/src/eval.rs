@@ -3,7 +3,6 @@ use std::rc::Rc;
 use crate::core::{Branch, PrimLit, PrimOp, PrimOutcome, PrimRet, RcTm};
 use crate::env::{GlobalDef, Globals};
 use crate::value::*;
-use neo_common::error::{Error, Result};
 
 pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
     use crate::core::Tm::*;
@@ -29,6 +28,13 @@ pub fn eval(globals: &Globals, env: &Env, tm: &RcTm) -> V {
         Io(t) => vio(eval(globals, env, t)),
         IoPure(v) => vpure(eval(globals, env, v)),
         IoBind { m, k } => vbind(eval(globals, env, m), eval(globals, env, k)),
+        Extern { name, args } => {
+            let args: Vec<V> = args.iter().map(|a| eval(globals, env, a)).collect();
+            match globals.get_extern(name) {
+                Some(info) => vextern(name.clone(), info.import.clone(), args),
+                None => vglob(name.clone()),
+            }
+        }
         Pi {
             dom, cod, implicit, ..
         } => {
@@ -138,23 +144,6 @@ pub fn eval_closure(globals: &Globals, closure: &Closure, arg: V) -> V {
     let mut env = closure.env.clone();
     env.push(arg);
     eval(globals, &env, &closure.body)
-}
-
-/// Execute an action value. Recursive actions cannot be written in a total
-/// program, so this terminates whenever type checking succeeds.
-pub fn run_action(globals: &Globals, action: &V) -> Result<V> {
-    let action = force(globals, action.clone());
-    match &*action {
-        Val::Action(a) => match &**a {
-            Action::Pure(v) => Ok(v.clone()),
-            Action::Bind(m, k) => {
-                let produced = run_action(globals, m)?;
-                let next = vapp(globals, k.clone(), produced);
-                run_action(globals, &next)
-            }
-        },
-        _ => Err(Error::new("`main` did not evaluate to an `IO` action")),
-    }
 }
 
 /// Reduce a primitive operation whose arguments are already values. The
