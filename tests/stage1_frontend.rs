@@ -97,10 +97,33 @@ fn driver_runs_as_a_component() {
             .arg(".")
             .arg(&wasm)
             .arg("input.neo")
+            .arg("output.wasm")
             .output()
             .expect("run driver");
-        let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(String::from_utf8_lossy(&out.stdout), "Ok(6)\n");
         assert_eq!(out.status.code(), Some(0));
+        let module = dir.join("output.wasm");
+        let bytes = std::fs::read(&module).expect("emitted module");
+        assert_eq!(&bytes[..4], b"\0asm");
+        if Command::new("wasm-tools").arg("--version").output().is_ok() {
+            let valid = Command::new("wasm-tools")
+                .arg("validate")
+                .arg(&module)
+                .output()
+                .expect("validate emitted module");
+            assert!(
+                valid.status.success(),
+                "{}",
+                String::from_utf8_lossy(&valid.stderr)
+            );
+            let run = Command::new("wasmtime")
+                .arg("--invoke")
+                .arg("main")
+                .arg(&module)
+                .output()
+                .expect("run emitted module");
+            assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "6");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     });
 }

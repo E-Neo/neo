@@ -1,9 +1,20 @@
 mod frontend;
+mod codegen;
 
-fn after_read(r: Result[Bytes, IoError]): IO[Result[U32, IoError]] {
+fn after_write(value: U32, r: Result[Unit, IoError]): IO[Result[U32, IoError]] {
+  match r {
+    Ok(_) => IO::pure(Ok(value))
+    Err(e) => IO::pure(Err(e))
+  }
+}
+
+fn after_read(output: String, r: Result[Bytes, IoError]): IO[Result[U32, IoError]] {
   match r {
     Ok(bytes) => match frontend::parser::parse_program(1000, bytes) {
-      Ok(value) => IO::pure(Ok(value))
+      Ok(value) => IO::bind(
+        file::write(output, codegen::wasm::module_const(value)),
+        fn(done: Result[Unit, IoError]) => after_write(value, done)
+      )
       Err(_) => IO::pure(Err(InvalidInput))
     }
     Err(e) => IO::pure(Err(e))
@@ -12,7 +23,14 @@ fn after_read(r: Result[Bytes, IoError]): IO[Result[U32, IoError]] {
 
 fn after_args(args: List[String]): IO[Result[U32, IoError]] {
   match args {
-    Cons(path, _) => IO::bind(file::read(path), after_read)
+    Cons(source, rest) => match rest {
+      Cons(output, _) => IO::bind(
+        file::read(source),
+        fn(r: Result[Bytes, IoError]) => after_read(output, r)
+      )
+      Nil => IO::pure(Err(InvalidInput))
+      Cons(_, _) => IO::pure(Err(InvalidInput))
+    }
     Nil => IO::pure(Err(InvalidInput))
   }
 }

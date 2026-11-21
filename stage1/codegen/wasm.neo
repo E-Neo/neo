@@ -62,20 +62,26 @@ fn export_section(): Bytes {
   section(7u32, b"\x01\x04main\x00\x00")
 }
 
-fn code_section(): Bytes {
-  section(10u32, b"\x01\x04\x00\x41\x2a\x0b")
+fn code_section(value: U32): Bytes {
+  let insn = b"\x00\x41".concat(uleb_bytes(value)).concat(b"\x0b")
+  let body = uleb_bytes(insn.length()).concat(insn)
+  section(10u32, b"\x01".concat(body))
 }
 
-pub fn demo_module(): Bytes {
+pub fn module_const(value: U32): Bytes {
   render(
     append(
       append(Chunk(header()), Chunk(type_section())),
       append(
         Chunk(function_section()),
-        append(Chunk(export_section()), Chunk(code_section()))
+        append(Chunk(export_section()), Chunk(code_section(value)))
       )
     )
   )
+}
+
+pub fn demo_module(): Bytes {
+  module_const(42u32)
 }
 
 pub fn demo_len(): U32 {

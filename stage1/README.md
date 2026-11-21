@@ -56,10 +56,11 @@ and conversion, written in Neo.
 arithmetic language. The lexer uses a byte-class state machine; the parser
 sums numerals with a single recursive token walk. Both avoid mutual recursion.
 
-`stage1/codegen/` emits LEB128, wasm sections, and a valid minimal module
-using the new `U32.to_byte` method.
+`stage1/codegen/` emits LEB128, wasm sections, and a valid module from a
+constant using the new `U32.to_byte` method.
 
-`stage1/driver.neo` is a first Stage 1 entry point: it reads a path from
-`env::args`, reads the file through `file::read`, runs the Stage 1 parser, and
-returns `Ok(value)` or `Err(InvalidInput)`. It builds and runs as a WASI
-component under wasmtime.
+`stage1/driver.neo` is a first end-to-end Stage 1 compiler: it reads a source
+path and an output path from `env::args`, reads the source, parses the
+arithmetic expression, emits a wasm module returning that value, and writes
+it to the output path. It builds and runs as a WASI component under wasmtime;
+the emitted module validates and returns the parsed value.
