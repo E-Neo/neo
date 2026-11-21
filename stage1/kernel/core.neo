@@ -1,0 +1,515 @@
+// Stage 1 kernel slice: terms, values, fuel-driven evaluation, and quoting.
+//
+// Lists inside terms and values are encoded with `TNil`/`TCons` and
+// `VNil`/`VCons`, because a `List[T]` field in an inductive is a nested
+// inductive and is rejected by the positivity checker.
+
+pub enum KernelError {
+  OutOfFuel
+  Unbound
+  NotFunction
+}
+
+pub enum Tm {
+  TNil
+  TCons(Tm, Tm)
+  Var(U32)
+  Const(String)
+  Ty(U32)
+  PropTy
+  Ind(String, Tm)
+  Ctor(String, U32, Tm)
+  Pi(String, Tm, Tm)
+  Lam(String, Tm, Tm)
+  App(Tm, Tm)
+}
+
+pub enum Val {
+  VNil
+  VCons(Val, Val)
+  VVar(U32)
+  VConst(String)
+  VType(U32)
+  VProp
+  VInd(String, Val)
+  VCtor(String, U32, Val)
+  VPi(String, Val, Tm, fn(U32) -> Val)
+  VLam(String, Val, Tm, fn(U32) -> Val)
+  VApp(Val, Val)
+  VError(KernelError)
+}
+
+pub fn env_empty(index: U32): Val {
+  VError(Unbound)
+}
+
+pub fn env_ext(env: fn(U32) -> Val, value: Val): fn(U32) -> Val {
+  fn(index: U32) => match index == 0u32 {
+    True => value
+    False => env(index - 1u32)
+  }
+}
+
+pub fn eval(fuel: Nat, env: fn(U32) -> Val, tm: Tm): Result[Val, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match tm {
+      TNil => Ok(VNil)
+      TCons(head, tail) => match eval(k, env, head) {
+        Ok(vhead) => match eval(k, env, tail) {
+          Ok(vtail) => Ok(VCons(vhead, vtail))
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      Var(index) => Ok(env(index))
+      Const(name) => Ok(VConst(name))
+      Ty(level) => Ok(VType(level))
+      PropTy => Ok(VProp)
+      Ind(name, args) => match eval(k, env, args) {
+        Ok(vargs) => Ok(VInd(name, vargs))
+        Err(e) => Err(e)
+      }
+      Ctor(name, index, args) => match eval(k, env, args) {
+        Ok(vargs) => Ok(VCtor(name, index, vargs))
+        Err(e) => Err(e)
+      }
+      Pi(name, dom, cod) => match eval(k, env, dom) {
+        Ok(vdom) => Ok(VPi(name, vdom, cod, env))
+        Err(e) => Err(e)
+      }
+      Lam(name, dom, body) => match eval(k, env, dom) {
+        Ok(vdom) => Ok(VLam(name, vdom, body, env))
+        Err(e) => Err(e)
+      }
+      App(f, a) => match eval(k, env, f) {
+        Ok(VLam(name, _, body, closure_env)) => match eval(k, env, a) {
+          Ok(value) => eval(k, env_ext(closure_env, value), body)
+          Err(e) => Err(e)
+        }
+        Ok(VError(e)) => Err(e)
+        Ok(neutral) => match eval(k, env, a) {
+          Ok(value) => Ok(VApp(neutral, value))
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+    }
+  }
+}
+
+pub fn quote(fuel: Nat, level: U32, value: Val): Result[Tm, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match value {
+      VNil => Ok(TNil)
+      VCons(head, tail) => match quote(k, level, head) {
+        Ok(qhead) => match quote(k, level, tail) {
+          Ok(qtail) => Ok(TCons(qhead, qtail))
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      VVar(index) => match index < level {
+        True => Ok(Var(level - 1u32 - index))
+        False => Err(Unbound)
+      }
+      VConst(name) => Ok(Const(name))
+      VType(level) => Ok(Ty(level))
+      VProp => Ok(PropTy)
+      VInd(name, args) => match quote(k, level, args) {
+        Ok(qargs) => Ok(Ind(name, qargs))
+        Err(e) => Err(e)
+      }
+      VCtor(name, index, args) => match quote(k, level, args) {
+        Ok(qargs) => Ok(Ctor(name, index, qargs))
+        Err(e) => Err(e)
+      }
+      VPi(name, dom, cod, env) => match quote(k, level, dom) {
+        Ok(qdom) => match eval(k, env_ext(env, VVar(level)), cod) {
+          Ok(vcod) => match quote(k, level + 1u32, vcod) {
+            Ok(qcod) => Ok(Pi(name, qdom, qcod))
+            Err(e) => Err(e)
+          }
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      VLam(name, dom, body, env) => match quote(k, level, dom) {
+        Ok(qdom) => match eval(k, env_ext(env, VVar(level)), body) {
+          Ok(vbody) => match quote(k, level + 1u32, vbody) {
+            Ok(qbody) => Ok(Lam(name, qdom, qbody))
+            Err(e) => Err(e)
+          }
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      VApp(f, a) => match quote(k, level, f) {
+        Ok(qf) => match quote(k, level, a) {
+          Ok(qa) => Ok(App(qf, qa))
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      VError(e) => Err(e)
+    }
+  }
+}
+
+pub fn normalize(fuel: Nat, tm: Tm): Result[Tm, KernelError] {
+  match eval(fuel, env_empty, tm) {
+    Ok(value) => quote(fuel, 0u32, value)
+    Err(e) => Err(e)
+  }
+}
+
+pub fn demo_identity(): U32 {
+  match normalize(100, App(Lam("x", Ty(0u32), Var(0u32)), Ty(0u32))) {
+    Ok(Ty(level)) => match level == 0u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(Const(_)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_pi(): U32 {
+  match normalize(100, Pi("x", Ty(0u32), Var(0u32))) {
+    Ok(Pi(_, Ty(dom), Var(index))) => match dom == 0u32 {
+      True => match index == 0u32 {
+        True => 1u32
+        False => 0u32
+      }
+      False => 0u32
+    }
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Const(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_list(): U32 {
+  match normalize(100, Ctor("E", 0u32, TCons(Ty(0u32), TNil))) {
+    Ok(Ctor(_, _, TCons(Ty(level), TNil))) => match level == 0u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Const(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_unbound(): U32 {
+  match normalize(100, Var(0u32)) {
+    Err(Unbound) => 1u32
+    Err(OutOfFuel) => 0u32
+    Err(NotFunction) => 0u32
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Const(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+  }
+}
+
+pub fn demo_fuel(): U32 {
+  match normalize(0, Ty(0u32)) {
+    Err(OutOfFuel) => 1u32
+    Err(Unbound) => 0u32
+    Err(NotFunction) => 0u32
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Const(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+  }
+}
+
+fn both(a: Bool, b: Bool): Bool {
+  match a {
+    True => b
+    False => False
+  }
+}
+
+pub fn conv(fuel: Nat, level: U32, a: Val, b: Val): Result[Bool, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match a {
+      VNil => match b {
+        VNil => Ok(True)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VCons(ah, at) => match b {
+        VNil => Ok(False)
+        VCons(bh, bt) => match conv(k, level, ah, bh) {
+          Ok(True) => conv(k, level, at, bt)
+          Ok(False) => Ok(False)
+          Err(e) => Err(e)
+        }
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VVar(i) => match b {
+        VVar(j) => match i == j {
+          True => Ok(True)
+          False => Ok(False)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VConst(x) => match b {
+        VConst(y) => match x == y {
+          True => Ok(True)
+          False => Ok(False)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VType(x) => match b {
+        VType(y) => match x == y {
+          True => Ok(True)
+          False => Ok(False)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VProp => match b {
+        VProp => Ok(True)
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VInd(xn, xa) => match b {
+        VInd(yn, ya) => match xn == yn {
+          True => conv(k, level, xa, ya)
+          False => Ok(False)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VCtor(xn, xi, xa) => match b {
+        VCtor(yn, yi, ya) => match xn == yn {
+          True => match xi == yi {
+            True => conv(k, level, xa, ya)
+            False => Ok(False)
+          }
+          False => Ok(False)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VPi(xn, xd, xc, xe) => match b {
+        VPi(yn, yd, yc, ye) => match conv(k, level, xd, yd) {
+          Ok(True) => match eval(k, env_ext(xe, VVar(level)), xc) {
+            Ok(xv) => match eval(k, env_ext(ye, VVar(level)), yc) {
+              Ok(yv) => conv(k, level + 1u32, xv, yv)
+              Err(e) => Err(e)
+            }
+            Err(e) => Err(e)
+          }
+          Ok(False) => Ok(False)
+          Err(e) => Err(e)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VLam(xn, xd, xb, xe) => match b {
+        VLam(yn, yd, yb, ye) => match conv(k, level, xd, yd) {
+          Ok(True) => match eval(k, env_ext(xe, VVar(level)), xb) {
+            Ok(xv) => match eval(k, env_ext(ye, VVar(level)), yb) {
+              Ok(yv) => conv(k, level + 1u32, xv, yv)
+              Err(e) => Err(e)
+            }
+            Err(e) => Err(e)
+          }
+          Ok(False) => Ok(False)
+          Err(e) => Err(e)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VApp(_, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VApp(xf, xa) => match b {
+        VApp(yf, ya) => match conv(k, level, xf, yf) {
+          Ok(True) => conv(k, level, xa, ya)
+          Ok(False) => Ok(False)
+          Err(e) => Err(e)
+        }
+        VNil => Ok(False)
+        VCons(_, _) => Ok(False)
+        VVar(_) => Ok(False)
+        VConst(_) => Ok(False)
+        VType(_) => Ok(False)
+        VProp => Ok(False)
+        VInd(_, _) => Ok(False)
+        VCtor(_, _, _) => Ok(False)
+        VPi(_, _, _, _) => Ok(False)
+        VLam(_, _, _, _) => Ok(False)
+        VError(e) => Err(e)
+      }
+      VError(e) => Err(e)
+    }
+  }
+}
+
+pub fn demo_conv_alpha(): U32 {
+  let left = Lam("x", Ty(0u32), Var(0u32))
+  let right = Lam("y", Ty(0u32), Var(0u32))
+  match eval(100, env_empty, left) {
+    Ok(vleft) => match eval(100, env_empty, right) {
+      Ok(vright) => match conv(100, 0u32, vleft, vright) {
+        Ok(True) => 1u32
+        Ok(False) => 0u32
+        Err(_) => 0u32
+      }
+      Err(_) => 0u32
+    }
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_conv_diff(): U32 {
+  match eval(100, env_empty, Ty(0u32)) {
+    Ok(v0) => match eval(100, env_empty, Ty(1u32)) {
+      Ok(v1) => match conv(100, 0u32, v0, v1) {
+        Ok(True) => 0u32
+        Ok(False) => 1u32
+        Err(_) => 0u32
+      }
+      Err(_) => 0u32
+    }
+    Err(_) => 0u32
+  }
+}

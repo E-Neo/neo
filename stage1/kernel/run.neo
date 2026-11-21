@@ -1,0 +1,13 @@
+mod core;
+
+fn main(): IO[U32] {
+  IO::pure(
+    core::demo_identity()
+      + core::demo_pi()
+      + core::demo_list()
+      + core::demo_unbound()
+      + core::demo_fuel()
+      + core::demo_conv_alpha()
+      + core::demo_conv_diff()
+  )
+}
