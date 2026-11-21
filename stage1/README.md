@@ -26,13 +26,18 @@ and conversion, written in Neo.
 - A `Match` term, encoded branch lists, non-dependent branch checking with
   constructor field telescopes, exhaustiveness checks, and constructor
   reduction during evaluation.
+- `Eq`, `ReflTm`, and a first `J` slice. Equality values are encoded as
+  `VInd("Eq", ...)` and proofs as `VCtor("Refl", ...)`, so the existing
+  conversion code handles them. `Refl` checks both sides against the value;
+  `J` checks the proof and reduces to its `refl_case`. Motives are not yet
+  applied.
 - Alpha-renamed lambdas, different universes, unbound variables, fuel
   exhaustion, identity checking, a type error, Pi inference, and application
   inference are tested.
 
 ## Next
 
-- `J` and dependent match refinement.
+- Dependent match refinement and full motive application in `J`.
 - Positivity, termination, and pretty printing.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.
 

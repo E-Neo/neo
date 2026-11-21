@@ -32,6 +32,9 @@ pub enum Tm {
   Match(Tm, Tm)
   TBrNil
   TBrCons(U32, U32, Tm, Tm)
+  Eq(Tm, Tm)
+  ReflTm(Tm)
+  J(Tm, Tm, Tm, Tm, Tm, Tm)
 }
 
 pub enum Val {
@@ -114,6 +117,35 @@ pub fn eval(fuel: Nat, env: fn(U32) -> Val, tm: Tm): Result[Val, KernelError] {
       }
       TBrNil => Err(Unsupported)
       TBrCons(_, _, _, _) => Err(Unsupported)
+      Eq(lhs, rhs) => match eval(k, env, lhs) {
+        Ok(vlhs) => match eval(k, env, rhs) {
+          Ok(vrhs) => Ok(VInd("Eq", VCons(vlhs, VCons(vrhs, VNil))))
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      ReflTm(value) => match eval(k, env, value) {
+        Ok(v) => Ok(VCtor("Refl", 0u32, VCons(v, VNil)))
+        Err(e) => Err(e)
+      }
+      J(_, _, _, proof, _, refl_case) => match eval(k, env, proof) {
+        Ok(VCtor(name, _, _)) => match name == "Refl" {
+          True => eval(k, env, refl_case)
+          False => Err(Unsupported)
+        }
+        Ok(VNil) => Err(Unsupported)
+        Ok(VCons(_, _)) => Err(Unsupported)
+        Ok(VVar(_)) => Err(Unsupported)
+        Ok(VConst(_)) => Err(Unsupported)
+        Ok(VType(_)) => Err(Unsupported)
+        Ok(VProp) => Err(Unsupported)
+        Ok(VInd(_, _)) => Err(Unsupported)
+        Ok(VPi(_, _, _, _)) => Err(Unsupported)
+        Ok(VLam(_, _, _, _)) => Err(Unsupported)
+        Ok(VApp(_, _)) => Err(Unsupported)
+        Ok(VError(e)) => Err(e)
+        Err(e) => Err(e)
+      }
     }
   }
 }
@@ -202,6 +234,9 @@ pub fn demo_identity(): U32 {
     Ok(Match(_, _)) => 0u32
     Ok(TBrNil) => 0u32
     Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
     Ok(TNil) => 0u32
     Ok(TCons(_, _)) => 0u32
     Err(_) => 0u32
@@ -231,6 +266,9 @@ pub fn demo_pi(): U32 {
     Ok(Match(_, _)) => 0u32
     Ok(TBrNil) => 0u32
     Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
     Err(_) => 0u32
   }
 }
@@ -255,6 +293,9 @@ pub fn demo_list(): U32 {
     Ok(Match(_, _)) => 0u32
     Ok(TBrNil) => 0u32
     Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
     Err(_) => 0u32
   }
 }
@@ -285,6 +326,9 @@ pub fn demo_unbound(): U32 {
     Ok(Match(_, _)) => 0u32
     Ok(TBrNil) => 0u32
     Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
   }
 }
 
@@ -314,6 +358,9 @@ pub fn demo_fuel(): U32 {
     Ok(Match(_, _)) => 0u32
     Ok(TBrNil) => 0u32
     Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
   }
 }
 
@@ -721,6 +768,9 @@ pub fn branch_at(branches: Tm, index: U32): BranchLookup {
     Lam(_, _, _) => BNone
     App(_, _) => BNone
     Match(_, _) => BNone
+    Eq(_, _) => BNone
+    ReflTm(_) => BNone
+    J(_, _, _, _, _, _) => BNone
   }
 }
 
@@ -864,6 +914,15 @@ pub fn infer(
         Ok(_) => Err(NotFunction)
         Err(e) => Err(e)
       }
+      Eq(lhs, rhs) => match infer(k, globals, ctx, lhs) {
+        Ok(ty) => match check(k, globals, ctx, rhs, ty) {
+          Ok(Unit) => Ok(VProp)
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      ReflTm(_) => Err(Unsupported)
+      J(_, _, _, _, _, _) => Err(Unsupported)
       Const(_) => Err(Unsupported)
       TNil => Err(Unsupported)
       TCons(_, _) => Err(Unsupported)
@@ -928,11 +987,57 @@ pub fn check(
         VLam(_, _, _, _) => Err(NotFunction)
         VApp(_, _) => Err(NotFunction)
       }
+      ReflTm(value) => match expected {
+        VInd(name, VCons(lhs, VCons(rhs, VNil))) => match name == "Eq" {
+          True => match eval(k, ctx_env(ctx), value) {
+            Ok(v) => match conv(k, ctx_len(ctx), v, lhs) {
+              Ok(True) => match conv(k, ctx_len(ctx), lhs, rhs) {
+                Ok(True) => Ok(Unit)
+                Ok(False) => Err(TypeMismatch)
+                Err(e) => Err(e)
+              }
+              Ok(False) => Err(TypeMismatch)
+              Err(e) => Err(e)
+            }
+            Err(e) => Err(e)
+          }
+          False => Err(TypeMismatch)
+        }
+        VInd(_, _) => Err(TypeMismatch)
+        VNil => Err(TypeMismatch)
+        VCons(_, _) => Err(TypeMismatch)
+        VVar(_) => Err(TypeMismatch)
+        VConst(_) => Err(TypeMismatch)
+        VType(_) => Err(TypeMismatch)
+        VProp => Err(TypeMismatch)
+        VCtor(_, _, _) => Err(TypeMismatch)
+        VPi(_, _, _, _) => Err(TypeMismatch)
+        VLam(_, _, _, _) => Err(TypeMismatch)
+        VApp(_, _) => Err(TypeMismatch)
+        VError(e) => Err(e)
+      }
+      J(_, lhs, rhs, proof, _, refl_case) => match eval(k, ctx_env(ctx), lhs) {
+        Ok(vlhs) => match eval(k, ctx_env(ctx), rhs) {
+          Ok(vrhs) => match check(
+            k,
+            globals,
+            ctx,
+            proof,
+            VInd("Eq", VCons(vlhs, VCons(vrhs, VNil)))
+          ) {
+            Ok(Unit) => check(k, globals, ctx, refl_case, expected)
+            Err(e) => Err(e)
+          }
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
       Var(_) => check_infer(k, globals, ctx, tm, expected)
       Ty(_) => check_infer(k, globals, ctx, tm, expected)
       PropTy => check_infer(k, globals, ctx, tm, expected)
       Pi(_, _, _) => check_infer(k, globals, ctx, tm, expected)
       App(_, _) => check_infer(k, globals, ctx, tm, expected)
+      Eq(_, _) => check_infer(k, globals, ctx, tm, expected)
       Const(_) => check_infer(k, globals, ctx, tm, expected)
       TNil => check_infer(k, globals, ctx, tm, expected)
       TCons(_, _) => check_infer(k, globals, ctx, tm, expected)
@@ -1177,6 +1282,9 @@ pub fn demo_match_eval(): U32 {
     Ok(Match(_, _)) => 0u32
     Ok(TBrNil) => 0u32
     Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
     Err(_) => 0u32
   }
 }
@@ -1223,5 +1331,76 @@ pub fn demo_match_arity(): U32 {
     Err(Unsupported) => 3u32
     Err(_) => 4u32
     Ok(Unit) => 0u32
+  }
+}
+
+fn eq_type(lhs: Val, rhs: Val): Val {
+  VInd("Eq", VCons(lhs, VCons(rhs, VNil)))
+}
+
+pub fn demo_eq_check(): U32 {
+  match check(
+    100,
+    empty_globals,
+    Nil,
+    ReflTm(Ty(0u32)),
+    eq_type(VType(0u32), VType(0u32))
+  ) {
+    Ok(Unit) => 1u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_eq_bad(): U32 {
+  match check(
+    100,
+    empty_globals,
+    Nil,
+    ReflTm(Ty(0u32)),
+    eq_type(VType(0u32), VType(1u32))
+  ) {
+    Err(TypeMismatch) => 1u32
+    Err(_) => 0u32
+    Ok(Unit) => 0u32
+  }
+}
+
+pub fn demo_j_eval(): U32 {
+  match normalize(100, J(Ty(0u32), Ty(0u32), Ty(0u32), ReflTm(Ty(0u32)), Ty(0u32), Ty(0u32))) {
+    Ok(Ty(level)) => match level == 0u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(TNil) => 0u32
+    Ok(TCons(_, _)) => 0u32
+    Ok(Var(_)) => 0u32
+    Ok(Const(_)) => 0u32
+    Ok(Ty(_)) => 0u32
+    Ok(PropTy) => 0u32
+    Ok(Ind(_, _)) => 0u32
+    Ok(Ctor(_, _, _)) => 0u32
+    Ok(Pi(_, _, _)) => 0u32
+    Ok(Lam(_, _, _)) => 0u32
+    Ok(App(_, _)) => 0u32
+    Ok(Match(_, _)) => 0u32
+    Ok(TBrNil) => 0u32
+    Ok(TBrCons(_, _, _, _)) => 0u32
+    Ok(Eq(_, _)) => 0u32
+    Ok(ReflTm(_)) => 0u32
+    Ok(J(_, _, _, _, _, _)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_j_check(): U32 {
+  match check(
+    100,
+    empty_globals,
+    Nil,
+    J(Ty(0u32), Ty(0u32), Ty(0u32), ReflTm(Ty(0u32)), Ty(0u32), Ty(0u32)),
+    VType(1u32)
+  ) {
+    Ok(Unit) => 1u32
+    Err(_) => 0u32
   }
 }

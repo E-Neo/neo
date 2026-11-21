@@ -20,5 +20,9 @@ fn main(): IO[U32] {
       + core::demo_match_check()
       + core::demo_match_missing()
       + core::demo_match_arity()
+      + core::demo_eq_check()
+      + core::demo_eq_bad()
+      + core::demo_j_eval()
+      + core::demo_j_check()
   )
 }
