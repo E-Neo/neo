@@ -1,0 +1,44 @@
+// Stage 1 component-shell splicing.
+//
+// The shell is frozen. The first core-module section starts at byte 2238
+// (id), with its payload at 2241; the payload is 2770 bytes long. These
+// constants must be regenerated if the component shell changes.
+
+use super::wasm
+
+pub enum SpliceError {
+  BadHeader
+  NoCore
+}
+
+fn first_core_id_at(): U32 {
+  2238u32
+}
+
+fn first_core_payload_at(): U32 {
+  2241u32
+}
+
+fn first_core_payload_end(): U32 {
+  5011u32
+}
+
+pub fn splice(shell: Bytes, core: Bytes): Result[Bytes, SpliceError] {
+  match shell.length() < first_core_payload_end() {
+    True => Err(BadHeader)
+    False => match shell.get(first_core_id_at()) == 1u32 {
+      False => Err(BadHeader)
+      True => {
+        let prefix = shell.slice(0u32, first_core_id_at())
+        let suffix = shell.slice(first_core_payload_end(), shell.length())
+        Ok(
+          prefix
+            .concat(1u32.to_byte())
+            .concat(wasm::uleb_bytes(core.length()))
+            .concat(core)
+            .concat(suffix)
+        )
+      }
+    }
+  }
+}

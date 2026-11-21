@@ -59,7 +59,9 @@ mutual recursion.
 
 `stage1/codegen/` emits LEB128, wasm sections, and a valid module from
 either a constant or an instruction sequence using the new `U32.to_byte`
-method.
+method. `component::splice` replaces the first core-module section in the
+frozen component shell. The shell offsets are constants and must be
+regenerated if the shell changes.
 
 `stage1/driver.neo` is a first end-to-end Stage 1 compiler: it reads a source
 path and an output path from `env::args`, reads the source, parses the

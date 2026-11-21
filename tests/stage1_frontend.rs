@@ -4,13 +4,14 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::rc::Rc;
 
 use neo::core::{PrimLit, const_};
 use neo::elab::elaborate_program;
 use neo::env::Globals;
 use neo::eval::{eval, force};
 use neo::prelude::new_globals;
-use neo::value::{V, Val};
+use neo::value::{V, Val, vprimlit};
 
 fn with_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
@@ -31,6 +32,41 @@ fn load(relative: &str) -> Globals {
 
 fn call(globals: &Globals, name: &str) -> V {
     force(globals, eval(globals, &Vec::new(), &const_(name)))
+}
+
+fn bytes_value(bytes: &[u8]) -> V {
+    vprimlit(PrimLit::Bytes(Rc::from(bytes)))
+}
+
+fn call_bytes(globals: &Globals, name: &str, shell: &[u8], core: &[u8]) -> V {
+    let mut value: V = Rc::new(Val::Glob(name.to_string()));
+    value = neo::eval::vapp(globals, value, bytes_value(shell));
+    value = neo::eval::vapp(globals, value, bytes_value(core));
+    force(globals, value)
+}
+
+fn first_core_module(component: &[u8]) -> &[u8] {
+    let mut pos = 8;
+    while pos < component.len() {
+        let id = component[pos];
+        pos += 1;
+        let mut shift = 0;
+        let mut size = 0usize;
+        loop {
+            let byte = component[pos];
+            pos += 1;
+            size |= ((byte & 0x7f) as usize) << shift;
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        if id == 1 {
+            return &component[pos..pos + size];
+        }
+        pos += size;
+    }
+    panic!("component has no core module");
 }
 
 fn u32_of(globals: &Globals, name: &str) -> u32 {
@@ -125,5 +161,46 @@ fn driver_runs_as_a_component() {
             assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "6");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn stage1_splices_the_component_shell() {
+    with_stack(|| {
+        let globals = load("stage1/codegen/run.neo");
+        let shell_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/neo-codegen/src/component_shell.wasm");
+        let shell = std::fs::read(&shell_path).expect("read shell");
+        let core = first_core_module(&shell).to_vec();
+        let value = call_bytes(&globals, "component::splice", &shell, &core);
+        let Val::Ctor(name, index, args) = &*value else {
+            panic!("expected a Result, got {value:?}");
+        };
+        assert_eq!(name, "Result");
+        assert_eq!(*index, 0);
+        let bytes = match &*args[args.len() - 1] {
+            Val::PrimLit(PrimLit::Bytes(bytes)) => bytes.clone(),
+            other => panic!("expected Bytes, got {other:?}"),
+        };
+        assert_eq!(
+            &*bytes, &shell,
+            "splicing the same core must preserve the shell"
+        );
+        if Command::new("wasm-tools").arg("--version").output().is_ok() {
+            let path = std::env::temp_dir()
+                .join(format!("neo-stage1-component-{}.wasm", std::process::id()));
+            std::fs::write(&path, &*bytes).expect("write component");
+            let out = Command::new("wasm-tools")
+                .arg("validate")
+                .arg(&path)
+                .output()
+                .expect("validate");
+            let _ = std::fs::remove_file(&path);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
     });
 }

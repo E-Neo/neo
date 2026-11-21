@@ -1,4 +1,5 @@
 mod wasm;
+mod component;
 
 fn main(): IO[U32] {
   IO::pure(wasm::demo_len())
