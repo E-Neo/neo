@@ -162,6 +162,10 @@ impl U32 {
       }
     }
   }
+
+  pub fn to_byte(self: U32): Bytes {
+    bytes_from_u32(self)
+  }
 }
 
 impl[T: Type] List[T] {

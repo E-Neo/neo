@@ -949,3 +949,19 @@ fn absurd(f: Fin[Zero]): Nat {
 "#,
     );
 }
+
+#[test]
+fn u32_to_byte_builds_bytes() {
+    let globals = define(
+        r#"
+fn main(): Bytes {
+  65u32.to_byte().concat(66u32.to_byte())
+}
+"#,
+    );
+    let result = call(&globals, "main", &[]);
+    match &*result {
+        Val::PrimLit(PrimLit::Bytes(bytes)) => assert_eq!(&**bytes, b"AB"),
+        other => panic!("expected Bytes, got {other:?}"),
+    }
+}

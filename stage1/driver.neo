@@ -1,0 +1,22 @@
+mod frontend;
+
+fn after_read(r: Result[Bytes, IoError]): IO[Result[U32, IoError]] {
+  match r {
+    Ok(bytes) => match frontend::parser::parse_program(1000, bytes) {
+      Ok(value) => IO::pure(Ok(value))
+      Err(_) => IO::pure(Err(InvalidInput))
+    }
+    Err(e) => IO::pure(Err(e))
+  }
+}
+
+fn after_args(args: List[String]): IO[Result[U32, IoError]] {
+  match args {
+    Cons(path, _) => IO::bind(file::read(path), after_read)
+    Nil => IO::pure(Err(InvalidInput))
+  }
+}
+
+fn main(): IO[Result[U32, IoError]] {
+  IO::bind(env::args(), after_args)
+}

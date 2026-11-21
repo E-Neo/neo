@@ -31,3 +31,17 @@ and conversion, written in Neo.
   environment in Stage 1.
 - Positivity, termination, and pretty printing.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.
+
+## Frontend, codegen, and driver slices
+
+`stage1/frontend/` contains a fuel-driven lexer and parser for a small
+arithmetic language. The lexer uses a byte-class state machine; the parser
+sums numerals with a single recursive token walk. Both avoid mutual recursion.
+
+`stage1/codegen/` emits LEB128, wasm sections, and a valid minimal module
+using the new `U32.to_byte` method.
+
+`stage1/driver.neo` is a first Stage 1 entry point: it reads a path from
+`env::args`, reads the file through `file::read`, runs the Stage 1 parser, and
+returns `Ok(value)` or `Err(InvalidInput)`. It builds and runs as a WASI
+component under wasmtime.

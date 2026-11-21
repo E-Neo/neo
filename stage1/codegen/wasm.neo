@@ -1,0 +1,83 @@
+// Stage 1 wasm emitter slice: LEB128, sections, and a minimal module.
+
+pub enum Builder {
+  Empty
+  Chunk(Bytes)
+  Node(Builder, Builder)
+}
+
+pub fn append(left: Builder, right: Builder): Builder {
+  Node(left, right)
+}
+
+pub fn render(builder: Builder): Bytes {
+  match builder {
+    Empty => b""
+    Chunk(bytes) => bytes
+    Node(left, right) => render(left).concat(render(right))
+  }
+}
+
+pub fn uleb(fuel: Nat, value: U32): List[U32] {
+  match fuel {
+    Zero => Nil
+    Succ(k) => match value < 128u32 {
+      True => Cons(value, Nil)
+      False => Cons((value % 128u32) + 128u32, uleb(k, value / 128u32))
+    }
+  }
+}
+
+pub fn list_bytes(fuel: Nat, values: List[U32]): Bytes {
+  match fuel {
+    Zero => b""
+    Succ(k) => match values {
+      Nil => b""
+      Cons(value, rest) => value.to_byte().concat(list_bytes(k, rest))
+    }
+  }
+}
+
+pub fn uleb_bytes(value: U32): Bytes {
+  list_bytes(16, uleb(16, value))
+}
+
+pub fn section(id: U32, payload: Bytes): Bytes {
+  id.to_byte().concat(uleb_bytes(payload.length())).concat(payload)
+}
+
+pub fn header(): Bytes {
+  b"\x00asm\x01\x00\x00\x00"
+}
+
+fn type_section(): Bytes {
+  section(1u32, b"\x01\x60\x00\x01\x7f")
+}
+
+fn function_section(): Bytes {
+  section(3u32, b"\x01\x00")
+}
+
+fn export_section(): Bytes {
+  section(7u32, b"\x01\x04main\x00\x00")
+}
+
+fn code_section(): Bytes {
+  section(10u32, b"\x01\x04\x00\x41\x2a\x0b")
+}
+
+pub fn demo_module(): Bytes {
+  render(
+    append(
+      append(Chunk(header()), Chunk(type_section())),
+      append(
+        Chunk(function_section()),
+        append(Chunk(export_section()), Chunk(code_section()))
+      )
+    )
+  )
+}
+
+pub fn demo_len(): U32 {
+  demo_module().length()
+}

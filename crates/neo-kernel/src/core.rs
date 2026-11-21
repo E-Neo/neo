@@ -123,9 +123,11 @@ pub enum PrimOp {
     BytesGet,
     StrFromBytes,
     BytesUtf8Check,
+    BytesFromU32,
 }
 
 const U32_BINARY: [PrimTy; 2] = [PrimTy::U32, PrimTy::U32];
+const U32_UNARY: [PrimTy; 1] = [PrimTy::U32];
 const STR_UNARY: [PrimTy; 1] = [PrimTy::String];
 const STR_BINARY: [PrimTy; 2] = [PrimTy::String, PrimTy::String];
 const STR_SLICE: [PrimTy; 3] = [PrimTy::String, PrimTy::U32, PrimTy::U32];
@@ -135,7 +137,7 @@ const BYTES_SLICE: [PrimTy; 3] = [PrimTy::Bytes, PrimTy::U32, PrimTy::U32];
 const BYTES_GET: [PrimTy; 2] = [PrimTy::Bytes, PrimTy::U32];
 
 impl PrimOp {
-    pub const ALL: [PrimOp; 30] = [
+    pub const ALL: [PrimOp; 31] = [
         PrimOp::Add,
         PrimOp::Sub,
         PrimOp::Mul,
@@ -166,6 +168,7 @@ impl PrimOp {
         PrimOp::BytesGet,
         PrimOp::StrFromBytes,
         PrimOp::BytesUtf8Check,
+        PrimOp::BytesFromU32,
     ];
 
     pub fn name(self) -> &'static str {
@@ -200,6 +203,7 @@ impl PrimOp {
             PrimOp::BytesGet => "bytes_get",
             PrimOp::StrFromBytes => "str_from_bytes",
             PrimOp::BytesUtf8Check => "bytes_utf8_check",
+            PrimOp::BytesFromU32 => "bytes_from_u32",
         }
     }
 
@@ -248,6 +252,7 @@ impl PrimOp {
             PrimOp::BytesConcat | PrimOp::BytesEq | PrimOp::BytesNe => &BYTES_BINARY,
             PrimOp::BytesGet => &BYTES_GET,
             PrimOp::StrFromBytes | PrimOp::BytesUtf8Check => &BYTES_UNARY,
+            PrimOp::BytesFromU32 => &U32_UNARY,
             _ => &U32_BINARY,
         }
     }
@@ -268,7 +273,10 @@ impl PrimOp {
                 PrimRet::U32
             }
             PrimOp::StrSlice | PrimOp::StrConcat | PrimOp::StrFromBytes => PrimRet::Str,
-            PrimOp::StrToBytes | PrimOp::BytesSlice | PrimOp::BytesConcat => PrimRet::Bytes,
+            PrimOp::StrToBytes
+            | PrimOp::BytesSlice
+            | PrimOp::BytesConcat
+            | PrimOp::BytesFromU32 => PrimRet::Bytes,
             _ => PrimRet::U32,
         }
     }
@@ -335,6 +343,7 @@ impl PrimOp {
             PrimOp::BytesUtf8Check => {
                 U32(utf8_error(arg_bytes(args, 0)).map_or(0, |i| i as u32 + 1))
             }
+            PrimOp::BytesFromU32 => Bytes(Rc::from([x as u8])),
         }
     }
 }

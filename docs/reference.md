@@ -1758,6 +1758,8 @@ Notes:
   `str_*`/`bytes_*` operations are primitive. The `u32_*` names are internal
   and report the corresponding operator; `str_*` and `bytes_*` cannot be
   written in a program at all.
+- `U32.to_byte` produces a one-byte `Bytes` value. It is the public surface
+  of the low-level `bytes_from_u32` primitive.
 - `Nat` arithmetic is provided by the `nat_*` prelude functions and the infix
   operators; `U32` uses the same operators over primitive machine words.
 

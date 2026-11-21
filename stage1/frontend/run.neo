@@ -1,0 +1,6 @@
+mod lexer;
+mod parser;
+
+fn main(): IO[U32] {
+  IO::pure(parser::demo_parse_add())
+}

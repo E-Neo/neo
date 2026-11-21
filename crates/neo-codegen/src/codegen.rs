@@ -3092,6 +3092,32 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
                 let get = defined(self.cg.get_id);
                 self.emit(I::Call(get));
             }
+            PrimOp::BytesFromU32 => {
+                self.compile(arg(0)?)?;
+                let byte = self.local();
+                self.emit(I::LocalSet(byte));
+                self.emit(I::I32Const(1));
+                self.emit(I::Call(self.cg.alloc_fn()));
+                let data = self.local();
+                self.emit(I::LocalSet(data));
+                self.emit(I::LocalGet(data));
+                self.emit(I::LocalGet(byte));
+                self.emit(I::I32Store8(mem8(0)));
+                self.emit(I::I32Const(12));
+                self.emit(I::Call(self.cg.alloc_fn()));
+                let desc = self.local();
+                self.emit(I::LocalSet(desc));
+                self.emit(I::LocalGet(desc));
+                self.emit(I::LocalGet(data));
+                self.emit(I::I32Store(mem(0)));
+                self.emit(I::LocalGet(desc));
+                self.emit(I::I32Const(0));
+                self.emit(I::I32Store(mem(4)));
+                self.emit(I::LocalGet(desc));
+                self.emit(I::I32Const(1));
+                self.emit(I::I32Store(mem(8)));
+                self.emit(I::LocalGet(desc));
+            }
         }
         Ok(())
     }

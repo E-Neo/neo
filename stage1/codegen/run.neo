@@ -1,0 +1,5 @@
+mod wasm;
+
+fn main(): IO[U32] {
+  IO::pure(wasm::demo_len())
+}

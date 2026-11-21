@@ -1,0 +1,47 @@
+// Stage 1 parser slice: lex a small arithmetic language and sum its numerals.
+//
+// The parser is a single fuel-recursive state machine over the token list, so
+// it needs no mutual recursion.
+
+use super::lexer
+use super::lexer::Token::{TkNum, TkIdent, TkPlus, TkLParen, TkRParen}
+
+pub enum ParseError {
+  OutOfFuel
+  Unexpected
+  Lex(lexer::LexError)
+}
+
+pub fn parse_sum(
+  fuel: Nat,
+  tokens: List[lexer::Token],
+  acc: U32
+): Result[U32, ParseError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match tokens {
+      Nil => Ok(acc)
+      Cons(token, rest) => match token {
+        TkNum(n) => parse_sum(k, rest, acc + n)
+        TkPlus => parse_sum(k, rest, acc)
+        TkIdent(_) => Err(Unexpected)
+        TkLParen => Err(Unexpected)
+        TkRParen => Err(Unexpected)
+      }
+    }
+  }
+}
+
+pub fn parse_program(fuel: Nat, bytes: Bytes): Result[U32, ParseError] {
+  match lexer::lex(1000, bytes, 0u32, Nil, lexer::LexState::Normal) {
+    Ok(tokens) => parse_sum(fuel, tokens, 0u32)
+    Err(e) => Err(Lex(e))
+  }
+}
+
+pub fn demo_parse_add(): U32 {
+  match parse_program(100, b"1 + 2 + 3") {
+    Ok(n) => n
+    Err(_) => 0u32
+  }
+}

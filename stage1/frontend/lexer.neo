@@ -1,0 +1,133 @@
+// Stage 1 lexer slice for a small arithmetic language.
+
+use list_reverse
+
+pub enum LexError {
+  OutOfFuel
+  Unexpected
+  BadUtf8
+}
+
+pub enum Token {
+  TkNum(U32)
+  TkIdent(String)
+  TkPlus
+  TkLParen
+  TkRParen
+}
+
+pub enum LexState {
+  Normal
+  Number(U32)
+  Ident(U32)
+}
+
+pub enum ByteClass {
+  Space
+  Digit
+  Plus
+  LParen
+  RParen
+  IdentStart
+  Other
+}
+
+fn classify(byte: U32): ByteClass {
+  match byte == 32u32 {
+    True => Space
+    False => match byte == 10u32 {
+      True => Space
+      False => match byte == 9u32 {
+        True => Space
+        False => match byte >= 48u32 {
+          True => match byte <= 57u32 {
+            True => Digit
+            False => match byte >= 97u32 {
+              True => match byte <= 122u32 {
+                True => IdentStart
+                False => Other
+              }
+              False => Other
+            }
+          }
+          False => match byte == 43u32 {
+            True => Plus
+            False => match byte == 40u32 {
+              True => LParen
+              False => match byte == 41u32 {
+                True => RParen
+                False => Other
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn is_digit(byte: U32): Bool {
+  match byte >= 48u32 {
+    True => byte <= 57u32
+    False => False
+  }
+}
+
+fn is_ident_continue(byte: U32): Bool {
+  match is_digit(byte) {
+    True => True
+    False => match byte >= 97u32 {
+      True => byte <= 122u32
+      False => False
+    }
+  }
+}
+
+pub fn lex(
+  fuel: Nat,
+  bytes: Bytes,
+  pos: U32,
+  acc: List[Token],
+  state: LexState
+): Result[List[Token], LexError] {
+  match fuel {
+    Zero => match pos >= bytes.length() {
+      True => Ok(list_reverse(acc, Nil))
+      False => Err(OutOfFuel)
+    }
+    Succ(k) => match state {
+      Normal => match pos >= bytes.length() {
+        True => Ok(list_reverse(acc, Nil))
+        False => match classify(bytes.get(pos)) {
+          Space => lex(k, bytes, pos + 1u32, acc, Normal)
+          Digit => lex(k, bytes, pos + 1u32, acc, Number(bytes.get(pos) - 48u32))
+          Plus => lex(k, bytes, pos + 1u32, Cons(TkPlus, acc), Normal)
+          LParen => lex(k, bytes, pos + 1u32, Cons(TkLParen, acc), Normal)
+          RParen => lex(k, bytes, pos + 1u32, Cons(TkRParen, acc), Normal)
+          IdentStart => lex(k, bytes, pos, acc, Ident(pos))
+          Other => Err(Unexpected)
+        }
+      }
+      Number(value) => match pos >= bytes.length() {
+        True => lex(k, bytes, pos, Cons(TkNum(value), acc), Normal)
+        False => match is_digit(bytes.get(pos)) {
+          True => lex(k, bytes, pos + 1u32, acc, Number(value * 10u32 + (bytes.get(pos) - 48u32)))
+          False => lex(k, bytes, pos, Cons(TkNum(value), acc), Normal)
+        }
+      }
+      Ident(start) => match pos >= bytes.length() {
+        True => match bytes.slice(start, pos).to_str() {
+          Ok(name) => lex(k, bytes, pos, Cons(TkIdent(name), acc), Normal)
+          Err(_) => Err(BadUtf8)
+        }
+        False => match is_ident_continue(bytes.get(pos)) {
+          True => lex(k, bytes, pos + 1u32, acc, Ident(start))
+          False => match bytes.slice(start, pos).to_str() {
+            Ok(name) => lex(k, bytes, pos, Cons(TkIdent(name), acc), Normal)
+            Err(_) => Err(BadUtf8)
+          }
+        }
+      }
+    }
+  }
+}
