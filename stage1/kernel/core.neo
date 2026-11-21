@@ -1654,3 +1654,86 @@ pub fn demo_nested_positivity(): U32 {
     Ok(Unit) => 0u32
   }
 }
+
+pub fn u32_digits(fuel: Nat, n: U32, acc: Bytes): Bytes {
+  match fuel {
+    Zero => acc
+    Succ(k) => match n < 10u32 {
+      True => (n + 48u32).to_byte().concat(acc)
+      False => u32_digits(k, n / 10u32, (n % 10u32 + 48u32).to_byte().concat(acc))
+    }
+  }
+}
+
+pub fn show_u32(fuel: Nat, n: U32): String {
+  match u32_digits(fuel, n, b"").to_str() {
+    Ok(text) => text
+    Err(_) => "?"
+  }
+}
+
+pub fn list_at(names: List[String], index: U32): String {
+  match names {
+    Nil => "#"
+    Cons(name, rest) => match index == 0u32 {
+      True => name
+      False => list_at(rest, index - 1u32)
+    }
+  }
+}
+
+pub fn show_tm(fuel: Nat, names: List[String], tm: Tm): String {
+  match fuel {
+    Zero => "?"
+    Succ(k) => match tm {
+      Var(index) => list_at(names, index)
+      Const(name) => name
+      Ty(level) => "Type ".concat(show_u32(k, level))
+      PropTy => "Prop"
+      TNil => "[]"
+      TCons(_, _) => "[...]"
+      Ind(name, _) => name
+      Ctor(name, _, _) => name
+      Pi(name, dom, cod) => "fn(".concat(name).concat(": ").concat(show_tm(k, names, dom)).concat(") -> ").concat(show_tm(k, Cons(name, names), cod))
+      Lam(name, dom, body) => "fn(".concat(name).concat(": ").concat(show_tm(k, names, dom)).concat(") => ").concat(show_tm(k, Cons(name, names), body))
+      App(f, a) => show_tm(k, names, f).concat("(").concat(show_tm(k, names, a)).concat(")")
+      Match(_, _) => "match(...)"
+      TBrNil => "branch[]"
+      TBrCons(_, _, _, _) => "branch"
+      Eq(lhs, rhs) => show_tm(k, names, lhs).concat(" = ").concat(show_tm(k, names, rhs))
+      ReflTm(value) => "Refl(".concat(show_tm(k, names, value)).concat(")")
+      J(_, _, _, _, _, _) => "J(...)"
+    }
+  }
+}
+
+pub fn demo_show_type(): U32 {
+  match show_tm(100, Nil, Ty(0u32)) == "Type 0" {
+    True => 1u32
+    False => 0u32
+  }
+}
+
+pub fn demo_show_lambda(): U32 {
+  match show_tm(100, Nil, Lam("x", Ty(0u32), Var(0u32))) == "fn(x: Type 0) => x" {
+    True => 1u32
+    False => 0u32
+  }
+}
+
+pub fn demo_show_pi(): U32 {
+  match show_tm(100, Nil, Pi("x", Ty(0u32), Ty(0u32))) == "fn(x: Type 0) -> Type 0" {
+    True => 1u32
+    False => 0u32
+  }
+}
+
+pub fn demo_show_app(): U32 {
+  match normalize(100, App(Lam("x", Ty(0u32), Var(0u32)), Ty(0u32))) {
+    Ok(value) => match show_tm(100, Nil, value) == "Type 0" {
+      True => 1u32
+      False => 0u32
+    }
+    Err(_) => 0u32
+  }
+}

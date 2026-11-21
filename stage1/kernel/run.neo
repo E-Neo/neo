@@ -27,5 +27,9 @@ fn main(): IO[U32] {
       + core::demo_positive_bool()
       + core::demo_negative_positivity()
       + core::demo_nested_positivity()
+      + core::demo_show_type()
+      + core::demo_show_lambda()
+      + core::demo_show_pi()
+      + core::demo_show_app()
   )
 }
