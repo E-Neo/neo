@@ -1,0 +1,151 @@
+pub enum Ordering {
+  Less
+  Equal
+  Greater
+}
+
+pub enum MapTree[K: Type, V: Type] {
+  Tip
+  Bin(K, V, MapTree[K, V], MapTree[K, V])
+}
+
+pub enum Map[K: Type, V: Type] {
+  New(fn(K, K) -> Ordering, MapTree[K, V])
+}
+
+pub fn nat_cmp(a: Nat, b: Nat): Ordering {
+  match nat_lt(a, b) {
+    True => Less
+    False => match nat_eq(a, b) {
+      True => Equal
+      False => Greater
+    }
+  }
+}
+
+pub fn list_reverse[T: Type](xs: List[T], acc: List[T]): List[T] {
+  match xs {
+    Nil => acc
+    Cons(x, rest) => list_reverse(rest, Cons(x, acc))
+  }
+}
+
+pub fn map_get[K: Type, V: Type](
+  compare: fn(K, K) -> Ordering,
+  tree: MapTree[K, V],
+  key: K
+): Option[V] {
+  match tree {
+    Tip => None
+    Bin(k, v, left, right) => match compare(key, k) {
+      Less => map_get(compare, left, key)
+      Equal => Some(v)
+      Greater => map_get(compare, right, key)
+    }
+  }
+}
+
+pub fn map_insert[K: Type, V: Type](
+  compare: fn(K, K) -> Ordering,
+  tree: MapTree[K, V],
+  key: K,
+  value: V
+): MapTree[K, V] {
+  match tree {
+    Tip => Bin(key, value, Tip, Tip)
+    Bin(k, v, left, right) => match compare(key, k) {
+      Less => Bin(k, v, map_insert(compare, left, key, value), right)
+      Equal => Bin(key, value, left, right)
+      Greater => Bin(k, v, left, map_insert(compare, right, key, value))
+    }
+  }
+}
+
+pub fn map_empty[K: Type, V: Type](compare: fn(K, K) -> Ordering): Map[K, V] {
+  Map::New(compare, Tip)
+}
+
+pub fn map_size[K: Type, V: Type](tree: MapTree[K, V]): Nat {
+  match tree {
+    Tip => Zero
+    Bin(_, _, left, right) => Succ(nat_add(map_size(left), map_size(right)))
+  }
+}
+
+impl Nat {
+  pub fn cmp(self: Nat, other: Nat): Ordering {
+    nat_cmp(self, other)
+  }
+}
+
+impl U32 {
+  pub fn cmp(self: U32, other: U32): Ordering {
+    match self < other {
+      True => Less
+      False => match self == other {
+        True => Equal
+        False => Greater
+      }
+    }
+  }
+}
+
+impl[T: Type] List[T] {
+  pub fn is_empty(self: List[T]): Bool {
+    match self {
+      Nil => True
+      Cons(_, _) => False
+    }
+  }
+
+  pub fn len(self: List[T]): Nat {
+    match self {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.len())
+    }
+  }
+
+  pub fn append(self: List[T], other: List[T]): List[T] {
+    match self {
+      Nil => other
+      Cons(x, rest) => Cons(x, rest.append(other))
+    }
+  }
+
+  pub fn reverse(self: List[T]): List[T] {
+    list_reverse(self, Nil)
+  }
+}
+
+impl[K: Type, V: Type] Map[K, V] {
+  pub fn get(self: Map[K, V], key: K): Option[V] {
+    match self {
+      Map::New(compare, tree) => map_get(compare, tree, key)
+    }
+  }
+
+  pub fn insert(self: Map[K, V], key: K, value: V): Map[K, V] {
+    match self {
+      Map::New(compare, tree) => Map::New(compare, map_insert(compare, tree, key, value))
+    }
+  }
+
+  pub fn size(self: Map[K, V]): Nat {
+    match self {
+      Map::New(_, tree) => map_size(tree)
+    }
+  }
+
+  pub fn is_empty(self: Map[K, V]): Bool {
+    match self {
+      Map::New(_, tree) => match tree {
+        Tip => True
+        Bin(_, _, _, _) => False
+      }
+    }
+  }
+}
+
+pub mod stderr {
+  pub extern fn write(s: String): IO[super::Result[super::Unit, super::IoError]] = "wasi:cli/stderr@0.2.9#write"
+}

@@ -29,13 +29,17 @@ const DIRS_RET: i32 = 272;
 const OPEN_RET: i32 = 288;
 const READ_RET: i32 = 304;
 const WRITE_RET: i32 = 320;
+const ENV_RET: i32 = 336;
+const CREATE_RET: i32 = 352;
+const DIRLIST_RET: i32 = 368;
+const ENTRY_RET: i32 = 384;
 const DIGIT_END: i32 = 96;
 
 /// Static strings are placed here, above the scratch area.
 const DATA_BASE: u32 = 1024;
 
 /// The number of imported WASI functions. Function indices start after these.
-const NUM_IMPORTS: u32 = 15;
+const NUM_IMPORTS: u32 = 20;
 
 const HEAP_START: u32 = 65_536;
 
@@ -54,6 +58,11 @@ const IMPORT_DESCRIPTOR_READ: u32 = 11;
 const IMPORT_DESCRIPTOR_WRITE: u32 = 12;
 const IMPORT_DROP_DESCRIPTOR: u32 = 13;
 const IMPORT_EXIT_WITH_CODE: u32 = 14;
+const IMPORT_GET_ENVIRONMENT: u32 = 15;
+const IMPORT_CREATE_DIRECTORY_AT: u32 = 16;
+const IMPORT_READ_DIRECTORY: u32 = 17;
+const IMPORT_READ_DIRECTORY_ENTRY: u32 = 18;
+const IMPORT_DROP_DIRECTORY_ENTRY_STREAM: u32 = 19;
 
 const NEO_WIT: &str = include_str!("../wit/neo.wit");
 const WIT_IO: &str = include_str!("../wit/deps/io.wit");
@@ -130,6 +139,7 @@ struct Codegen<'g> {
 
     fn_slots: HashMap<String, u32>,
     fn_zero: HashMap<String, usize>,
+    fn_direct: HashMap<String, usize>,
 
     /// (enum name, constructor index, arguments already consumed) -> table slot.
     ctor_steps: HashMap<(String, usize, usize), u32>,
@@ -176,6 +186,7 @@ impl<'g> Codegen<'g> {
             table_funcs: Vec::new(),
             fn_slots: HashMap::new(),
             fn_zero: HashMap::new(),
+            fn_direct: HashMap::new(),
             ctor_steps: HashMap::new(),
             printers: HashMap::new(),
             data: Vec::new(),
@@ -1169,6 +1180,45 @@ impl<'g> Codegen<'g> {
         self.set_body(id, body);
     }
 
+    fn ensure_direct(&mut self, name: &str) -> Result<Option<usize>> {
+        if let Some(&id) = self.fn_direct.get(name) {
+            return Ok(Some(id));
+        }
+        let num_params = match self.globals.get_fn_num_params(name) {
+            Some(n) if n > 0 => n,
+            _ => return Ok(None),
+        };
+        let mut body = self
+            .globals
+            .get_fn_body(name)
+            .cloned()
+            .ok_or_else(|| Error::new(format!("function `{}` has no body", name)))?;
+        for _ in 0..num_params {
+            match &*body {
+                Tm::Lam { body: inner, .. } => body = inner.clone(),
+                _ => return Ok(None),
+            }
+        }
+        let params = vec![ValType::I32; num_params];
+        let id = self.new_func(&params, &[ValType::I32]);
+        self.fn_direct.insert(name.to_string(), id);
+        let fin = {
+            let mut fc = FnCompiler::new(self, num_params as u32);
+            fc.direct_id = Some(id);
+            fc.env = (0..num_params)
+                .rev()
+                .map(|local| Place {
+                    local: local as u32,
+                    offset: None,
+                })
+                .collect();
+            fc.compile(&body)?;
+            fc.finish()
+        };
+        self.set_body(id, fin);
+        Ok(Some(id))
+    }
+
     fn ensure_fn(&mut self, name: &str) -> Result<FnRef> {
         if let Some(&slot) = self.fn_slots.get(name) {
             return Ok(FnRef::Closure(slot));
@@ -1453,6 +1503,8 @@ impl<'g> Codegen<'g> {
             ],
             &[],
         );
+        let create_directory_ty = self.ty(&[ValType::I32; 4], &[]);
+        let method_ret_ty = self.ty(&[ValType::I32, ValType::I32], &[]);
 
         let heap_start = {
             let end = DATA_BASE + self.data.len() as u32 + 16;
@@ -1542,6 +1594,31 @@ impl<'g> Codegen<'g> {
         imports.import(
             "wasi:cli/exit@0.2.9",
             "exit-with-code",
+            EntityType::Function(drop_ty),
+        );
+        imports.import(
+            "wasi:cli/environment@0.2.9",
+            "get-environment",
+            EntityType::Function(retptr_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[method]descriptor.create-directory-at",
+            EntityType::Function(create_directory_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[method]descriptor.read-directory",
+            EntityType::Function(method_ret_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[method]directory-entry-stream.read-directory-entry",
+            EntityType::Function(method_ret_ty),
+        );
+        imports.import(
+            "wasi:filesystem/types@0.2.9",
+            "[resource-drop]directory-entry-stream",
             EntityType::Function(drop_ty),
         );
 
@@ -1687,6 +1764,7 @@ struct FnCompiler<'a, 'g> {
     next_local: u32,
     params: u32,
     env: Vec<Place>,
+    direct_id: Option<usize>,
 }
 
 impl<'a, 'g> FnCompiler<'a, 'g> {
@@ -1697,6 +1775,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             next_local: params,
             params,
             env: Vec::new(),
+            direct_id: None,
         }
     }
 
@@ -1789,6 +1868,10 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
     }
 
     fn compile(&mut self, tm: &RcTm) -> Result<()> {
+        self.compile_tail(tm, false)
+    }
+
+    fn compile_tail(&mut self, tm: &RcTm, tail: bool) -> Result<()> {
         match &**tm {
             Tm::Var(i) => {
                 if let Some(p) = self.env.get(*i).copied() {
@@ -1813,13 +1896,13 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             Tm::Extern { name, args } => self.compile_extern(name, args)?,
             Tm::Const(name) => self.compile_const(name)?,
             Tm::Ctor(enum_name, index, args) => self.compile_ctor(enum_name, *index, args)?,
-            Tm::App(f, a) => self.compile_app(f, a)?,
+            Tm::App(..) => self.compile_application(tm, tail)?,
             Tm::Match {
                 motive,
                 scrut,
                 branches,
-            } => self.compile_match(motive, scrut, branches)?,
-            Tm::J { refl_case, .. } => self.compile(refl_case)?,
+            } => self.compile_match(motive, scrut, branches, tail)?,
+            Tm::J { refl_case, .. } => self.compile_tail(refl_case, tail)?,
             Tm::Lam { body, .. } => self.compile_lambda(body)?,
         }
         Ok(())
@@ -1835,15 +1918,20 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         let capability = neo_host::lookup(&import)
             .ok_or_else(|| Error::new(format!("unknown host capability `{}`", import)))?;
         self.compile_thunk_with(|child| match capability.lowering {
-            neo_host::Lowering::StderrWrite => child.compile_stderr_write(args),
-            neo_host::Lowering::Argv => child.compile_argv(),
+            neo_host::Lowering::StderrWrite => child.compile_write_stream(IMPORT_GET_STDERR, args),
+            neo_host::Lowering::StdoutWrite => child.compile_write_stream(IMPORT_GET_STDOUT, args),
+            neo_host::Lowering::Argv => child.compile_argv(false),
+            neo_host::Lowering::Args => child.compile_argv(true),
             neo_host::Lowering::StdinReadAll => child.compile_stdin_read_all(),
             neo_host::Lowering::FileRead => child.compile_file_read(args),
             neo_host::Lowering::FileWrite => child.compile_file_write(args),
+            neo_host::Lowering::EnvGet => child.compile_env_get(args),
+            neo_host::Lowering::DirCreate => child.compile_dir_create(args),
+            neo_host::Lowering::DirList => child.compile_dir_list(args),
         })
     }
 
-    fn compile_stderr_write(&mut self, args: &[RcTm]) -> Result<()> {
+    fn compile_write_stream(&mut self, handle_import: u32, args: &[RcTm]) -> Result<()> {
         let [arg] = args else {
             return Err(Error::new("`stderr.write` takes one argument"));
         };
@@ -1859,7 +1947,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.emit(I::LocalSet(ptr));
 
         let handle = self.local();
-        self.emit(I::Call(IMPORT_GET_STDERR));
+        self.emit(I::Call(handle_import));
         self.emit(I::LocalSet(handle));
         let status = self.local();
         self.emit(I::LocalGet(handle));
@@ -1993,7 +2081,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
     }
 
     /// Read the process argument vector and build a `List[String]`.
-    fn compile_argv(&mut self) -> Result<()> {
+    fn compile_argv(&mut self, skip_first: bool) -> Result<()> {
         self.emit(I::I32Const(ARGV_RET));
         self.emit(I::Call(IMPORT_GET_ARGUMENTS));
         let base = self.local();
@@ -2006,6 +2094,9 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         let index = self.local();
         self.emit(I::LocalGet(len));
         self.emit(I::LocalSet(index));
+        let stop = self.local();
+        self.emit(I::I32Const(if skip_first { 1 } else { 0 }));
+        self.emit(I::LocalSet(stop));
         let acc = self.local();
         let nil = ctor_index(self.cg.globals, "List", "Nil")?;
         let cons = ctor_index(self.cg.globals, "List", "Cons")?;
@@ -2015,7 +2106,8 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.emit(I::Block(BlockType::Empty));
         self.emit(I::Loop(BlockType::Empty));
         self.emit(I::LocalGet(index));
-        self.emit(I::I32Eqz);
+        self.emit(I::LocalGet(stop));
+        self.emit(I::I32LeU);
         self.emit(I::BrIf(1));
         self.emit(I::LocalGet(index));
         self.emit(I::I32Const(1));
@@ -2224,6 +2316,9 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         let failed = self.local();
         self.emit(I::I32Const(0));
         self.emit(I::LocalSet(failed));
+        let error_code = self.local();
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(error_code));
         let acc = self.local();
         let empty = self.cg.intern_literal(b"");
         self.emit(I::I32Const(empty));
@@ -2241,12 +2336,15 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.load_mem(DIRS_RET, 4);
         self.emit(I::LocalSet(dirs_len));
         let desc = self.emit_open(dirs_base, dirs_len, path_ptr, path_len, 0, 1);
+        self.emit_drop_preopens(dirs_base, dirs_len);
 
         self.emit(I::LocalGet(desc));
         self.emit(I::I32Eqz);
         self.emit(I::If(BlockType::Empty));
         self.emit(I::I32Const(1));
         self.emit(I::LocalSet(failed));
+        self.load_mem(OPEN_RET, 4);
+        self.emit(I::LocalSet(error_code));
         self.emit(I::Else);
         self.emit(I::Block(BlockType::Empty));
         self.emit(I::Loop(BlockType::Empty));
@@ -2265,6 +2363,8 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.emit(I::Else);
         self.emit(I::I32Const(1));
         self.emit(I::LocalSet(failed));
+        self.load_mem(READ_RET, 4);
+        self.emit(I::LocalSet(error_code));
         self.emit(I::Br(2));
         self.emit(I::End);
 
@@ -2305,7 +2405,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
 
         self.emit(I::LocalGet(failed));
         self.emit(I::If(BlockType::Result(ValType::I32)));
-        self.build_io_err("Failed")?;
+        self.build_io_err_code(error_code)?;
         self.emit(I::Else);
         self.build_io_ok(Some(acc))?;
         self.emit(I::End);
@@ -2349,6 +2449,9 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         let failed = self.local();
         self.emit(I::I32Const(0));
         self.emit(I::LocalSet(failed));
+        let error_code = self.local();
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(error_code));
         let written = self.local();
         self.emit(I::I32Const(0));
         self.emit(I::LocalSet(written));
@@ -2362,12 +2465,15 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.load_mem(DIRS_RET, 4);
         self.emit(I::LocalSet(dirs_len));
         let desc = self.emit_open(dirs_base, dirs_len, path_ptr, path_len, 9, 2);
+        self.emit_drop_preopens(dirs_base, dirs_len);
 
         self.emit(I::LocalGet(desc));
         self.emit(I::I32Eqz);
         self.emit(I::If(BlockType::Empty));
         self.emit(I::I32Const(1));
         self.emit(I::LocalSet(failed));
+        self.load_mem(OPEN_RET, 4);
+        self.emit(I::LocalSet(error_code));
         self.emit(I::Else);
         self.emit(I::Block(BlockType::Empty));
         self.emit(I::Loop(BlockType::Empty));
@@ -2395,6 +2501,8 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.emit(I::Else);
         self.emit(I::I32Const(1));
         self.emit(I::LocalSet(failed));
+        self.load_mem(WRITE_RET, 4);
+        self.emit(I::LocalSet(error_code));
         self.emit(I::Br(2));
         self.emit(I::End);
         let n = self.local();
@@ -2420,9 +2528,367 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
 
         self.emit(I::LocalGet(failed));
         self.emit(I::If(BlockType::Result(ValType::I32)));
-        self.build_io_err("Failed")?;
+        self.build_io_err_code(error_code)?;
         self.emit(I::Else);
         self.build_io_ok(None)?;
+        self.emit(I::End);
+        Ok(())
+    }
+
+    fn emit_drop_preopens(&mut self, dirs_base: u32, dirs_len: u32) {
+        let index = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(index));
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(index));
+        self.emit(I::LocalGet(dirs_len));
+        self.emit(I::I32GeU);
+        self.emit(I::BrIf(1));
+        let offset = self.local();
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(12));
+        self.emit(I::I32Mul);
+        self.emit(I::LocalSet(offset));
+        self.emit(I::LocalGet(dirs_base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::Call(IMPORT_DROP_DESCRIPTOR));
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(1));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(index));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+    }
+
+    fn build_io_err_code(&mut self, code: u32) -> Result<()> {
+        self.emit(I::LocalGet(code));
+        self.emit(I::I32Const(20));
+        self.emit(I::I32Eq);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_err("NotFound")?;
+        self.emit(I::Else);
+        self.emit(I::LocalGet(code));
+        self.emit(I::I32Const(12));
+        self.emit(I::I32Eq);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_err("InvalidInput")?;
+        self.emit(I::Else);
+        self.emit(I::LocalGet(code));
+        self.emit(I::I32Const(0));
+        self.emit(I::I32Eq);
+        self.emit(I::LocalGet(code));
+        self.emit(I::I32Const(31));
+        self.emit(I::I32Eq);
+        self.emit(I::I32Or);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_err("PermissionDenied")?;
+        self.emit(I::Else);
+        self.build_io_err("Failed")?;
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit(I::End);
+        Ok(())
+    }
+
+    fn compile_env_get(&mut self, args: &[RcTm]) -> Result<()> {
+        let [name] = args else {
+            return Err(Error::new("`env.get` takes one argument"));
+        };
+        self.compile(name)?;
+        let name_desc = self.local();
+        self.emit(I::LocalSet(name_desc));
+
+        self.emit(I::I32Const(ENV_RET));
+        self.emit(I::Call(IMPORT_GET_ENVIRONMENT));
+        let base = self.local();
+        self.load_mem(ENV_RET, 0);
+        self.emit(I::LocalSet(base));
+        let len = self.local();
+        self.load_mem(ENV_RET, 4);
+        self.emit(I::LocalSet(len));
+
+        let result = self.local();
+        let none = ctor_index(self.cg.globals, "Option", "None")?;
+        let some = ctor_index(self.cg.globals, "Option", "Some")?;
+        self.build_ctor(none, &[]);
+        self.emit(I::LocalSet(result));
+
+        let index = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(index));
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(index));
+        self.emit(I::LocalGet(len));
+        self.emit(I::I32GeU);
+        self.emit(I::BrIf(1));
+        let offset = self.local();
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(16));
+        self.emit(I::I32Mul);
+        self.emit(I::LocalSet(offset));
+        let key_ptr = self.local();
+        self.emit(I::LocalGet(base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalSet(key_ptr));
+        let key_len = self.local();
+        self.emit(I::LocalGet(base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::LocalSet(key_len));
+        let key_desc = self.make_bytes_descriptor(key_ptr, key_len);
+        self.emit(I::LocalGet(name_desc));
+        self.emit(I::LocalGet(key_desc));
+        self.emit(I::Call(defined(self.cg.eq_id)));
+        self.emit(I::If(BlockType::Empty));
+        let value_ptr = self.local();
+        self.emit(I::LocalGet(base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::LocalSet(value_ptr));
+        let value_len = self.local();
+        self.emit(I::LocalGet(base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(12)));
+        self.emit(I::LocalSet(value_len));
+        let value_desc = self.make_bytes_descriptor(value_ptr, value_len);
+        self.build_ctor(
+            some,
+            &[Place {
+                local: value_desc,
+                offset: None,
+            }],
+        );
+        self.emit(I::LocalSet(result));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(1));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(index));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit(I::LocalGet(result));
+        Ok(())
+    }
+
+    fn compile_dir_create(&mut self, args: &[RcTm]) -> Result<()> {
+        let [path] = args else {
+            return Err(Error::new("`dir.create` takes one argument"));
+        };
+        self.compile(path)?;
+        let path_desc = self.local();
+        self.emit(I::LocalSet(path_desc));
+        let path_ptr = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(path_ptr));
+        let path_len = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::LocalSet(path_len));
+
+        self.emit(I::I32Const(DIRS_RET));
+        self.emit(I::Call(IMPORT_GET_DIRECTORIES));
+        let dirs_base = self.local();
+        self.load_mem(DIRS_RET, 0);
+        self.emit(I::LocalSet(dirs_base));
+        let dirs_len = self.local();
+        self.load_mem(DIRS_RET, 4);
+        self.emit(I::LocalSet(dirs_len));
+
+        let code = self.local();
+        self.emit(I::I32Const(-2));
+        self.emit(I::LocalSet(code));
+        let index = self.local();
+        self.emit(I::I32Const(0));
+        self.emit(I::LocalSet(index));
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(index));
+        self.emit(I::LocalGet(dirs_len));
+        self.emit(I::I32GeU);
+        self.emit(I::BrIf(1));
+        let offset = self.local();
+        self.emit(I::LocalGet(index));
+        self.emit(I::I32Const(12));
+        self.emit(I::I32Mul);
+        self.emit(I::LocalSet(offset));
+        let dir = self.local();
+        self.emit(I::LocalGet(dirs_base));
+        self.emit(I::LocalGet(offset));
+        self.emit(I::I32Add);
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalSet(dir));
+        self.emit(I::LocalGet(dir));
+        self.emit(I::LocalGet(path_ptr));
+        self.emit(I::LocalGet(path_len));
+        self.emit(I::I32Const(CREATE_RET));
+        self.emit(I::Call(IMPORT_CREATE_DIRECTORY_AT));
+        let tag = self.local();
+        self.load_u8_mem(CREATE_RET, 0);
+        self.emit(I::LocalSet(tag));
+        self.emit(I::LocalGet(tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::I32Const(-1));
+        self.emit(I::LocalSet(code));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        self.load_mem(CREATE_RET, 4);
+        self.emit(I::LocalSet(code));
+        self.emit(I::Br(1));
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit_drop_preopens(dirs_base, dirs_len);
+
+        self.emit(I::LocalGet(code));
+        self.emit(I::I32Const(-1));
+        self.emit(I::I32Eq);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_ok(None)?;
+        self.emit(I::Else);
+        self.build_io_err_code(code)?;
+        self.emit(I::End);
+        Ok(())
+    }
+
+    fn compile_dir_list(&mut self, args: &[RcTm]) -> Result<()> {
+        let [path] = args else {
+            return Err(Error::new("`dir.list` takes one argument"));
+        };
+        self.compile(path)?;
+        let path_desc = self.local();
+        self.emit(I::LocalSet(path_desc));
+        let path_ptr = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(0)));
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(4)));
+        self.emit(I::I32Add);
+        self.emit(I::LocalSet(path_ptr));
+        let path_len = self.local();
+        self.emit(I::LocalGet(path_desc));
+        self.emit(I::I32Load(mem(8)));
+        self.emit(I::LocalSet(path_len));
+
+        self.emit(I::I32Const(DIRS_RET));
+        self.emit(I::Call(IMPORT_GET_DIRECTORIES));
+        let dirs_base = self.local();
+        self.load_mem(DIRS_RET, 0);
+        self.emit(I::LocalSet(dirs_base));
+        let dirs_len = self.local();
+        self.load_mem(DIRS_RET, 4);
+        self.emit(I::LocalSet(dirs_len));
+        let dir = self.emit_open(dirs_base, dirs_len, path_ptr, path_len, 2, 1);
+        self.emit_drop_preopens(dirs_base, dirs_len);
+
+        let code = self.local();
+        self.emit(I::I32Const(1));
+        self.emit(I::LocalSet(code));
+        let acc = self.local();
+        let nil = ctor_index(self.cg.globals, "List", "Nil")?;
+        let cons = ctor_index(self.cg.globals, "List", "Cons")?;
+        self.build_ctor(nil, &[]);
+        self.emit(I::LocalSet(acc));
+
+        self.emit(I::LocalGet(dir));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Else);
+        self.emit(I::LocalGet(dir));
+        self.emit(I::I32Const(DIRLIST_RET));
+        self.emit(I::Call(IMPORT_READ_DIRECTORY));
+        let read_tag = self.local();
+        self.load_u8_mem(DIRLIST_RET, 0);
+        self.emit(I::LocalSet(read_tag));
+        self.emit(I::LocalGet(read_tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        let stream = self.local();
+        self.load_mem(DIRLIST_RET, 4);
+        self.emit(I::LocalSet(stream));
+        self.emit(I::I32Const(-1));
+        self.emit(I::LocalSet(code));
+
+        self.emit(I::Block(BlockType::Empty));
+        self.emit(I::Loop(BlockType::Empty));
+        self.emit(I::LocalGet(stream));
+        self.emit(I::I32Const(ENTRY_RET));
+        self.emit(I::Call(IMPORT_READ_DIRECTORY_ENTRY));
+        let entry_tag = self.local();
+        self.load_u8_mem(ENTRY_RET, 0);
+        self.emit(I::LocalSet(entry_tag));
+        self.emit(I::LocalGet(entry_tag));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Else);
+        self.load_mem(ENTRY_RET, 4);
+        self.emit(I::LocalSet(code));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        let some = self.local();
+        self.load_u8_mem(ENTRY_RET, 4);
+        self.emit(I::LocalSet(some));
+        self.emit(I::LocalGet(some));
+        self.emit(I::I32Eqz);
+        self.emit(I::If(BlockType::Empty));
+        self.emit(I::Br(2));
+        self.emit(I::End);
+        let name_ptr = self.local();
+        self.load_mem(ENTRY_RET, 12);
+        self.emit(I::LocalSet(name_ptr));
+        let name_len = self.local();
+        self.load_mem(ENTRY_RET, 16);
+        self.emit(I::LocalSet(name_len));
+        let name = self.make_bytes_descriptor(name_ptr, name_len);
+        self.build_ctor(
+            cons,
+            &[
+                Place {
+                    local: name,
+                    offset: None,
+                },
+                Place {
+                    local: acc,
+                    offset: None,
+                },
+            ],
+        );
+        self.emit(I::LocalSet(acc));
+        self.emit(I::Br(0));
+        self.emit(I::End);
+        self.emit(I::End);
+        self.emit(I::LocalGet(stream));
+        self.emit(I::Call(IMPORT_DROP_DIRECTORY_ENTRY_STREAM));
+        self.emit(I::Else);
+        self.load_mem(DIRLIST_RET, 4);
+        self.emit(I::LocalSet(code));
+        self.emit(I::End);
+        self.emit(I::LocalGet(dir));
+        self.emit(I::Call(IMPORT_DROP_DESCRIPTOR));
+        self.emit(I::End);
+
+        self.emit(I::LocalGet(code));
+        self.emit(I::I32Const(-1));
+        self.emit(I::I32Eq);
+        self.emit(I::If(BlockType::Result(ValType::I32)));
+        self.build_io_ok(Some(acc))?;
+        self.emit(I::Else);
+        self.build_io_err_code(code)?;
         self.emit(I::End);
         Ok(())
     }
@@ -2639,6 +3105,34 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         Ok(())
     }
 
+    fn compile_application(&mut self, tm: &RcTm, tail: bool) -> Result<()> {
+        let mut args: Vec<&RcTm> = Vec::new();
+        let mut head = tm;
+        while let Tm::App(f, a) = &**head {
+            args.push(a);
+            head = f;
+        }
+        args.reverse();
+        if let Tm::Const(name) = &**head
+            && self.cg.globals.get_fn_num_params(name) == Some(args.len())
+            && let Some(id) = self.cg.ensure_direct(name)?
+        {
+            for arg in args {
+                self.compile(arg)?;
+            }
+            if tail && self.direct_id == Some(id) {
+                self.emit(I::ReturnCall(id as u32));
+            } else {
+                self.emit(I::Call(defined(id)));
+            }
+            return Ok(());
+        }
+        let Tm::App(f, a) = &**tm else {
+            return Err(Error::new("internal: expected an application"));
+        };
+        self.compile_app(f, a)
+    }
+
     fn compile_app(&mut self, f: &RcTm, a: &RcTm) -> Result<()> {
         let c = self.local();
         self.compile(f)?;
@@ -2746,6 +3240,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         motive: &RcTm,
         scrut: &RcTm,
         branches: &[crate::core::Branch],
+        tail: bool,
     ) -> Result<()> {
         let Tm::Lam { dom, .. } = &**motive else {
             return Err(Error::new("match motive is not a lambda"));
@@ -2771,7 +3266,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         let s = self.local();
         self.compile(scrut)?;
         self.emit(I::LocalSet(s));
-        self.match_chain(s, &entries, 0)
+        self.match_chain(s, &entries, 0, tail)
     }
 
     fn match_chain(
@@ -2779,6 +3274,7 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         scrut: u32,
         entries: &[(usize, usize, RcTm)],
         pos: usize,
+        tail: bool,
     ) -> Result<()> {
         if pos >= entries.len() {
             self.emit(I::Unreachable);
@@ -2804,11 +3300,11 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         }
         env.extend(saved.iter().copied());
         self.env = env;
-        self.compile(body)?;
+        self.compile_tail(body, tail)?;
         self.env = saved;
 
         self.emit(I::Else);
-        self.match_chain(scrut, entries, pos + 1)?;
+        self.match_chain(scrut, entries, pos + 1, tail)?;
         self.emit(I::End);
         Ok(())
     }

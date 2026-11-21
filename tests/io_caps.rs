@@ -84,11 +84,19 @@ fn main(): IO[Result[Bytes, IoError]] {{
         path.to_string_lossy()
     ));
     let value = run_main(&globals);
-    let Val::Ctor(name, index, _) = &*value else {
+    let Val::Ctor(name, index, args) = &*value else {
         panic!("expected a Result, got {value:?}");
     };
     assert_eq!(name, "Result");
     assert_eq!(*index, 1);
+    let fields = ctor_fields(&globals, "Result", 1, args);
+    match &*fields[0] {
+        Val::Ctor(name, index, _) => {
+            assert_eq!(name, "IoError");
+            assert_eq!(*index, 2, "missing files report NotFound");
+        }
+        other => panic!("expected IoError, got {other:?}"),
+    }
 }
 
 #[test]
@@ -108,4 +116,77 @@ fn main(): IO[List[String]] {
     assert_eq!(*index, 1, "the process argument vector is non-empty");
     let fields = ctor_fields(&globals, "List", 1, args);
     assert!(matches!(&*fields[0], Val::PrimLit(PrimLit::Str(_))));
+}
+
+#[test]
+fn env_args_skip_the_program_name() {
+    let globals = define(
+        r#"
+fn main(): IO[List[String]] {
+  env::args()
+}
+"#,
+    );
+    let value = run_main(&globals);
+    assert!(matches!(&*value, Val::Ctor(name, _, _) if name == "List"));
+}
+
+#[test]
+fn env_get_finds_a_variable() {
+    let name = "NEO_ENV_GET_TEST";
+    // SAFETY: this test process is single-threaded with respect to this key.
+    unsafe { std::env::set_var(name, "value") };
+    let globals = define(&format!(
+        r#"
+fn main(): IO[Option[String]] {{
+  env::get("{name}")
+}}
+"#
+    ));
+    let value = run_main(&globals);
+    let Val::Ctor(name, index, args) = &*value else {
+        panic!("expected an Option, got {value:?}");
+    };
+    assert_eq!(name, "Option");
+    assert_eq!(*index, 1);
+    let fields = ctor_fields(&globals, "Option", 1, args);
+    match &*fields[0] {
+        Val::PrimLit(PrimLit::Str(bytes)) => assert_eq!(&**bytes, b"value"),
+        other => panic!("expected a String, got {other:?}"),
+    }
+}
+
+#[test]
+fn dir_create_and_list() {
+    let dir = std::env::temp_dir().join(format!("neo-dir-caps-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.to_string_lossy();
+    let globals = define(&format!(
+        r#"
+fn after_create(r: Result[Unit, IoError]): IO[Result[List[String], IoError]] {{
+  match r {{
+    Ok(_) => dir::list("{path}")
+    Err(e) => IO::pure(Err(e))
+  }}
+}}
+
+fn main(): IO[Result[List[String], IoError]] {{
+  IO::bind(dir::create("{path}/child"), after_create)
+}}
+"#
+    ));
+    let value = run_main(&globals);
+    let Val::Ctor(name, index, args) = &*value else {
+        panic!("expected a Result, got {value:?}");
+    };
+    assert_eq!(name, "Result");
+    assert_eq!(*index, 0);
+    let fields = ctor_fields(&globals, "Result", 0, args);
+    let Val::Ctor(name, _, list_args) = &*fields[0] else {
+        panic!("expected a List, got {:?}", fields[0]);
+    };
+    assert_eq!(name, "List");
+    assert!(!list_args.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }

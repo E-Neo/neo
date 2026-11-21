@@ -539,7 +539,13 @@ fn main(): IO[U32] {
 }
 
 /// Run a component with a given working directory, arguments, and stdin.
-fn run_capability(path: &Path, dir: Option<&Path>, args: &[&str], stdin: &[u8]) -> Option<String> {
+fn run_capability(
+    path: &Path,
+    dir: Option<&Path>,
+    args: &[&str],
+    stdin: &[u8],
+    envs: &[(&str, &str)],
+) -> Option<String> {
     use std::io::Write as _;
     use std::process::Stdio;
 
@@ -552,6 +558,9 @@ fn run_capability(path: &Path, dir: Option<&Path>, args: &[&str], stdin: &[u8]) 
         .stderr(Stdio::piped());
     if let Some(dir) = dir {
         command.current_dir(dir).arg("--dir").arg(".");
+    }
+    for (name, value) in envs {
+        command.arg("--env").arg(format!("{name}={value}"));
     }
     command.arg(path).args(args);
     let mut child = command.spawn().ok()?;
@@ -582,7 +591,7 @@ fn main(): IO[List[String]] {
 "#,
         "argv",
     );
-    if let Some(stdout) = run_capability(&path, None, &["a", "b"], b"") {
+    if let Some(stdout) = run_capability(&path, None, &["a", "b"], b"", &[]) {
         assert_eq!(stdout, "Cons(neo-program, Cons(a, Cons(b, Nil)))\n");
     }
 }
@@ -597,7 +606,7 @@ fn main(): IO[Result[Bytes, IoError]] {
 "#,
         "stdin-read-all",
     );
-    if let Some(stdout) = run_capability(&path, None, &[], b"abc") {
+    if let Some(stdout) = run_capability(&path, None, &[], b"abc", &[]) {
         assert_eq!(stdout, "Ok(b\"\\x61\\x62\\x63\")\n");
     }
 }
@@ -621,7 +630,7 @@ fn main(): IO[Result[Bytes, IoError]] {
 "#,
         "file-round-trip",
     );
-    if let Some(stdout) = run_capability(&path, Some(&dir), &[], b"") {
+    if let Some(stdout) = run_capability(&path, Some(&dir), &[], b"", &[]) {
         assert_eq!(
             stdout,
             "Ok(b\"\\x6e\\x65\\x6f\\x00\\x66\\x69\\x6c\\x65\")\n"
@@ -676,4 +685,112 @@ fn main(): IO[Bool] {
         assert_eq!(stdout, "True\n");
         assert_eq!(code, 0);
     }
+}
+
+#[test]
+fn builds_stdout_write() {
+    let path = build(
+        r#"
+fn main(): IO[Result[Unit, IoError]] {
+  stdout::write("out\n")
+}
+"#,
+        "stdout-write",
+    );
+    if let Some(stdout) = run_capability(&path, None, &[], b"", &[]) {
+        assert_eq!(stdout, "out\nOk(Unit)\n");
+    }
+}
+
+#[test]
+fn builds_env_args() {
+    let path = build(
+        r#"
+fn main(): IO[List[String]] {
+  env::args()
+}
+"#,
+        "env-args",
+    );
+    if let Some(stdout) = run_capability(&path, None, &["a", "b"], b"", &[]) {
+        assert_eq!(stdout, "Cons(a, Cons(b, Nil))\n");
+    }
+}
+
+#[test]
+fn builds_env_get() {
+    let path = build(
+        r#"
+fn after(r: Result[Unit, IoError]): IO[Option[String]] {
+  match r {
+    Ok(_) => env::get("NEO_TEST")
+    Err(_) => IO::pure(None)
+  }
+}
+
+fn main(): IO[Option[String]] {
+  IO::bind(stdout::write("out\n"), after)
+}
+"#,
+        "env-get",
+    );
+    if let Some(stdout) = run_capability(&path, None, &[], b"", &[("NEO_TEST", "value")]) {
+        assert_eq!(stdout, "out\nSome(value)\n");
+    }
+}
+
+#[test]
+fn builds_dir_create_and_list() {
+    let dir = std::env::temp_dir().join(format!("neo-dir-codegen-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = build(
+        r#"
+fn after_create(r: Result[Unit, IoError]): IO[Result[List[String], IoError]] {
+  match r {
+    Ok(_) => dir::list(".")
+    Err(e) => IO::pure(Err(e))
+  }
+}
+
+fn main(): IO[Result[List[String], IoError]] {
+  IO::bind(dir::create("newdir"), after_create)
+}
+"#,
+        "dir-create-list",
+    );
+    if let Some(stdout) = run_capability(&path, Some(&dir), &[], b"", &[]) {
+        assert_eq!(stdout, "Ok(Cons(newdir, Nil))\n");
+    }
+    assert!(dir.join("newdir").is_dir());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn builds_direct_and_tail_recursive_calls() {
+    check(
+        r#"
+use nat_add
+
+fn range(n: Nat, acc: List[Nat]): List[Nat] {
+  match n {
+    Zero => acc
+    Succ(k) => range(k, Cons(k, acc))
+  }
+}
+
+fn sum(xs: List[Nat], acc: Nat): Nat {
+  match xs {
+    Nil => acc
+    Cons(x, rest) => sum(rest, nat_add(x, acc))
+  }
+}
+
+fn main(): IO[Nat] {
+  IO::pure(sum(range(100, Nil), Zero))
+}
+"#,
+        "tail-recursion",
+        "4950\n",
+    );
 }

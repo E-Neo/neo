@@ -1,0 +1,27 @@
+pub mod stdout {
+  pub extern fn write(s: String): IO[super::Result[super::Unit, super::IoError]] = "wasi:cli/stdout@0.2.9#write"
+}
+
+pub mod env {
+  pub extern fn argv(): IO[super::List[String]] = "wasi:cli/environment@0.2.9#get-arguments"
+
+  pub extern fn args(): IO[super::List[String]] = "neo:env@0.1.0#args"
+
+  pub extern fn get(name: String): IO[super::Option[String]] = "neo:env@0.1.0#get"
+}
+
+pub mod stdin {
+  pub extern fn read_all(): IO[super::Result[Bytes, super::IoError]] = "neo:stdin@0.1.0#read-all"
+}
+
+pub mod file {
+  pub extern fn read(path: String): IO[super::Result[Bytes, super::IoError]] = "neo:file@0.1.0#read"
+
+  pub extern fn write(path: String, data: Bytes): IO[super::Result[super::Unit, super::IoError]] = "neo:file@0.1.0#write"
+}
+
+pub mod dir {
+  pub extern fn create(path: String): IO[super::Result[super::Unit, super::IoError]] = "neo:dir@0.1.0#create"
+
+  pub extern fn list(path: String): IO[super::Result[super::List[String], super::IoError]] = "neo:dir@0.1.0#list"
+}

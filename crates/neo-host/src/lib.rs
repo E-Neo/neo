@@ -26,6 +26,16 @@ pub enum Lowering {
     FileRead,
     /// Write `Bytes` to a file path, truncating or creating it.
     FileWrite,
+    /// Write a `String` to standard output.
+    StdoutWrite,
+    /// Read the process arguments, excluding the program name.
+    Args,
+    /// Look up an environment variable.
+    EnvGet,
+    /// Create a directory path.
+    DirCreate,
+    /// List a directory path.
+    DirList,
 }
 
 /// A capability the compiler knows how to lower and execute.
@@ -67,6 +77,31 @@ pub const CAPABILITIES: &[Capability] = &[
         ty: file_write_ty,
         lowering: Lowering::FileWrite,
     },
+    Capability {
+        import: "wasi:cli/stdout@0.2.9#write",
+        ty: stdout_write_ty,
+        lowering: Lowering::StdoutWrite,
+    },
+    Capability {
+        import: "neo:env@0.1.0#args",
+        ty: args_ty,
+        lowering: Lowering::Args,
+    },
+    Capability {
+        import: "neo:env@0.1.0#get",
+        ty: env_get_ty,
+        lowering: Lowering::EnvGet,
+    },
+    Capability {
+        import: "neo:dir@0.1.0#create",
+        ty: dir_create_ty,
+        lowering: Lowering::DirCreate,
+    },
+    Capability {
+        import: "neo:dir@0.1.0#list",
+        ty: dir_list_ty,
+        lowering: Lowering::DirList,
+    },
 ];
 
 pub fn lookup(import: &str) -> Option<&'static Capability> {
@@ -102,6 +137,40 @@ fn stdin_read_all_ty() -> RcTm {
 
 fn file_read_ty() -> RcTm {
     pi("path", prim_ty(PrimTy::String), io(result_bytes_io_error()))
+}
+
+fn stdout_write_ty() -> RcTm {
+    pi("s", prim_ty(PrimTy::String), io(result_unit_io_error()))
+}
+
+fn args_ty() -> RcTm {
+    io(ind("List", vec![prim_ty(PrimTy::String)]))
+}
+
+fn option_string() -> RcTm {
+    ind("Option", vec![prim_ty(PrimTy::String)])
+}
+
+fn env_get_ty() -> RcTm {
+    pi("name", prim_ty(PrimTy::String), io(option_string()))
+}
+
+fn dir_create_ty() -> RcTm {
+    pi("path", prim_ty(PrimTy::String), io(result_unit_io_error()))
+}
+
+fn dir_list_ty() -> RcTm {
+    pi(
+        "path",
+        prim_ty(PrimTy::String),
+        io(ind(
+            "Result",
+            vec![
+                ind("List", vec![prim_ty(PrimTy::String)]),
+                ind("IoError", Vec::new()),
+            ],
+        )),
+    )
 }
 
 fn file_write_ty() -> RcTm {
@@ -186,7 +255,7 @@ impl Host for StdioHost {
                 };
                 match std::fs::read(path) {
                     Ok(bytes) => Ok(ok_bytes(bytes)),
-                    Err(_) => Ok(err_bytes()),
+                    Err(error) => Ok(err_bytes_with(error_kind(&error))),
                 }
             }
             Lowering::FileWrite => {
@@ -201,7 +270,73 @@ impl Host for StdioHost {
                 let data = bytes_arg(data)?;
                 match std::fs::write(path, data) {
                     Ok(()) => Ok(ok_unit()),
-                    Err(_) => Ok(err_unit()),
+                    Err(error) => Ok(err_unit_with(error_kind(&error))),
+                }
+            }
+            Lowering::StdoutWrite => {
+                let [arg] = args else {
+                    return Err(Error::new("`stdout.write` takes one argument"));
+                };
+                let bytes = string_arg(arg)?;
+                match write_stdout(bytes) {
+                    Ok(()) => Ok(ok_unit()),
+                    Err(error) => Ok(err_unit_with(error_kind(&error))),
+                }
+            }
+            Lowering::Args => {
+                let args = std::env::args_os()
+                    .skip(1)
+                    .map(|arg| ok_string(arg.to_string_lossy().as_bytes()))
+                    .collect();
+                Ok(vlist(args))
+            }
+            Lowering::EnvGet => {
+                let [name] = args else {
+                    return Err(Error::new("`env.get` takes one argument"));
+                };
+                let name = string_arg(name)?;
+                let name = match std::str::from_utf8(name) {
+                    Ok(name) => name,
+                    Err(_) => return Ok(vnone_string()),
+                };
+                match std::env::var_os(name) {
+                    Some(value) => Ok(vsome_string(value.to_string_lossy().as_bytes())),
+                    None => Ok(vnone_string()),
+                }
+            }
+            Lowering::DirCreate => {
+                let [path] = args else {
+                    return Err(Error::new("`dir.create` takes one argument"));
+                };
+                let path = string_arg(path)?;
+                let path = match std::str::from_utf8(path) {
+                    Ok(path) => path,
+                    Err(_) => return Ok(err_unit()),
+                };
+                match std::fs::create_dir(path) {
+                    Ok(()) => Ok(ok_unit()),
+                    Err(error) => Ok(err_unit_with(error_kind(&error))),
+                }
+            }
+            Lowering::DirList => {
+                let [path] = args else {
+                    return Err(Error::new("`dir.list` takes one argument"));
+                };
+                let path = string_arg(path)?;
+                let path = match std::str::from_utf8(path) {
+                    Ok(path) => path,
+                    Err(_) => return Ok(vlist_err("InvalidInput")),
+                };
+                match std::fs::read_dir(path) {
+                    Ok(entries) => {
+                        let mut names: Vec<String> = Vec::new();
+                        for entry in entries.flatten() {
+                            names.push(entry.file_name().to_string_lossy().into_owned());
+                        }
+                        names.sort();
+                        Ok(vlist_ok(names))
+                    }
+                    Err(error) => Ok(vlist_err(error_name(error_kind(&error)))),
                 }
             }
         }
@@ -227,6 +362,12 @@ fn bytes_arg(v: &V) -> Result<&[u8]> {
         Val::PrimLit(PrimLit::Bytes(bytes)) => Ok(bytes),
         _ => Err(Error::new("host capability expected a `Bytes` argument")),
     }
+}
+
+fn write_stdout(bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(bytes).and_then(|()| stdout.flush())
 }
 
 fn write_stderr(bytes: &[u8]) -> StderrOutcome {
@@ -294,7 +435,11 @@ fn ok_bytes(bytes: Vec<u8>) -> V {
 }
 
 fn err_bytes() -> V {
-    err_value(bytes_ty_value())
+    err_bytes_with(ErrorKind::Failed)
+}
+
+fn err_bytes_with(kind: ErrorKind) -> V {
+    err_unit_like(bytes_ty_value(), kind)
 }
 
 fn ok_unit() -> V {
@@ -310,17 +455,108 @@ fn ok_unit() -> V {
 }
 
 fn err_unit() -> V {
-    err_value(vind("Unit", Vec::new()))
+    err_unit_like(vind("Unit", Vec::new()), ErrorKind::Failed)
 }
 
 fn bytes_ty_value() -> V {
     vprimty(PrimTy::Bytes)
 }
 
-fn err_value(ok_ty: V) -> V {
+#[derive(Clone, Copy)]
+enum ErrorKind {
+    Closed,
+    Failed,
+    NotFound,
+    PermissionDenied,
+    InvalidInput,
+}
+
+fn error_kind(error: &std::io::Error) -> ErrorKind {
+    match error.kind() {
+        std::io::ErrorKind::BrokenPipe => ErrorKind::Closed,
+        std::io::ErrorKind::NotFound => ErrorKind::NotFound,
+        std::io::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
+        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+            ErrorKind::InvalidInput
+        }
+        _ => ErrorKind::Failed,
+    }
+}
+
+fn error_name(kind: ErrorKind) -> &'static str {
+    match kind {
+        ErrorKind::Closed => "Closed",
+        ErrorKind::Failed => "Failed",
+        ErrorKind::NotFound => "NotFound",
+        ErrorKind::PermissionDenied => "PermissionDenied",
+        ErrorKind::InvalidInput => "InvalidInput",
+    }
+}
+
+fn error_index(kind: ErrorKind) -> usize {
+    match kind {
+        ErrorKind::Closed => 0,
+        ErrorKind::Failed => 1,
+        ErrorKind::NotFound => 2,
+        ErrorKind::PermissionDenied => 3,
+        ErrorKind::InvalidInput => 4,
+    }
+}
+
+fn vnone_string() -> V {
+    vctor("Option", 0, vec![string_ty()])
+}
+
+fn vsome_string(bytes: &[u8]) -> V {
+    vctor("Option", 1, vec![string_ty(), ok_string(bytes)])
+}
+
+fn vlist_ok(names: Vec<String>) -> V {
+    let items = names
+        .iter()
+        .map(|name| ok_string(name.as_bytes()))
+        .collect();
+    vctor(
+        "Result",
+        0,
+        vec![ind_list_string_value(), error_ty(), vlist(items)],
+    )
+}
+
+fn vlist_err(ctor: &str) -> V {
+    let index = match ctor {
+        "NotFound" => 2,
+        "PermissionDenied" => 3,
+        "InvalidInput" => 4,
+        _ => 1,
+    };
     vctor(
         "Result",
         1,
-        vec![ok_ty, error_ty(), vctor("IoError", 1, Vec::new())],
+        vec![
+            ind_list_string_value(),
+            error_ty(),
+            vctor("IoError", index, Vec::new()),
+        ],
+    )
+}
+
+fn ind_list_string_value() -> V {
+    vind("List", vec![string_ty()])
+}
+
+fn err_unit_with(kind: ErrorKind) -> V {
+    err_unit_like(vind("Unit", Vec::new()), kind)
+}
+
+fn err_unit_like(ok_ty: V, kind: ErrorKind) -> V {
+    vctor(
+        "Result",
+        1,
+        vec![
+            ok_ty,
+            error_ty(),
+            vctor("IoError", error_index(kind), Vec::new()),
+        ],
     )
 }

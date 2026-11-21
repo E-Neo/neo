@@ -26,6 +26,8 @@ Implemented:
   `Or`, `Exists`);
 - a primitive 32-bit word type `U32` with total arithmetic, bitwise, and
   comparison operations, compiled to unboxed WebAssembly `i32`s;
+- direct calls to saturated known functions, `return_call` for tail
+  recursion, and a benchmark harness (`neo-internal bench`);
 - modules with nested items, file modules (`mod name;`), `use` paths, aliases,
   constructor globs, and `pub use` re-exports; private-by-default visibility
   with `pub`;
@@ -34,11 +36,13 @@ Implemented:
   methods;
 - primitive `String` (UTF-8) and `Bytes` with O(1) length and slicing,
   concatenation, equality, and printing, exposed as methods;
-- prelude `Option` and `Result` types, and checked `Bytes.to_str` with a
-  `Utf8Error` that reports the first invalid byte;
-- host capabilities for standard error, the argument vector, standard input,
-  and regular files (`stderr::write`, `env::argv`, `stdin::read_all`,
-  `file::read`, `file::write`);
+- prelude `Option`, `Result`, `Ordering`, and `Map` types, list helpers, and
+  checked `Bytes.to_str` with a `Utf8Error` that reports the first invalid
+  byte;
+- host capabilities for standard output and error, arguments, environment
+  variables, standard input, files, and directories (`stdout::write`,
+  `stderr::write`, `env::argv`, `env::args`, `env::get`, `stdin::read_all`,
+  `file::read`, `file::write`, `dir::create`, `dir::list`);
 - `neo` REPL, `neo FILE` interpretation, and `neo build FILE` to a WASI 0.2
   component; a `U32` result from `main` is both printed and used as the
   process exit status.

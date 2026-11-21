@@ -76,6 +76,10 @@ commits and design notes.
 
 | D36 | **Exit status.** A `main` whose action produces `U32` prints the value and exits with its low eight bits; any other result type exits `0`. The interpreter and compiled component agree. The vendored `wasi:cli@0.2.9` copy marks `exit-with-code` as `@since(version = 0.2.0)` rather than `@unstable`, because the fixed world uses it directly; wasmtime provides it without a feature flag. |
 
+| D37 | **I/O ergonomics.** `IoError` distinguishes `Closed`, `Failed`, `NotFound`, `PermissionDenied`, and `InvalidInput`; WASI error codes are mapped to the closest variant. `stdout::write` mirrors `stderr::write`, `env::args` omits argv0 while `env::argv` keeps it, `env::get` returns `Option[String]`, and `dir::create`/`dir::list` cover directory creation and enumeration. Directory listings are returned in host order. |
+
+| D38 | **Direct calls, tail calls, and allocation.** A saturated application of a known top-level function calls an uncurried direct entry point instead of allocating and applying a curried closure. Tail-position self calls emit `return_call`. `neo-internal bench` measures component size and wasmtime wall time on `bench/list_workload.neo`. Free lists are deferred: Neo has no liveness signal, and the measured removable cost was call-site closure allocation; a generic free list needs an ownership model. |
+
 ## 3. The `Neo-B` subset
 
 The compiler is written in a subset of the language it accepts. The rule is
@@ -114,7 +118,7 @@ Parity against Stage 0 is added by M1 and applies from then on.
 | M4b.2 | `extern fn ... = "wasi:...#name"`, explicit imports, host-built results (`stderr::write`) | External write runs under `wasmtime`; interpreter parity where possible | ~200 Rust |
 | M4b.3 | World growth: `argv`, `stdin.read_all`, `file.read`, `file.write` | File-reading program runs under `wasmtime` | ~150 Rust |
 | M4b.4 | Exit status through `wasi:cli/exit#exit-with-code` | Compiled exit status matches `main`'s `U32` | ~100 Rust + spike |
-| M5 | Arenas, free lists, `return_call`, benchmark | Self-compile-shaped workload in budget | ~700 Rust |
+| M5 | Direct calls, `return_call`, allocation review, benchmark | Self-compile-shaped workload in budget | ~700 Rust |
 | M6 | Modules, file modules, `pub use`, visibility, and `impl` blocks | Multi-file module builds and runs; module, visibility, and re-export tests | ~700 Rust |
 | M7 | Neo-written standard library (`Option`, `Result`, `Ordering`, `Map`, string utilities) | Library tests pass | ~1,500 Neo |
 | M8 | Canonical component emitter, frozen | Byte-identical to `wit-component` on the corpus, stable across processes | ~400 Rust |

@@ -1706,8 +1706,14 @@ mod stderr {
   pub extern fn write(s: String): IO[Result[Unit, IoError]]
 }
 
+mod stdout {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]]
+}
+
 mod env {
   pub extern fn argv(): IO[List[String]]
+  pub extern fn args(): IO[List[String]]
+  pub extern fn get(name: String): IO[Option[String]]
 }
 
 mod stdin {
@@ -1717,6 +1723,11 @@ mod stdin {
 mod file {
   pub extern fn read(path: String): IO[Result[Bytes, IoError]]
   pub extern fn write(path: String, data: Bytes): IO[Result[Unit, IoError]]
+}
+
+mod dir {
+  pub extern fn create(path: String): IO[Result[Unit, IoError]]
+  pub extern fn list(path: String): IO[Result[List[String], IoError]]
 }
 ```
 
@@ -1835,9 +1846,11 @@ allocator; memory grows on demand. There is no garbage collector and no
 reference counting.
 
 The I/O API is `IO::pure`, `IO::bind`, and the `extern` capabilities in the
-closed registry. The prelude provides `stderr::write`, `env::argv`,
-`stdin::read_all`, `file::read`, and `file::write`. File paths are relative to
-a preopened directory; pass `--dir .` to `wasmtime` to grant the current one.
+closed registry. The prelude provides `stdout::write`, `stderr::write`,
+`env::argv`, `env::args`, `env::get`, `stdin::read_all`, `file::read`,
+`file::write`, `dir::create`, and `dir::list`. File and directory paths are
+relative to a preopened directory; pass `--dir .` to `wasmtime` to grant the
+current one. `env::args` excludes the program name; `env::argv` includes it.
 
 When `main`'s action produces `U32`, that value is printed and its low eight
 bits become the process exit status. Other result types print normally and

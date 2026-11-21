@@ -1,0 +1,19 @@
+use nat_add
+
+fn range(n: Nat, acc: List[Nat]): List[Nat] {
+  match n {
+    Zero => acc
+    Succ(k) => range(k, Cons(k, acc))
+  }
+}
+
+fn sum(xs: List[Nat], acc: Nat): Nat {
+  match xs {
+    Nil => acc
+    Cons(x, rest) => sum(rest, nat_add(x, acc))
+  }
+}
+
+fn main(): IO[Nat] {
+  IO::pure(sum(range(500, Nil), Zero))
+}
