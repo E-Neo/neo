@@ -88,7 +88,7 @@ fn driver_runs_as_a_component() {
         let dir = std::env::temp_dir().join(format!("neo-stage1-driver-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
-        std::fs::write(dir.join("input.neo"), "1 + 2 + 3").expect("input");
+        std::fs::write(dir.join("input.neo"), "2 * (1 + 2)").expect("input");
         let wasm = dir.join("driver.wasm");
         neo::codegen::build_component(&globals, &wasm).expect("build driver");
         let out = Command::new("wasmtime")
@@ -100,7 +100,7 @@ fn driver_runs_as_a_component() {
             .arg("output.wasm")
             .output()
             .expect("run driver");
-        assert_eq!(String::from_utf8_lossy(&out.stdout), "Ok(6)\n");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "Ok(0)\n");
         assert_eq!(out.status.code(), Some(0));
         let module = dir.join("output.wasm");
         let bytes = std::fs::read(&module).expect("emitted module");

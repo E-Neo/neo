@@ -52,12 +52,14 @@ and conversion, written in Neo.
 
 ## Frontend, codegen, and driver slices
 
-`stage1/frontend/` contains a fuel-driven lexer and parser for a small
-arithmetic language. The lexer uses a byte-class state machine; the parser
-sums numerals with a single recursive token walk. Both avoid mutual recursion.
+`stage1/frontend/` contains a fuel-driven lexer and a shunting-yard
+compiler for a small arithmetic language. It supports numerals, `+`, `*`,
+and parentheses, and emits wasm instructions directly. The parser avoids
+mutual recursion.
 
-`stage1/codegen/` emits LEB128, wasm sections, and a valid module from a
-constant using the new `U32.to_byte` method.
+`stage1/codegen/` emits LEB128, wasm sections, and a valid module from
+either a constant or an instruction sequence using the new `U32.to_byte`
+method.
 
 `stage1/driver.neo` is a first end-to-end Stage 1 compiler: it reads a source
 path and an output path from `env::args`, reads the source, parses the

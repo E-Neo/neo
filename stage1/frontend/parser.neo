@@ -4,7 +4,7 @@
 // it needs no mutual recursion.
 
 use super::lexer
-use super::lexer::Token::{TkNum, TkIdent, TkPlus, TkLParen, TkRParen}
+use super::lexer::Token::{TkNum, TkIdent, TkPlus, TkStar, TkLParen, TkRParen}
 
 pub enum ParseError {
   OutOfFuel
@@ -24,6 +24,7 @@ pub fn parse_sum(
       Cons(token, rest) => match token {
         TkNum(n) => parse_sum(k, rest, acc + n)
         TkPlus => parse_sum(k, rest, acc)
+        TkStar => Err(Unexpected)
         TkIdent(_) => Err(Unexpected)
         TkLParen => Err(Unexpected)
         TkRParen => Err(Unexpected)
@@ -43,5 +44,136 @@ pub fn demo_parse_add(): U32 {
   match parse_program(100, b"1 + 2 + 3") {
     Ok(n) => n
     Err(_) => 0u32
+  }
+}
+
+
+pub enum OpResult {
+  OpOk(Bytes, List[lexer::Token])
+}
+
+fn sleb(fuel: Nat, value: U32, out: Bytes): Bytes {
+  match fuel {
+    Zero => out
+    Succ(k) => {
+      let byte = value % 128u32
+      let rest = value / 128u32
+      let more = match rest == 0u32 {
+        True => byte >= 64u32
+        False => Bool::True
+      }
+      let encoded = match more {
+        True => (byte + 128u32).to_byte()
+        False => byte.to_byte()
+      }
+      match more {
+        True => sleb(k, rest, out.concat(encoded))
+        False => out.concat(encoded)
+      }
+    }
+  }
+}
+
+fn const_insn(value: U32): Bytes {
+  b"\x41".concat(sleb(16, value, b""))
+}
+
+fn precedence(token: lexer::Token): U32 {
+  match token {
+    TkPlus => 1u32
+    TkStar => 2u32
+    TkNum(_) => 0u32
+    TkIdent(_) => 0u32
+    TkLParen => 0u32
+    TkRParen => 0u32
+  }
+}
+
+fn emit_op(token: lexer::Token): Bytes {
+  match token {
+    TkPlus => b"\x6a"
+    TkStar => b"\x6c"
+    TkNum(_) => b""
+    TkIdent(_) => b""
+    TkLParen => b""
+    TkRParen => b""
+  }
+}
+
+fn pop_ops(
+  fuel: Nat,
+  ops: List[lexer::Token],
+  min_prec: U32,
+  out: Bytes
+): OpResult {
+  match fuel {
+    Zero => OpOk(out, ops)
+    Succ(k) => match ops {
+      Nil => OpOk(out, Nil)
+      Cons(token, rest) => match token {
+        TkPlus => match precedence(token) >= min_prec {
+          True => pop_ops(k, rest, min_prec, out.concat(emit_op(token)))
+          False => OpOk(out, ops)
+        }
+        TkStar => match precedence(token) >= min_prec {
+          True => pop_ops(k, rest, min_prec, out.concat(emit_op(token)))
+          False => OpOk(out, ops)
+        }
+        TkNum(_) => OpOk(out, ops)
+        TkIdent(_) => OpOk(out, ops)
+        TkLParen => OpOk(out, ops)
+        TkRParen => OpOk(out, ops)
+      }
+    }
+  }
+}
+
+pub fn compile_tokens(
+  fuel: Nat,
+  tokens: List[lexer::Token],
+  out: Bytes,
+  ops: List[lexer::Token]
+): Result[Bytes, ParseError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match tokens {
+      Nil => match pop_ops(k, ops, 0u32, out) {
+        OpOk(result, rest) => match rest {
+          Nil => Ok(result)
+          Cons(_, _) => Err(Unexpected)
+        }
+      }
+      Cons(token, rest) => match token {
+        TkNum(n) => compile_tokens(k, rest, out.concat(const_insn(n)), ops)
+        TkPlus => match pop_ops(k, ops, precedence(token), out) {
+          OpOk(result, remaining) => compile_tokens(k, rest, result, Cons(token, remaining))
+        }
+        TkStar => match pop_ops(k, ops, precedence(token), out) {
+          OpOk(result, remaining) => compile_tokens(k, rest, result, Cons(token, remaining))
+        }
+        TkLParen => compile_tokens(k, rest, out, Cons(token, ops))
+        TkRParen => match pop_ops(k, ops, 0u32, out) {
+          OpOk(result, remaining) => match remaining {
+            Nil => Err(Unexpected)
+            Cons(open, after) => match open {
+              TkLParen => compile_tokens(k, rest, result, after)
+              TkNum(_) => Err(Unexpected)
+              TkIdent(_) => Err(Unexpected)
+              TkPlus => Err(Unexpected)
+              TkStar => Err(Unexpected)
+              TkRParen => Err(Unexpected)
+            }
+          }
+        }
+        TkIdent(_) => Err(Unexpected)
+      }
+    }
+  }
+}
+
+pub fn compile_program(fuel: Nat, bytes: Bytes): Result[Bytes, ParseError] {
+  match lexer::lex(1000, bytes, 0u32, Nil, lexer::LexState::Normal) {
+    Ok(tokens) => compile_tokens(fuel, tokens, b"", Nil)
+    Err(e) => Err(Lex(e))
   }
 }

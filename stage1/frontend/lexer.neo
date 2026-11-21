@@ -12,6 +12,7 @@ pub enum Token {
   TkNum(U32)
   TkIdent(String)
   TkPlus
+  TkStar
   TkLParen
   TkRParen
 }
@@ -26,6 +27,7 @@ pub enum ByteClass {
   Space
   Digit
   Plus
+  Star
   LParen
   RParen
   IdentStart
@@ -52,7 +54,9 @@ fn classify(byte: U32): ByteClass {
           }
           False => match byte == 43u32 {
             True => Plus
-            False => match byte == 40u32 {
+            False => match byte == 42u32 {
+              True => Star
+              False => match byte == 40u32 {
               True => LParen
               False => match byte == 41u32 {
                 True => RParen
@@ -63,6 +67,7 @@ fn classify(byte: U32): ByteClass {
         }
       }
     }
+  }
   }
 }
 
@@ -102,6 +107,7 @@ pub fn lex(
           Space => lex(k, bytes, pos + 1u32, acc, Normal)
           Digit => lex(k, bytes, pos + 1u32, acc, Number(bytes.get(pos) - 48u32))
           Plus => lex(k, bytes, pos + 1u32, Cons(TkPlus, acc), Normal)
+          Star => lex(k, bytes, pos + 1u32, Cons(TkStar, acc), Normal)
           LParen => lex(k, bytes, pos + 1u32, Cons(TkLParen, acc), Normal)
           RParen => lex(k, bytes, pos + 1u32, Cons(TkRParen, acc), Normal)
           IdentStart => lex(k, bytes, pos, acc, Ident(pos))

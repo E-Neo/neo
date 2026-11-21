@@ -68,6 +68,23 @@ fn code_section(value: U32): Bytes {
   section(10u32, b"\x01".concat(body))
 }
 
+fn code_section_instructions(insn: Bytes): Bytes {
+  let body = b"\x00".concat(insn).concat(b"\x0b")
+  section(10u32, b"\x01".concat(uleb_bytes(body.length())).concat(body))
+}
+
+pub fn module_from_instructions(insn: Bytes): Bytes {
+  render(
+    append(
+      append(Chunk(header()), Chunk(type_section())),
+      append(
+        Chunk(function_section()),
+        append(Chunk(export_section()), Chunk(code_section_instructions(insn)))
+      )
+    )
+  )
+}
+
 pub fn module_const(value: U32): Bytes {
   render(
     append(

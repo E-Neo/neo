@@ -10,10 +10,10 @@ fn after_write(value: U32, r: Result[Unit, IoError]): IO[Result[U32, IoError]] {
 
 fn after_read(output: String, r: Result[Bytes, IoError]): IO[Result[U32, IoError]] {
   match r {
-    Ok(bytes) => match frontend::parser::parse_program(1000, bytes) {
-      Ok(value) => IO::bind(
-        file::write(output, codegen::wasm::module_const(value)),
-        fn(done: Result[Unit, IoError]) => after_write(value, done)
+    Ok(bytes) => match frontend::parser::compile_program(1000, bytes) {
+      Ok(insn) => IO::bind(
+        file::write(output, codegen::wasm::module_from_instructions(insn)),
+        fn(done: Result[Unit, IoError]) => after_write(0u32, done)
       )
       Err(_) => IO::pure(Err(InvalidInput))
     }
