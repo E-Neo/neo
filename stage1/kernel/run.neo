@@ -9,5 +9,9 @@ fn main(): IO[U32] {
       + core::demo_fuel()
       + core::demo_conv_alpha()
       + core::demo_conv_diff()
+      + core::demo_check_identity()
+      + core::demo_check_bad()
+      + core::demo_infer_pi()
+      + core::demo_infer_app()
   )
 }

@@ -19,11 +19,15 @@ and conversion, written in Neo.
 - `Var`, `Const`, `Ty`, `PropTy`, `Ind`, `Ctor`, `Pi`, `Lam`, and `App`.
 - TList/TNil list nodes.
 - `eval`, `quote`, `normalize`, and `conv`.
-- Alpha-renamed lambdas, different universes, unbound variables, and fuel
-  exhaustion are tested.
+- Sorts and `infer`/`check` for variables, universes, Pi, lambda, and
+  application, with a `List[Val]` context and context-environment functions.
+- Alpha-renamed lambdas, different universes, unbound variables, fuel
+  exhaustion, identity checking, a type error, Pi inference, and application
+  inference are tested.
 
 ## Next
 
-- Checking/inference: sorts, Pi domains/codomains, constructors, match, and J.
+- Constructor and enum typing, `match`, and `J`; these need a global
+  environment in Stage 1.
 - Positivity, termination, and pretty printing.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.

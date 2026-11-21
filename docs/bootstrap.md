@@ -87,7 +87,7 @@ commits and design notes.
 
 | D42 | **Stage 1 readiness spike.** `spike/` validates fuel-driven evaluation, function-valued closure environments, byte parsing, and a pure wasm byte builder. Nested `List[Val]` environments are rejected by positivity, so closures use `fn(String) -> Val`; such environments cannot be compared, so conversion must apply closures to fresh variables. Mutual recursion is still absent; the ports use single-entry recursive functions or need a future mutual-recursion feature. |
 
-| D43 | **Stage 1 kernel slice.** `stage1/kernel` ports terms, values, fuel-driven evaluation, quoting, and conversion. Argument lists are encoded with `TNil`/`TCons` and `VNil`/`VCons` because nested inductive fields are rejected. Environments are `fn(U32) -> Val`; Pi/lambda closures store bodies and environments, and conversion applies them to fresh variables. Checking, positivity, termination, and printing remain. |
+| D43 | **Stage 1 kernel slice.** `stage1/kernel` ports terms, values, fuel-driven evaluation, quoting, conversion, sorts, and `infer`/`check` for variables, universes, Pi, lambda, and application. Argument lists are encoded with `TNil`/`TCons` and `VNil`/`VCons` because nested inductive fields are rejected. Environments are `fn(U32) -> Val`; Pi/lambda closures store bodies and environments, and conversion applies them to fresh variables. Global-environment typing for constructors and matches, positivity, termination, and printing remain. |
 
 ## 3. The `Neo-B` subset
 
