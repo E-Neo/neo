@@ -54,8 +54,8 @@ fn main_value(globals: &Globals) -> V {
 
 fn as_nat(globals: &Globals, v: &V) -> u64 {
     let info = globals.get_enum("Nat").unwrap();
-    let zero = info.ctors.iter().position(|c| c.name == "zero").unwrap();
-    let succ = info.ctors.iter().position(|c| c.name == "succ").unwrap();
+    let zero = info.ctors.iter().position(|c| c.name == "Zero").unwrap();
+    let succ = info.ctors.iter().position(|c| c.name == "Succ").unwrap();
     fn go(v: &V, zero: usize, succ: usize) -> u64 {
         match &**v {
             Val::Ctor(name, i, _) if name == "Nat" && *i == zero => 0,
@@ -89,7 +89,7 @@ fn bool_main(body: &str) -> bool {
 
 #[test]
 fn let_bindings() {
-    assert_eq!(nat_main("let a: Nat = 2\n  let b = zero\n  a + b"), 2);
+    assert_eq!(nat_main("let a: Nat = 2\n  let b = Zero\n  a + b"), 2);
     assert_eq!(u32_main("let a = 3u32\n  a"), 3);
     assert_rejected(
         "fn main(): Nat {\n  let x = 1\n  x\n}",
@@ -100,7 +100,7 @@ fn let_bindings() {
 #[test]
 fn let_bindings_shadow() {
     assert_eq!(nat_main("let a: Nat = 2\n  let a: Nat = a + 1\n  a"), 3);
-    elaborate("fn main(): Nat {\n  let p: (zero = zero) = refl\n  0\n}");
+    elaborate("fn main(): Nat {\n  let p: (Zero = Zero) = Refl\n  0\n}");
 }
 
 #[test]
@@ -118,17 +118,17 @@ fn numerals_follow_the_expected_type() {
 
 #[test]
 fn equality_split() {
-    elaborate("fn refl_zero(): zero = zero {\n  refl\n}");
+    elaborate("fn refl_zero(): Zero = Zero {\n  Refl\n}");
     assert!(bool_main("(1 : Nat) == 1"));
     assert!(bool_main("(1 : Nat) != 2"));
-    assert!(bool_main("true != false"));
+    assert!(bool_main("Bool::True != Bool::False"));
     assert!(bool_main("\"a\" != \"b\""));
-    assert!(bool_main("unit == unit"));
+    assert!(bool_main("Unit::Unit == Unit::Unit"));
     assert_rejected(
         "fn main(): Bool { 1 == 1 }",
         "cannot infer the operand type",
     );
-    assert_rejected("fn main(): Nat { zero == zero }", "type mismatch");
+    assert_rejected("fn main(): Nat { Zero == Zero }", "type mismatch");
     assert_rejected(
         "fn f(x: List[Nat]): Bool { x == x }",
         "boolean equality is not defined",
@@ -201,7 +201,7 @@ fn ascription_directs_numerals() {
 fn boolean_equality_is_typed_by_the_operands() {
     assert!(bool_main("(1 : Nat) == 1"));
     assert!(bool_main("1u32 == 1"));
-    assert!(bool_main("true == true"));
+    assert!(bool_main("Bool::True == Bool::True"));
     assert!(bool_main("\"abc\" == \"abc\""));
-    assert!(bool_main("unit == unit"));
+    assert!(bool_main("Unit::Unit == Unit::Unit"));
 }

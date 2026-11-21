@@ -46,7 +46,7 @@ impl Host for NoHost {
 
 #[test]
 fn pure_action_produces_its_value() {
-    let globals = define("fn answer(): IO[U32] { io_pure(42u32) }");
+    let globals = define("fn answer(): IO[U32] { IO::pure(42u32) }");
     assert_eq!(show_val(&globals, 0, &run(&globals, "answer")), "42");
 }
 
@@ -55,11 +55,11 @@ fn bind_threads_the_produced_value() {
     let globals = define(
         r#"
 fn inc(m: IO[U32]): IO[U32] {
-  io_bind(m, fn(x: U32) => io_pure(x + 1u32))
+  IO::bind(m, fn(x: U32) => IO::pure(x + 1u32))
 }
 
 fn answer(): IO[U32] {
-  inc(io_pure(41u32))
+  inc(IO::pure(41u32))
 }
 "#,
     );
@@ -71,11 +71,11 @@ fn bind_is_polymorphic() {
     let globals = define(
         r#"
 fn second[T: Type](first: IO[T], next: IO[T]): IO[T] {
-  io_bind(first, fn(x: T) => io_bind(next, fn(y: T) => io_pure(y)))
+  IO::bind(first, fn(x: T) => IO::bind(next, fn(y: T) => IO::pure(y)))
 }
 
 fn value(): IO[String] {
-  second(io_pure("ignored"), io_pure("kept"))
+  second(IO::pure("ignored"), IO::pure("kept"))
 }
 "#,
     );
@@ -104,7 +104,7 @@ fn bind_requires_an_action() {
     let error = elaborate_error(
         r#"
 fn bad(): IO[U32] {
-  io_bind(1u32, fn(x: U32) => io_pure(x))
+  IO::bind(1u32, fn(x: U32) => IO::pure(x))
 }
 "#,
     );
@@ -120,7 +120,7 @@ fn bind_checks_the_continuation_domain() {
     let error = elaborate_error(
         r#"
 fn bad(): IO[U32] {
-  io_bind(io_pure(1u32), fn(x: Nat) => io_pure(0u32))
+  IO::bind(IO::pure(1u32), fn(x: Nat) => IO::pure(0u32))
 }
 "#,
     );
@@ -133,7 +133,7 @@ fn bad(): IO[U32] {
 
 #[test]
 fn io_expects_a_type_parameter() {
-    let error = elaborate_error("fn bad(): IO { io_pure(0u32) }");
+    let error = elaborate_error("fn bad(): IO { IO::pure(0u32) }");
     assert!(
         error.message.contains("`IO` expects one parameter"),
         "unexpected error: {}",
@@ -143,7 +143,7 @@ fn io_expects_a_type_parameter() {
 
 #[test]
 fn actions_are_opaque_values() {
-    let globals = define("fn action(): IO[U32] { io_pure(1u32) }");
+    let globals = define("fn action(): IO[U32] { IO::pure(1u32) }");
     let value = force(&globals, eval(&globals, &Vec::new(), &const_("action")));
     assert!(matches!(&*value, Val::Action(_)));
 }

@@ -60,13 +60,13 @@ fn builds_nat_main() {
         r#"
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
 fn main(): IO[Nat] {
-  io_pure(add(2, 3))
+  IO::pure(add(2, 3))
 }
 "#,
         "nat",
@@ -80,17 +80,17 @@ fn builds_bool_main() {
         r#"
 fn not(b: Bool): Bool {
   match b {
-    true => false
-    false => true
+    True => False
+    False => True
   }
 }
 
 fn main(): IO[Bool] {
-  io_pure(not(false))
+  IO::pure(not(False))
 }
 "#,
         "bool",
-        "true\n",
+        "True\n",
     );
 }
 
@@ -105,7 +105,7 @@ enum Color {
 }
 
 fn main(): IO[Color] {
-  io_pure(green)
+  IO::pure(green)
 }
 "#,
         "color",
@@ -119,17 +119,17 @@ fn prints_recursive_enum_values() {
         r#"
 fn range(n: Nat): List[Nat] {
   match n {
-    zero => nil
-    succ(p) => cons(p, range(p))
+    Zero => Nil
+    Succ(p) => Cons(p, range(p))
   }
 }
 
 fn main(): IO[List[Nat]] {
-  io_pure(range(3))
+  IO::pure(range(3))
 }
 "#,
         "list",
-        "cons(2, cons(1, cons(0, nil)))\n",
+        "Cons(2, Cons(1, Cons(0, Nil)))\n",
     );
 }
 
@@ -138,7 +138,7 @@ fn prints_strings() {
     check(
         r#"
 fn main(): IO[String] {
-  io_pure("hello, world")
+  IO::pure("hello, world")
 }
 "#,
         "string",
@@ -151,7 +151,7 @@ fn prints_concatenated_strings() {
     check(
         r#"
 fn main(): IO[String] {
-  io_pure(str_concat("hello, ", "world"))
+  IO::pure("hello, ".concat("world"))
 }
 "#,
         "string-concat",
@@ -165,8 +165,8 @@ fn supports_closures_and_captures() {
         r#"
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
@@ -175,7 +175,7 @@ fn addn(n: Nat): fn(x: Nat) -> Nat {
 }
 
 fn main(): IO[Nat] {
-  io_pure(addn(2)(3))
+  IO::pure(addn(2)(3))
 }
 "#,
         "closure",
@@ -188,8 +188,8 @@ fn supports_first_class_constructors() {
     check(
         r#"
 fn main(): IO[Nat] {
-  let f = succ
-  io_pure(f(4))
+  let f = Succ
+  IO::pure(f(4))
 }
 "#,
         "ctor",
@@ -203,17 +203,17 @@ fn compiles_generic_functions() {
         r#"
 fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   match xs {
-    nil => ys
-    cons(h, t) => cons(h, append(t, ys))
+    Nil => ys
+    Cons(h, t) => Cons(h, append(t, ys))
   }
 }
 
 fn main(): IO[List[Nat]] {
-  io_pure(append(cons((1 : Nat), cons((2 : Nat), nil)), cons((3 : Nat), nil)))
+  IO::pure(append(Cons((1 : Nat), Cons((2 : Nat), Nil)), Cons((3 : Nat), Nil)))
 }
 "#,
         "append",
-        "cons(1, cons(2, cons(3, nil)))\n",
+        "Cons(1, Cons(2, Cons(3, Nil)))\n",
     );
 }
 
@@ -223,29 +223,29 @@ fn runs_proof_functions() {
         r#"
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
 fn sym[T: Type](x: T, y: T, p: x = y): y = x {
   match p {
-    refl => refl
+    Refl => Refl
   }
 }
 
-fn add_zero(a: Nat): add(a, zero) = a {
+fn add_zero(a: Nat): add(a, Zero) = a {
   match a {
-    zero => refl
-    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
-      refl => refl
+    Zero => Refl
+    Succ(p) => match sym(add(p, Zero), p, add_zero(p)) {
+      Refl => Refl
     }
   }
 }
 
 fn main(): IO[Nat] {
   let q = add_zero(3)
-  io_pure(7)
+  IO::pure(7)
 }
 "#,
         "proof",
@@ -258,7 +258,7 @@ fn builds_u32_arithmetic() {
     check(
         r#"
 fn main(): IO[U32] {
-  io_pure(6u32 * 7u32 + 0u32 - 1u32)
+  IO::pure(6u32 * 7u32 + 0u32 - 1u32)
 }
 "#,
         "u32",
@@ -271,7 +271,7 @@ fn builds_u32_division_by_zero() {
     check(
         r#"
 fn main(): IO[U32] {
-  io_pure(9u32 / 0u32 + 9u32 % 0u32)
+  IO::pure(9u32 / 0u32 + 9u32 % 0u32)
 }
 "#,
         "u32-divzero",
@@ -288,11 +288,11 @@ fn is_even(n: U32): Bool {
 }
 
 fn main(): IO[Bool] {
-  io_pure(is_even(40u32))
+  IO::pure(is_even(40u32))
 }
 "#,
         "u32-cmp",
-        "true\n",
+        "True\n",
     );
 }
 
@@ -301,7 +301,7 @@ fn builds_nat_operators() {
     check(
         r#"
 fn main(): IO[Nat] {
-  io_pure(((12 : Nat) & 10) + ((1 : Nat) << 4) + ((20 : Nat) / 6) + ((20 : Nat) % 6))
+  IO::pure(((12 : Nat) & 10) + ((1 : Nat) << 4) + ((20 : Nat) / 6) + ((20 : Nat) % 6))
 }
 "#,
         "nat-operators",
@@ -314,7 +314,7 @@ fn builds_u32_infix_operators() {
     check(
         r#"
 fn main(): IO[U32] {
-  io_pure((20 / 6) + (20 % 6) + (1 << 4) + (12 & 10))
+  IO::pure((20 / 6) + (20 % 6) + (1 << 4) + (12 & 10))
 }
 "#,
         "u32-infix-operators",
@@ -327,7 +327,7 @@ fn builds_string_slicing_and_concatenation() {
     check(
         r#"
 fn main(): IO[String] {
-  io_pure(str_concat(str_slice("hello, world", 7, 12), str_concat(" ", str_slice("héllo!", 0, 6))))
+  IO::pure("hello, world".slice(7, 12).concat(" ".concat("héllo!".slice(0, 6))))
 }
 "#,
         "string-slice",
@@ -340,11 +340,11 @@ fn builds_bytes_operations() {
     check(
         r#"
 fn main(): IO[U32] {
-  io_pure(
-    bytes_get(b"abc", 1) +
-    bytes_length(b"abcd") +
-    bytes_get(b"a", 9) +
-    bytes_length(bytes_concat(bytes_slice(b"hello", 1, 3), b"!"))
+  IO::pure(
+    b"abc".get(1) +
+    b"abcd".length() +
+    b"a".get(9) +
+    b"hello".slice(1, 3).concat(b"!").length()
   )
 }
 "#,
@@ -358,7 +358,7 @@ fn builds_bytes_printing() {
     check(
         r#"
 fn main(): IO[Bytes] {
-  io_pure(bytes_concat(b"neo", b"\x00\xff"))
+  IO::pure(b"neo".concat(b"\x00\xff"))
 }
 "#,
         "bytes-print",
@@ -370,15 +370,17 @@ fn main(): IO[Bytes] {
 fn builds_method_calls() {
     check(
         r#"
-fn List.length[T: Type](xs: List[T]): Nat {
-  match xs {
-    nil => zero
-    cons(_, rest) => succ(rest.length())
+impl[T: Type] List[T] {
+  pub fn length(xs: List[T]): Nat {
+    match xs {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.length())
+    }
   }
 }
 
 fn main(): IO[String] {
-  io_pure("hello".slice(0, 4).concat("!"))
+  IO::pure("hello".slice(0, 4).concat("!"))
 }
 "#,
         "methods",
@@ -390,16 +392,18 @@ fn main(): IO[String] {
 fn builds_generic_method_calls() {
     check(
         r#"
-fn List.length[T: Type](xs: List[T]): Nat {
-  match xs {
-    nil => zero
-    cons(_, rest) => succ(rest.length())
+impl[T: Type] List[T] {
+  pub fn length(xs: List[T]): Nat {
+    match xs {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.length())
+    }
   }
 }
 
 fn main(): IO[Nat] {
-  let xs: List[Nat] = cons(1, cons(2, cons(3, nil)))
-  io_pure(xs.length())
+  let xs: List[Nat] = Cons(1, Cons(2, Cons(3, Nil)))
+  IO::pure(xs.length())
 }
 "#,
         "generic-methods",
@@ -412,11 +416,11 @@ fn builds_valid_utf8_conversion() {
     check(
         r#"
 fn main(): IO[Result[String, Utf8Error]] {
-  io_pure(b"hello, \xe2\x82\xac".to_str())
+  IO::pure(b"hello, \xe2\x82\xac".to_str())
 }
 "#,
         "utf8-ok",
-        "ok(hello, €)\n",
+        "Ok(hello, €)\n",
     );
 }
 
@@ -425,11 +429,11 @@ fn builds_invalid_utf8_conversion() {
     check(
         r#"
 fn main(): IO[Result[String, Utf8Error]] {
-  io_pure(b"ab\xff".to_str())
+  IO::pure(b"ab\xff".to_str())
 }
 "#,
         "utf8-err",
-        "err(invalid_utf8(2))\n",
+        "Err(Invalid(2))\n",
     );
 }
 
@@ -437,11 +441,18 @@ fn main(): IO[Result[String, Utf8Error]] {
 fn builds_bytes_utf8_check() {
     check(
         r#"
+fn code(r: Result[String, Utf8Error]): U32 {
+  match r {
+    Ok(_) => 0u32
+    Err(Invalid(index)) => index + 1u32
+  }
+}
+
 fn main(): IO[U32] {
-  io_pure(
-    bytes_utf8_check(b"abc") +
-    bytes_utf8_check(b"\xf4\x8f\xbf\xbf") * 10u32 +
-    bytes_utf8_check(b"\xf4\x90\x80\x80")
+  IO::pure(
+    code(b"abc".to_str()) +
+    code(b"\xf4\x8f\xbf\xbf".to_str()) * 10u32 +
+    code(b"\xf4\x90\x80\x80".to_str())
   )
 }
 "#,
@@ -455,11 +466,11 @@ fn builds_io_bind() {
     check(
         r#"
 fn inc(m: IO[U32]): IO[U32] {
-  io_bind(m, fn(x: U32) => io_pure(x + 1u32))
+  IO::bind(m, fn(x: U32) => IO::pure(x + 1u32))
 }
 
 fn main(): IO[U32] {
-  inc(inc(io_pure(40u32)))
+  inc(inc(IO::pure(40u32)))
 }
 "#,
         "io-bind",
@@ -503,17 +514,19 @@ fn run_streams(path: &Path) -> Option<(String, String)> {
 fn builds_stderr_write() {
     let path = build(
         r#"
-extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+mod log {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+}
 
 fn exit_code(r: Result[Unit, IoError]): IO[U32] {
   match r {
-    ok(_) => io_pure(0u32)
-    err(_) => io_pure(1u32)
+    Ok(_) => IO::pure(0u32)
+    Err(_) => IO::pure(1u32)
   }
 }
 
 fn main(): IO[U32] {
-  io_bind(stderr.write("hello\n"), exit_code)
+  IO::bind(log::write("hello\n"), exit_code)
 }
 "#,
         "stderr-write",

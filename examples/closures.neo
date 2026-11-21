@@ -2,8 +2,8 @@
 // its free variables by value.
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
@@ -16,5 +16,5 @@ fn twice(f: fn(x: Nat) -> Nat, x: Nat): Nat {
 }
 
 fn main(): IO[Nat] {
-  io_pure(twice(addn(2), 3))
+  IO::pure(twice(addn(2), 3))
 }

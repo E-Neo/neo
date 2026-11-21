@@ -1,7 +1,9 @@
-fn Nope.length(self: Nope): U32 {
-  io_pure(0)
+impl Nope {
+  pub fn length(self: Nope): U32 {
+    IO::pure(0)
+  }
 }
 
 fn main(): IO[U32] {
-  io_pure(0)
+  IO::pure(0)
 }

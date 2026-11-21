@@ -11,8 +11,8 @@ fn main(): IO[Nat] {
   let shift: Nat = (1 << 5) + (64 >> 3)
   let word: U32 = (20 / 6) + (20 % 6)
   let word_ok: Nat = match word == 5 {
-    true => 1
-    false => 0
+    True => 1
+    False => 0
   }
-  io_pure(q + r + bits + shift + word_ok)
+  IO::pure(q + r + bits + shift + word_ok)
 }

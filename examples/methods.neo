@@ -1,9 +1,11 @@
 // Methods are functions namespaced by their receiver type. Different types may
 // declare the same method name; dispatch uses the receiver's type.
-fn Bool.not(self: Bool): Bool {
-  match self {
-    false => true
-    true => false
+impl Bool {
+  pub fn not(self: Bool): Bool {
+    match self {
+      False => True
+      True => False
+    }
   }
 }
 
@@ -12,16 +14,18 @@ enum Shape {
   rect(U32, U32)
 }
 
-fn Shape.area(self: Shape): U32 {
-  match self {
-    circle(r) => r * r * 3u32
-    rect(w, h) => w * h
+impl Shape {
+  pub fn area(self: Shape): U32 {
+    match self {
+      circle(r) => r * r * 3u32
+      rect(w, h) => w * h
+    }
   }
 }
 
 fn main(): IO[U32] {
-  match false.not() {
-    true => io_pure(rect(3u32, 4u32).area())
-    false => io_pure(0u32)
+  match Bool::False.not() {
+    True => IO::pure(rect(3u32, 4u32).area())
+    False => IO::pure(0u32)
   }
 }

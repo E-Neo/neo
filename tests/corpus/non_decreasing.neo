@@ -3,5 +3,5 @@ fn loop(n: Nat): Nat {
 }
 
 fn main(): IO[Nat] {
-  io_pure(loop(0))
+  IO::pure(loop(0))
 }

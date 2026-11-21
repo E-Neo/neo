@@ -1,9 +1,9 @@
-// `IO` actions are values. `io_bind` sequences them; `io_pure` produces a
+// `IO` actions are values. `IO::bind` sequences them; `IO::pure` produces a
 // value. The runtime runs `main`'s action once.
 fn inc(action: IO[U32]): IO[U32] {
-  io_bind(action, fn(x: U32) => io_pure(x + 1u32))
+  IO::bind(action, fn(x: U32) => IO::pure(x + 1u32))
 }
 
 fn main(): IO[U32] {
-  inc(inc(io_pure(40u32)))
+  inc(inc(IO::pure(40u32)))
 }

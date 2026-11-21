@@ -129,7 +129,7 @@ fn term_at(globals: &Globals, names: &mut Vec<String>, tm: &RcTm) -> String {
             term_at(globals, names, b),
             term_at(globals, names, c)
         ),
-        Tm::Refl(a) => format!("refl({})", term_at(globals, names, a)),
+        Tm::Refl(a) => format!("Refl({})", term_at(globals, names, a)),
         Tm::J {
             ty,
             lhs,
@@ -165,8 +165,8 @@ pub fn nat_value(globals: &Globals, enum_name: &str, index: usize, args: &[RcTm]
         return None;
     }
     let info = globals.get_enum("Nat")?;
-    let zero = info.ctors.iter().position(|c| c.name == "zero")?;
-    let succ = info.ctors.iter().position(|c| c.name == "succ")?;
+    let zero = info.ctors.iter().position(|c| c.name == "Zero")?;
+    let succ = info.ctors.iter().position(|c| c.name == "Succ")?;
     if index == zero && args.is_empty() {
         Some(0)
     } else if index == succ && args.len() == 1 {

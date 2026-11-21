@@ -9,16 +9,16 @@ enum Tree {
 
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
 fn count(t: Tree): Nat {
   match t {
-    leaf => zero
-    node(leaf, r) => succ(count(r))
-    node(node(a, b), r) => succ(add(succ(add(count(a), count(b))), count(r)))
+    leaf => Zero
+    node(leaf, r) => Succ(count(r))
+    node(node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
   }
 }
 
@@ -27,5 +27,5 @@ fn sample(): Tree {
 }
 
 fn main(): IO[Nat] {
-  io_pure(count(sample()))
+  IO::pure(count(sample()))
 }

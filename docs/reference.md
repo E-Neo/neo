@@ -41,7 +41,7 @@ The smallest Neo program:
 
 ```neo
 fn main(): IO[Nat] {
-  io_pure(5)
+  IO::pure(5)
 }
 ```
 
@@ -55,9 +55,9 @@ wasmtime hello.wasm                # runs the component: prints 5
 
 `neo build` writes `hello.wasm` next to the input by default.
 
-`main` produces an `IO` action. `io_pure(v)` is an action that produces `v`;
-`io_bind(m, k)` runs `m` and passes its result to the function `k`. Host
-operations are declared with `extern`, such as `stderr.write`. Neo runs
+`main` produces an `IO` action. `IO::pure(v)` is an action that produces `v`;
+`IO::bind(m, k)` runs `m` and passes its result to the function `k`. Host
+operations are declared with `extern`, such as `stderr::write`. Neo runs
 `main`'s action once and prints its result, including `String` results.
 
 ---
@@ -109,7 +109,7 @@ and run to the end of the line:
 
 ```neo
 // This is a comment.
-fn main(): IO[Nat] { io_pure(5) }  // So is this.
+fn main(): IO[Nat] { IO::pure(5) }  // So is this.
 ```
 
 There are no block comments. There are no semicolons.
@@ -131,8 +131,8 @@ fn add(
   b: Nat
 ): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 ```
@@ -145,7 +145,7 @@ An identifier starts with an ASCII letter or `_` and continues with ASCII
 letters, digits, `_`, or `'`:
 
 ```
-x   foo   Nat   succ'   _tmp   x1
+x   foo   Nat   Succ'   _tmp   x1
 ```
 
 The single token `_` is the wildcard, not an identifier.
@@ -154,10 +154,11 @@ The single token `_` is the wildcard, not an identifier.
 
 ```
 enum   fn   let   match   Type   Prop
+as   impl   mod   pub   use
 ```
 
-`refl` is recognised specially in expressions. Everything else — including
-`true`, `false`, `zero`, `nil`, and `unit` — is an ordinary name resolved from
+`Refl` is recognised specially in expressions. Everything else — including
+`True`, `False`, `Zero`, `Nil`, and `Unit` — is an ordinary name resolved from
 the prelude or the program.
 
 ### Numeric literals
@@ -170,7 +171,7 @@ Numeric literals are unsigned decimal integers:
 
 A numeral has no intrinsic type. It takes its type from the expected type:
 
-- in a `Nat` position it elaborates to a `Nat` built from `zero` and `succ`;
+- in a `Nat` position it elaborates to a `Nat` built from `Zero` and `Succ`;
 - in a `U32` position it elaborates to a machine word;
 - in any other position it is rejected.
 
@@ -184,10 +185,10 @@ There is no default. A numeral in a position with no expected type is rejected:
 
 ```neo
 fn id[T: Type](x: T): T { x }
-fn main(): IO[Nat] { io_pure(id(42)) }          // error
-fn main(): IO[U32] { io_pure(id(42u32)) }       // ok
-fn main(): IO[Nat] { io_pure(id[Nat](42)) }     // ok
-fn main(): IO[Nat] { io_pure(id((42 : Nat))) }  // ok
+fn main(): IO[Nat] { IO::pure(id(42)) }          // error
+fn main(): IO[U32] { IO::pure(id(42u32)) }       // Ok
+fn main(): IO[Nat] { IO::pure(id[Nat](42)) }     // Ok
+fn main(): IO[Nat] { IO::pure(id((42 : Nat))) }  // Ok
 ```
 
 A literal with the `u32` suffix pins the type to `U32`:
@@ -240,13 +241,14 @@ remain meaningful. `Bytes` is uninterpreted. `String` results print as text and
 ### Operators and punctuation
 
 ```
-(  )  [  ]  {  }  ,  .  :  =  ==  ->  =>
+(  )  [  ]  {  }  ,  .  ::  :  =  ==  ->  =>
 +  -  *  /  %  &  |  ^  <<  >>  <  <=  >  >=  !=
 ```
 
 `[` and `]` delimit implicit parameter and argument lists. `->` is the
 function-type arrow; `=>` introduces a lambda body or match arm. `.` selects a
-method call or separates a method's type from its name.
+method call. `::` separates the segments of a module path and qualifies a
+constructor by its enum.
 
 `=` is both the `let` binding separator and the equality proposition. `==` and
 `!=` are boolean equality. `//` starts a line comment; `/` is division when it
@@ -260,66 +262,116 @@ Operators are non-associative at the comparison level. See
 
 ## 4. Declarations
 
-A program is a sequence of top-level declarations:
+A program is a sequence of items:
 
 ```neo
+mod name { ... }
+use path::{Name, other as alias, *}
 enum Name { ... }
-extern fn capability.name(parameter, ...): IO[T] = "import"
+extern fn capability(parameter, ...): IO[T] = "import"
 fn name[implicit, ...](parameter, ...): Result { ... }
+impl[implicit, ...] Name[implicit, ...] { ... }
 ```
 
 Rules:
 
-- Only `enum`, `extern fn`, and `fn` may appear at the top level.
-- Type and function names live in one global namespace. Reusing a name is an
-  error, and prelude names are already taken. A method's full name is
-  `Type.name`, so the same simple method name may exist on different types.
-- A name must be declared before it is used. Forward references are errors.
+- `mod`, `use`, `enum`, `extern fn`, `fn`, and `impl` may appear at the top
+  level and inside a module. `pub` may prefix `mod`, `use`, `enum`, `extern
+  fn`, and `fn`; `impl` blocks are never public, but their methods may be.
+- Modules and their items live in one namespace per module. A module may not
+  redefine a name already used by an item or by a module at the same path.
+- Items are resolved before elaboration and elaborated in dependency order, so
+  a module may refer to an item declared later in the same module.
 - The only recursion available is a function calling **itself**. Mutual
   recursion is not supported.
-- Definitions (`enum`, `fn`) cannot be nested. Function bodies are blocks,
-  which may contain `let` bindings and expressions.
+- Definitions may be nested inside modules. Function bodies are blocks, which
+  may contain `let` bindings and expressions.
 
-For example, `add` must precede `mul`:
+For example, `add` may precede `mul` or follow it:
 
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
 fn mul(a: Nat, b: Nat): Nat {
   match a {
-    zero => zero
-    succ(p) => add(b, mul(p, b))
+    Zero => Zero
+    Succ(p) => add(b, mul(p, b))
   }
 }
 ```
 
-Because prelude constructors already occupy names, this is an error:
+### Modules and visibility
+
+`mod name { ... }` groups items. `::` reaches an item through a path:
 
 ```neo
-fn and(a: Bool, b: Bool): Bool { ... }  // `and` is already defined
+mod geometry {
+  pub enum Shape {
+    Circle(U32)
+    Square(U32)
+  }
+
+  pub fn area(s: Shape): U32 {
+    match s {
+      Circle(r) => r * r * 3u32
+      Square(w) => w * w
+    }
+  }
+}
+
+fn main(): U32 {
+  geometry::area(geometry::Shape::Circle(2u32))
+}
 ```
 
-The prelude's `and` is the constructor of `And[P, Q]`. Use another name such
-as `both`.
+- A `use` path is resolved from the program root unless it starts with `self`
+  or `super`: `use geometry::Shape::{Circle, Square}` imports constructors,
+  `use geometry::Shape as S` renames a type, and `use geometry::Shape::*`
+  imports every constructor. `pub use` re-exports are not supported.
+- Inside a module, `self::name` names an item of the same module and
+  `super::name` names an item of the enclosing module. A path may start with a
+  module, or with a type when reaching one of its constructors.
+- Items are private by default and visible in their module and its descendants.
+  `pub` makes an item visible everywhere. Methods follow the same rule: a
+  method is private unless declared `pub`.
+- Types and constructors from the prelude are auto-imported. Other prelude
+  items, such as `nat_add`, must be imported with `use nat_add`.
+- Module paths use `::`; `.` is only for method calls. `geometry.area(x)` is
+  therefore not a module access.
+
+An item declared in the current module shadows an auto-imported prelude name.
+Constructors are namespaced, so this is valid:
+
+```neo
+fn Pair(a: Bool, b: Bool): Bool { ... }
+```
+
+The prelude's own `Pair` is `And::Pair`; a local `Pair` hides the simple name
+without changing the constructor.
 
 ### Host capabilities
 
-`extern` declares a capability provided by the runtime:
+`extern` declares a capability provided by the runtime inside a module:
 
 ```neo
-extern fn stderr.write(s: String): IO[Result[Unit, IoError]] =
-  "wasi:cli/stderr@0.2.9#write"
+mod log {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]] =
+    "wasi:cli/stderr@0.2.9#write"
+}
 ```
+
+The prelude already declares `stderr::write` with this import, so ordinary
+programs can call it directly rather than redeclaring it.
 
 Rules:
 
-- The name has a capability namespace: `stderr.write`, not `stderr_write`.
-  The namespace is not a value, so `stderr` alone is an error.
+- The capability is named by its module path: `log::write`. A module is not a
+  value, so `log` alone is an error.
 - There is no body; instead, `= "import"` names the capability explicitly.
 - The result must be `IO[T]`, with no implicit parameters. Parameters must be
   `U32`, `String`, or `Bytes`.
@@ -327,27 +379,24 @@ Rules:
   An unknown import, or a declared type that does not match the registered
   capability type, is an error.
 - Externs are not first-class values. Only a fully applied call is valid:
-  `stderr.write("x")`, never `let f = stderr.write`.
-- `stderr.write` returns `IO[Result[Unit, IoError]]`. The runtime writes the
-  string to standard error and reports `ok(unit)`, `err(closed)`, or
-  `err(failed)`. `failed` covers any other host error; the opaque WASI error
+  `stderr::write("x")`, never `let f = stderr::write`.
+- `stderr::write` returns `IO[Result[Unit, IoError]]`. The runtime writes the
+  string to standard error and reports `Ok(Unit)`, `Err(Closed)`, or
+  `Err(Failed)`. `Failed` covers any other host error; the opaque WASI error
   handle is dropped rather than exposed.
 
 A complete program:
 
 ```neo
-extern fn stderr.write(s: String): IO[Result[Unit, IoError]] =
-  "wasi:cli/stderr@0.2.9#write"
-
 fn exit_code(r: Result[Unit, IoError]): IO[U32] {
   match r {
-    ok(_) => io_pure(0u32)
-    err(_) => io_pure(1u32)
+    Ok(_) => IO::pure(0u32)
+    Err(_) => IO::pure(1u32)
   }
 }
 
 fn main(): IO[U32] {
-  io_bind(stderr.write("hello\n"), exit_code)
+  IO::bind(stderr::write("hello\n"), exit_code)
 }
 ```
 
@@ -428,14 +477,14 @@ IO[List[Nat]]
 ```
 
 `IO[T]` lives in the same universe as `T`. It has no constructors, no matcher,
-and no `run`; an action is built with `io_pure(v)`, `io_bind(m, k)`, or a
+and no `run`; an action is built with `IO::pure(v)`, `IO::bind(m, k)`, or a
 saturated `extern` call. The runtime runs `main`'s action once. `T` must be a
 type, not a proposition.
 
 ### Equality types
 
 ```neo
-zero = zero
+Zero = Zero
 add(2, 3) = 5
 ```
 
@@ -464,8 +513,8 @@ An enum declares an inductive family:
 
 ```neo
 enum Nat {
-  zero
-  succ(Nat)
+  Zero
+  Succ(Nat)
 }
 ```
 
@@ -508,8 +557,8 @@ syntax.
 
 ```neo
 enum Maybe[T: Type] {
-  none
-  some(T)
+  None
+  Some(T)
 }
 ```
 
@@ -517,7 +566,7 @@ this is an error:
 
 ```neo
 fn bad(): Nat {
-  let m = some(zero)     // cannot infer the type arguments of `some`
+  let m = Some(Zero)     // cannot infer the type arguments of `Some`
   0
 }
 ```
@@ -526,12 +575,12 @@ The expected type must be known:
 
 ```neo
 fn five(): Maybe[Nat] {
-  some(5)
+  Some(5)
 }
 
 fn main(): IO[Nat] {
   let m = five()
-  io_pure(0)
+  IO::pure(0)
 }
 ```
 
@@ -569,8 +618,8 @@ Named fields and explicit result types let you write indexed types:
 
 ```neo
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
+  vnil : Vec[T, Zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn two(): Vec[Nat, 2] {
@@ -579,7 +628,7 @@ fn two(): Vec[Nat, 2] {
 ```
 
 Here `m` is an ordinary runtime field that records the length of the tail,
-and the constructor's result type connects it to `succ(m)`. Because `Vec` has
+and the constructor's result type connects it to `Succ(m)`. Because `Vec` has
 parameters, `vcons(...)` must be used where the expected type is known.
 
 Indexed families support **index refinement**. Matching refines both constructor
@@ -588,19 +637,19 @@ Constructors whose result indices cannot match become impossible branches:
 
 ```neo
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
+  vnil : Vec[T, Zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
-fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
+fn tail[T: Type, n: Nat](v: Vec[T, Succ(n)]): Vec[T, n] {
   match v {
     vcons(m, x, xs) => xs
   }
 }
 ```
 
-The scrutinee `Vec[Nat, succ(n)]` cannot be built by `vnil`, so the `vnil` arm
-may be omitted. In the `vcons` branch, the equation `succ(m) = succ(n)`
+The scrutinee `Vec[Nat, Succ(n)]` cannot be built by `vnil`, so the `vnil` arm
+may be omitted. In the `vcons` branch, the equation `Succ(m) = Succ(n)`
 refines the field `m` to `n`, so `xs` has type `Vec[Nat, n]`. An arm written for
 an impossible constructor is accepted but never checked, and the generated code
 omits it.
@@ -611,15 +660,15 @@ work directly on a bare index:
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -631,10 +680,10 @@ fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, 
 }
 ```
 
-In the `vnil` branch of `length`, the equation `n = zero` refines `n`; in the
-`vcons` branch it refines `n` to `succ(m)`. In `append`, the `vcons` branch
-learns `n = succ(k)`, so the constructed vector has index
-`succ(add(k, m))`, convertible to `add(succ(k), m)`.
+In the `vnil` branch of `length`, the equation `n = Zero` refines `n`; in the
+`vcons` branch it refines `n` to `Succ(m)`. In `append`, the `vcons` branch
+learns `n = Succ(k)`, so the constructed vector has index
+`Succ(add(k, m))`, convertible to `add(Succ(k), m)`.
 
 Indexed families are still limited:
 
@@ -698,8 +747,8 @@ Example:
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 ```
@@ -713,8 +762,8 @@ fn add(a: Nat, b: Nat): Nat {
 ```neo
 fn replicate[T: Type](n: Nat, x: T): List[T] {
   match n {
-    zero => nil
-    succ(p) => cons(x, replicate(p, x))
+    Zero => Nil
+    Succ(p) => Cons(x, replicate(p, x))
   }
 }
 ```
@@ -730,15 +779,15 @@ its own line, followed by exactly one tail expression:
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
 fn main(): IO[Nat] {
   let x: Nat = 2
   let y: Nat = 3
-  io_pure(add(x, y))
+  IO::pure(add(x, y))
 }
 ```
 
@@ -750,7 +799,7 @@ fn main(): IO[Nat] {
   `let x = 42u32`.
 - A binding annotation is parsed at comparison precedence, so a function type
   or equality type in an annotation must be parenthesized:
-  `let f: (fn(x: Nat) -> Nat) = g` and `let p: (zero = zero) = refl`.
+  `let f: (fn(x: Nat) -> Nat) = g` and `let p: (Zero = Zero) = Refl`.
 - The value of a block is the value of its final expression.
 - A block is itself an expression, so it can appear anywhere an expression is
   allowed.
@@ -759,8 +808,8 @@ A parameterised constructor needs a known result type. Annotate the binding:
 
 ```neo
 fn main(): IO[Nat] {
-  let m: List[Nat] = cons(5, nil)
-  io_pure(0)
+  let m: List[Nat] = Cons(5, Nil)
+  IO::pure(0)
 }
 ```
 
@@ -768,12 +817,12 @@ Alternatively, use a helper function with a known return type:
 
 ```neo
 fn five(): List[Nat] {
-  cons(5, nil)
+  Cons(5, Nil)
 }
 
 fn main(): IO[Nat] {
   let m = five()
-  io_pure(0)
+  IO::pure(0)
 }
 ```
 
@@ -847,10 +896,10 @@ name may be omitted: `fn(Nat) -> Nat` or `fn[Type](x: x) -> x`.
 ### Lambdas
 
 ```neo
-fn(x: Nat) => succ(x)
+fn(x: Nat) => Succ(x)
 fn[T: Type](x: T) => x
 fn(a: Nat, b: Nat) => add(a, b)
-fn(Nat) => zero
+fn(Nat) => Zero
 ```
 
 A lambda may bind implicit parameters with `[]`; calls to the resulting
@@ -864,7 +913,7 @@ fn apply(f: fn(x: Nat) -> Nat, x: Nat): Nat {
 }
 
 fn main(): IO[Nat] {
-  io_pure(apply(fn(y: Nat) => succ(y), 3))
+  IO::pure(apply(fn(y: Nat) => Succ(y), 3))
 }
 ```
 
@@ -872,7 +921,7 @@ Lambdas are for parameters. A zero-argument function is written as a
 declaration:
 
 ```neo
-fn zero(): Nat {
+fn Zero(): Nat {
   0
 }
 ```
@@ -881,19 +930,22 @@ fn zero(): Nat {
 
 ### Methods
 
-A method is a function namespaced by the type of its receiver. Declare it with
-a dotted name; the first explicit parameter is the receiver and must have that
-type:
+A method is a function declared inside an `impl` block. The first explicit
+parameter is the receiver and must have the impl target's type:
 
 ```neo
-fn String.concat(self: String, other: String): String {
-  str_concat(self, other)
+impl String {
+  pub fn concat(self: String, other: String): String {
+    str_concat(self, other)
+  }
 }
 
-fn List.length[T: Type](xs: List[T]): Nat {
-  match xs {
-    nil => zero
-    cons(_, rest) => succ(rest.length())
+impl[T: Type] List[T] {
+  pub fn length(xs: List[T]): Nat {
+    match xs {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.length())
+    }
   }
 }
 ```
@@ -906,9 +958,16 @@ xs.length()
 xs.length[Nat]()
 ```
 
-- Implicit parameters such as `T` are declared before the receiver.
+- `impl Type { ... }` adds methods to an enum or a primitive type. The same
+  type may have several `impl` blocks, but a method name may only be defined
+  once for that type.
+- `impl[T: Type] List[T] { ... }` declares the type parameters once and passes
+  them to every method as implicit parameters. The impl target must apply the
+  impl's own type parameters in order.
 - The receiver's type head selects the method, so `String.length`,
   `Bytes.length`, and `List.length` can coexist. Dispatch is static.
+- Methods are private unless declared `pub`; a private method is callable only
+  from its module and that module's descendants.
 - The receiver's type must be known before the method is selected, so the
   receiver is elaborated without an expected type. A bare type variable has no
   methods; annotate it. A bare numeral needs an ascription such as
@@ -933,7 +992,7 @@ declared twice.
 Parentheses group expressions:
 
 ```neo
-(fn(x: Nat) => succ(x))(3)
+(fn(x: Nat) => Succ(x))(3)
 ```
 
 ### Numbers and operators
@@ -980,8 +1039,8 @@ If both operands are bare numerals and there is no expected numeric type, the
 operator is rejected:
 
 ```neo
-fn main(): IO[Bool] { io_pure(1 < 2) }     // error: cannot infer the numeric type
-fn main(): IO[Bool] { io_pure(1u32 < 2) }  // ok
+fn main(): IO[Bool] { IO::pure(1 < 2) }     // error: cannot infer the numeric type
+fn main(): IO[Bool] { IO::pure(1u32 < 2) }  // Ok
 ```
 
 `==` and `!=` are boolean equality. They are not the equality proposition; that
@@ -1027,8 +1086,8 @@ comparison reduces during elaboration:
 ```neo
 fn pick(): Nat {
   match 1u32 < 2u32 {
-    true => 10
-    false => 20
+    True => 10
+    False => 20
   }
 }
 ```
@@ -1086,8 +1145,8 @@ An error carries the byte index where the first invalid sequence starts:
 
 ```neo
 match b"a\xff".to_str() {
-  ok(text) => text
-  err(invalid_utf8(index)) => ...
+  Ok(text) => text
+  Err(Invalid(index)) => ...
 }
 ```
 
@@ -1131,8 +1190,8 @@ Example:
 ```neo
 fn pred(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(p) => p
+    Zero => Zero
+    Succ(p) => p
   }
 }
 ```
@@ -1142,10 +1201,10 @@ fn pred(n: Nat): Nat {
 ```
 _                        wildcard
 x                        variable binder
-zero                     nullary constructor
-succ(p)                  constructor with sub-patterns
-cons(_, t)               wildcard field
-cons(succ(k), rest)      nested constructor pattern
+Zero                     nullary constructor
+Succ(p)                  constructor with sub-patterns
+Cons(_, t)               wildcard field
+Cons(Succ(k), rest)      nested constructor pattern
 ```
 
 Patterns nest arbitrarily. A nested pattern compiles to an inner `match` on the
@@ -1154,10 +1213,10 @@ field, using the same index refinement as an ordinary match:
 ```neo
 fn classify(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(zero) => 1
-    succ(succ(zero)) => 2
-    succ(succ(succ(k))) => 3
+    Zero => Zero
+    Succ(Zero) => 1
+    Succ(Succ(Zero)) => 2
+    Succ(Succ(Succ(k))) => 3
   }
 }
 ```
@@ -1167,9 +1226,9 @@ Multiple arms for one constructor are allowed and checked in order:
 ```neo
 fn small(xs: List[Nat]): Nat {
   match xs {
-    nil => zero
-    cons(zero, rest) => zero
-    cons(succ(k), rest) => k
+    Nil => Zero
+    Cons(Zero, rest) => Zero
+    Cons(Succ(k), rest) => k
   }
 }
 ```
@@ -1192,7 +1251,7 @@ fn force(n: Nat): Nat {
 ```
 
 - If that single variable's name is a nullary constructor, it is treated as
-  the constructor, not as a binder. For example, a lone `zero => ...` arm is a
+  the constructor, not as a binder. For example, a lone `Zero => ...` arm is a
   constructor pattern for `Nat`, and the match is then rejected as
   non-exhaustive. Use `_` or a different name for an irrefutable arm.
 
@@ -1201,10 +1260,10 @@ fn force(n: Nat): Nat {
 If the expected result type is known and the scrutinee is a variable, the
 result type is abstracted over that variable, so it may mention it. Indices are
 refined from the scrutinee type (see
-[indexed families](#indexed-families)): solving `succ(m) = succ(n)` gives the
+[indexed families](#indexed-families)): solving `Succ(m) = Succ(n)` gives the
 branch field `m` the value `n`, and field types that mention `m` are rewritten
-accordingly. Solving `succ(m) = n` refines the context parameter `n` to
-`succ(m)`, so later branches and recursive calls see the refined type.
+accordingly. Solving `Succ(m) = n` refines the context parameter `n` to
+`Succ(m)`, so later branches and recursive calls see the refined type.
 
 Refinement is first-order and total. It does not guess: a stuck index such as
 `pred(n)`, or an equation that would make an index depend on itself, is
@@ -1213,19 +1272,19 @@ rejected instead of being assumed.
 ### Matching on equality proofs
 
 A match on a proof of `x = y` is special. It takes exactly one arm, whose
-pattern is `refl` or `_`:
+pattern is `Refl` or `_`:
 
 ```neo
 fn sym[T: Type](x: T, y: T, p: x = y): y = x {
   match p {
-    refl => refl
+    Refl => Refl
   }
 }
 ```
 
 The arm is checked against a motive. If the expected type is written in terms
 of the right-hand side `y`, that occurrence is abstracted to the motive
-argument; the `refl` arm is then checked at the left-hand side `x`, and the
+argument; the `Refl` arm is then checked at the left-hand side `x`, and the
 whole match has the expected type with `y` in place. This is motive-based
 equality elimination (`J`), not textual replacement.
 See [section 9](#9-equality-and-proofs).
@@ -1234,9 +1293,9 @@ Abstraction is capture-avoiding, so it works under binders. For example, an
 expected type that mentions `x` inside a function type is abstracted too:
 
 ```neo
-fn h(x: Nat, p: x = zero): fn(y: Nat) -> zero = x {
+fn h(x: Nat, p: x = Zero): fn(y: Nat) -> Zero = x {
   match p {
-    refl => fn(y: Nat) => refl
+    Refl => fn(y: Nat) => Refl
   }
 }
 ```
@@ -1253,34 +1312,34 @@ not found; that case needs an explicit helper.
 `=` is a built-in homogeneous equality proposition:
 
 ```neo
-zero = zero
+Zero = Zero
 add(2, 3) = 5
 ```
 
 The type of the left side determines the type of the right side; both must be
 the same type.
 
-### `refl`
+### `Refl`
 
-`refl` proves `x = y` when `x` and `y` are definitionally equal. It is only
+`Refl` proves `x = y` when `x` and `y` are definitionally equal. It is only
 valid where the expected type is a known equality:
 
 ```neo
-fn refl_zero(): zero = zero {
-  refl
+fn refl_zero(): Zero = Zero {
+  Refl
 }
 ```
 
-Writing `refl` in an inference position is an error:
+Writing `Refl` in an inference position is an error:
 
 ```
-`refl` needs an expected equality type; use it where the type is known
+`Refl` needs an expected equality type; use it where the type is known
 ```
 
 If the sides are not convertible:
 
 ```
-`refl` cannot prove `zero = succ(zero)` (sides are not equal)
+`Refl` cannot prove `Zero = Succ(Zero)` (sides are not equal)
 ```
 
 ### Proving with recursive matches
@@ -1291,16 +1350,16 @@ as `induction` (using the `sym` defined above):
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
-fn add_zero(a: Nat): add(a, zero) = a {
+fn add_zero(a: Nat): add(a, Zero) = a {
   match a {
-    zero => refl
-    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
-      refl => refl
+    Zero => Refl
+    Succ(p) => match sym(add(p, Zero), p, add_zero(p)) {
+      Refl => Refl
     }
   }
 }
@@ -1311,14 +1370,14 @@ There are no tactics, no `theorem` keyword, and no `forall`. A theorem is a
 
 ### What can be eliminated
 
-- Equality proofs (`match p { refl => ... }`) may produce any type, including
+- Equality proofs (`match p { Refl => ... }`) may produce any type, including
   computational data. The proof is erased at run time.
 - A proposition enum (`And`, `Or`, `Exists`, `True`) is intended for
   proof-level computation only. The kernel enforces this: eliminating such a
   value into a computational type is rejected (large elimination).
 - The exception is the *singleton* rule. A `Prop` enum with no constructors
   (`False`), or with exactly one constructor whose fields are all propositions
-  (for example `x = y` with its `refl` constructor), may be eliminated into any
+  (for example `x = y` with its `Refl` constructor), may be eliminated into any
   type. This is what makes equality proofs usable as ordinary values.
 - `False`, which has no constructors, is eliminated with a zero-arm match.
   The expected result type must be known.
@@ -1326,17 +1385,17 @@ There are no tactics, no `theorem` keyword, and no `forall`. A theorem is a
 ### Proof erasure
 
 At run time, types and type-level terms carry no information. Equality proofs
-and `J` compile to their `refl` case. A proof can be bound and ignored:
+and `J` compile to their `Refl` case. A proof can be bound and ignored:
 
 ```neo
 fn main(): IO[Nat] {
   let proof = add_zero(3)
-  io_pure(7)
+  IO::pure(7)
 }
 ```
 
-Proposition-enum values such as `trivial` are ordinary runtime values at
-Stage 0; this is why `fn main(): IO[True] { io_pure(trivial) }` can print `trivial`.
+Proposition-enum values such as `Trivial` are ordinary runtime values at
+Stage 0; this is why `fn main(): IO[True] { IO::pure(Trivial) }` can print `Trivial`.
 
 ### Proof irrelevance
 
@@ -1368,8 +1427,8 @@ Accepted:
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 ```
@@ -1384,13 +1443,13 @@ fn bad(n: Nat): Nat {
 }
 
 fn bad2(n: Nat): Nat {
-  bad2(succ(n))             // increases
+  bad2(Succ(n))             // increases
 }
 
 fn bad3(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(p) => bad3(succ(p))  // non-variable expression containing a smaller value
+    Zero => Zero
+    Succ(p) => bad3(Succ(p))  // non-variable expression containing a smaller value
   }
 }
 ```
@@ -1507,65 +1566,66 @@ scope. They are shown for reference; do not redeclare them in a program.
 
 ```neo
 enum Nat {
-  zero
-  succ(Nat)
+  Zero
+  Succ(Nat)
 }
 
 enum Bool {
-  false
-  true
+  False
+  True
 }
 
 enum Unit {
-  unit
+  Unit
 }
 
 enum List[T: Type] {
-  nil
-  cons(T, List[T])
+  Nil
+  Cons(T, List[T])
 }
 
 enum False : Prop {
 }
 
 enum True : Prop {
-  trivial
+  Trivial
 }
 
 enum And[P: Prop, Q: Prop] : Prop {
-  and(P, Q)
+  Pair(P, Q)
 }
 
 enum Or[P: Prop, Q: Prop] : Prop {
-  or_left(P)
-  or_right(Q)
+  Left(P)
+  Right(Q)
 }
 
 enum Exists[T: Type, P: fn(x: T) -> Prop] : Prop {
-  exists(x: T, P(x))
+  Witness(x: T, P(x))
 }
 
 enum Option[T: Type] {
-  none
-  some(T)
+  None
+  Some(T)
 }
 
 enum Result[T: Type, E: Type] {
-  ok(T)
-  err(E)
+  Ok(T)
+  Err(E)
 }
 
 enum Utf8Error {
-  invalid_utf8(U32)
+  Invalid(U32)
 }
 
 enum IoError {
-  closed
-  failed
+  Closed
+  Failed
 }
 ```
 
-The prelude also defines these numeric, boolean, and unit functions:
+The prelude also defines these numeric, boolean, and unit functions. They are
+not auto-imported; write `use nat_add` (and so on) to bring one into scope:
 
 ```neo
 fn bool_not(b: Bool): Bool
@@ -1593,37 +1653,56 @@ fn nat_mod2(a: Nat): Nat
 
 fn unit_eq(a: Unit, b: Unit): Bool
 fn unit_ne(a: Unit, b: Unit): Bool
+```
 
-fn String.length(self: String): U32
-fn String.slice(self: String, start: U32, end: U32): String
-fn String.concat(self: String, other: String): String
-fn String.to_bytes(self: String): Bytes
+Text methods are declared with `impl` blocks:
 
-fn Bytes.length(self: Bytes): U32
-fn Bytes.slice(self: Bytes, start: U32, end: U32): Bytes
-fn Bytes.concat(self: Bytes, other: Bytes): Bytes
-fn Bytes.get(self: Bytes, index: U32): U32
-fn Bytes.to_str(self: Bytes): Result[String, Utf8Error]
+```neo
+impl String {
+  pub fn length(self: String): U32
+  pub fn slice(self: String, start: U32, end: U32): String
+  pub fn concat(self: String, other: String): String
+  pub fn to_bytes(self: String): Bytes
+}
+
+impl Bytes {
+  pub fn length(self: Bytes): U32
+  pub fn slice(self: Bytes, start: U32, end: U32): Bytes
+  pub fn concat(self: Bytes, other: Bytes): Bytes
+  pub fn get(self: Bytes, index: U32): U32
+  pub fn to_str(self: Bytes): Result[String, Utf8Error]
+}
+```
+
+The prelude also declares the `stderr` module:
+
+```neo
+mod stderr {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]]
+}
 ```
 
 Notes:
 
-- A numeral in a `Nat` position desugars to `zero` and `succ`; in a `U32`
+- A numeral in a `Nat` position desugars to `Zero` and `Succ`; in a `U32`
   position it is a primitive literal. The `u32` suffix pins `U32`.
 - `String` and `Bytes` literals and operations are primitive; their public
   surface is the method set in [text methods](#text-methods).
 - `List` is `List[T]`, not a built-in vector; it is a linked list.
 - `Option` and `Result` are ordinary enums. `main`'s action may produce either;
-  both backends print constructors as `some(3)`, `ok("x")`, or
-  `err(invalid_utf8(2))`.
+  both backends print constructors as `Some(3)`, `Ok("x")`, or
+  `Err(Invalid(2))`.
 - `And`, `Or`, `Exists`, `True`, and `False` are propositions (`Prop`).
-- Constructor names are global. Avoid `and` if you also want a Boolean
-  conjunction function; name it `both` instead.
-- `U32`, `String`, `Bytes`, the internal `u32_*` operations, and the low-level
-  `str_*`/`bytes_*` operations are primitive and are not declared in this list.
+- Types and constructors are auto-imported by their simple names. Because
+  `Bool`'s `True` and the proposition `True` share a spelling, a bare `True`
+  in a position where the expected type is not known is ambiguous; write
+  `Bool::True` or qualify it.
+- `U32`, `String`, `Bytes`, the `u32_*` operations, and the low-level
+  `str_*`/`bytes_*` operations are primitive. The `u32_*` names are internal
+  and report the corresponding operator; `str_*` and `bytes_*` cannot be
+  written in a program at all.
 - `Nat` arithmetic is provided by the `nat_*` prelude functions and the infix
-  operators; `U32` uses the same operators over primitive machine words. The
-  `u32_*` names are internal and cannot be written in a program.
+  operators; `U32` uses the same operators over primitive machine words.
 
 ---
 
@@ -1635,7 +1714,7 @@ Notes:
 
 ```neo
 fn main(): IO[U32] {
-  io_pure(0u32)
+  IO::pure(0u32)
 }
 ```
 
@@ -1672,14 +1751,14 @@ A `main` whose type is not `IO[T]` is rejected with
 Values print with surface constructor names and without type parameters:
 
 ```neo
-cons(2, cons(1, cons(0, nil)))     // List[Nat]
-cons(5, nil)                       // List[Nat]
-pair(4, true)
-unit
-true
+Cons(2, Cons(1, Cons(0, Nil)))     // List[Nat]
+Cons(5, Nil)                       // List[Nat]
+pair(4, True)
+Unit
+True
 42                                 // Nat numerals are printed in decimal
 42                                 // U32 values print the same, without the suffix
-trivial                            // True
+Trivial                            // True
 "hello"                            // String prints as raw text
 b"\x00\xff"                        // Bytes print as escaped bytes
 ```
@@ -1709,13 +1788,13 @@ wasmtime program.wasm
 
 Only functions reachable from `main` are compiled. Unused proofs and type-level
 functions do not affect code generation. Types and type-level terms are erased;
-equality proofs and `J` reduce to their `refl` case. Proposition-enum values
+equality proofs and `J` reduce to their `Refl` case. Proposition-enum values
 remain ordinary values and can be printed. The runtime allocates with a bump
 allocator; memory grows on demand. There is no garbage collector and no
 reference counting.
 
-The I/O API is `io_pure`, `io_bind`, and the `extern` capabilities in the
-closed registry. This milestone provides `stderr.write`; `argv`, standard
+The I/O API is `IO::pure`, `IO::bind`, and the `extern` capabilities in the
+closed registry. This milestone provides `stderr::write`; `argv`, standard
 input, and files arrive with M4b.3.
 
 ---
@@ -1731,11 +1810,12 @@ neo>
 
 The REPL accepts two kinds of input:
 
-1. **Declarations** starting with `enum `, `extern fn `, or `fn <name>(`. They
-   are added to the current environment:
+1. **Declarations** starting with `mod `, `use `, `enum `, `extern `, `impl `,
+   or `fn <name>(`, optionally prefixed by `pub `. They are added to the current
+   environment:
    ```neo
-   neo> fn inc(x: Nat): Nat { succ(x) }
-   ok
+   neo> fn inc(x: Nat): Nat { Succ(x) }
+   Ok
    neo> inc(4)
    5
    ```
@@ -1780,16 +1860,29 @@ REPL errors are printed and the session continues. The REPL does not require a
 A simplified EBNF. `NEWLINE` is significant outside parentheses.
 
 ```ebnf
-program      ::= { NEWLINE } { decl { NEWLINE } }
+program      ::= { NEWLINE } { item { NEWLINE } }
 
-decl         ::= enum_decl | fn_decl
+item         ::= [ "pub" ] ( mod_decl | use_decl | enum_decl
+                           | extern_decl | fn_decl )
+               | impl_decl
+mod_decl     ::= "mod" IDENT "{" { NEWLINE } { item NEWLINE } "}"
+use_decl     ::= "use" use_tree
+use_tree     ::= path [ "as" IDENT ]
+               | path "::" "*"
+               | path "::" "{" use_tree { "," use_tree } "}"
+path         ::= IDENT { "::" IDENT }
 
 enum_decl    ::= "enum" IDENT [ "[" params "]" ]
                  [ ":" expr ]
                  "{" { NEWLINE } { ctor NEWLINE } "}"
 ctor         ::= IDENT [ "(" fields ")" ] [ ":" expr ]
 
-fn_decl      ::= "fn" [ IDENT "." ] IDENT [ "[" params "]" ] "(" params ")" ":" expr block
+extern_decl  ::= "extern" "fn" IDENT [ "[" params "]" ] "(" params ")"
+                 ":" cmp_expr "=" STRING
+
+fn_decl      ::= "fn" IDENT [ "[" params "]" ] "(" params ")" ":" expr block
+impl_decl    ::= "impl" [ "[" params "]" ] app
+                 "{" { NEWLINE } { [ "pub" ] fn_decl NEWLINE } "}"
 
 params       ::= [ param { "," param } ]
 param        ::= IDENT ":" expr
@@ -1821,7 +1914,7 @@ postfix      ::= "[" args "]"
                | "." IDENT [ "[" args "]" ] "(" args ")"
 args         ::= [ expr { "," expr } ]
 
-atom         ::= IDENT
+atom         ::= IDENT { "::" IDENT }
                | NUMERAL
                | STRING
                | BYTES
@@ -1837,8 +1930,7 @@ match_expr   ::= "match" expr "{" { NEWLINE } { arm NEWLINE } "}"
 arm          ::= pattern "=>" expr
 
 pattern      ::= "_"
-               | IDENT
-               | IDENT "(" [ pattern { "," pattern } ] ")"
+               | IDENT { "::" IDENT } [ "(" [ pattern { "," pattern } ] ")" ]
 ```
 
 Notes:
@@ -1850,18 +1942,19 @@ Notes:
   `b"..."` byte literal (type `Bytes`).
 - A final constructor or match arm may be followed by `}` instead of a
   newline.
-- A bare `refl` name is parsed as the `refl` expression.
+- A bare `Refl` name is parsed as the `Refl` expression.
 - A lone identifier in a pattern is a binder unless it names a nullary
   constructor of the scrutinee's enum.
 - `[` and `]` delimit implicit parameter and argument lists. An empty `[]`
   list is rejected.
 - Newlines inside `[...]` are ignored, just like newlines inside `(...)`.
-- The name in `fn Type.name` is a method declaration; its first explicit
-  parameter must have type `Type`.
+- A method is declared inside `impl Type { ... }`; its first explicit
+  parameter must have type `Type`. `impl[T: Type] Type[T] { ... }` declares
+  the parameters for all of its methods.
 - A postfix `.name(args)` is a method call. It requires the argument list,
   even when the method takes none: `s.length()`. It cannot be partially
   applied or used as a value.
-- `IO[T]`, `io_pure(e)`, and `io_bind(m, k)` are built-in forms. `IO` takes one
+- `IO[T]`, `IO::pure(e)`, and `IO::bind(m, k)` are built-in forms. `IO` takes one
   type in `[]`; the two operations take their arguments in `()`. Their names
   are reserved and cannot be redeclared at the top level.
 
@@ -1906,7 +1999,9 @@ Common messages:
 | `cannot select a method on type ...` | The receiver's type is not concrete; annotate it. |
 | `method ... takes N arguments after the receiver, got M` | Supply every explicit argument, including `()`. |
 | `the first parameter of ... must have type ...` | A method's receiver must be the first explicit parameter and have the namespace type. |
-| `... is not a type, so ... cannot be declared as a method` | The part before `.` must be an enum or primitive type. |
+| `... is not an enum or primitive type` | An `impl` target must be an enum or a primitive type. |
+| `... is private here` | The item or method is private to another module; mark it `pub`. |
+| `module ... is private here` | The module is private to another module; mark it `pub`. |
 | `a method call needs (...) arguments` | Write `x.f()`, not `x.f`. |
 | `... is internal; use the ... operator` | The `u32_*` names are not surface syntax; use the operator. |
 | `primitive ... takes N arguments, got M` | A primitive operation must be fully applied. |
@@ -1925,7 +2020,7 @@ Common messages:
 | `recursive function ... is used as a value` | The recursive name escaped; only fully applied calls are allowed. |
 | `recursive call to ... is not structurally decreasing ...` | A recursive call does not descend on a subterm of one fixed parameter. |
 | `constructor ... must return ...` | A constructor's explicit result type must be its declaring enum. |
-| `a match on an equality proof must use the pattern refl` | Equality matches have one `refl`/`_` arm. |
+| `a match on an equality proof must use the pattern Refl` | Equality matches have one `Refl`/`_` arm. |
 | `recursive call ... is not structurally decreasing ...` | Termination check failed. |
 | `... is not strictly positive ...` | Positivity check failed. |
 | `this program needs fn main(): IO[T]` | The file has no `main`. |
@@ -1948,8 +2043,9 @@ design:
 - unqualified overloading (`concat(a, b)`), method values (`xs.length`), and
   user-defined operator overloading. Methods are selected only by the
   receiver's type head; see [methods](#methods);
-- modules, imports, namespaces, or multiple files; `::` is reserved for future
-  module qualification;
+- multiple source files and `pub use` re-exports. Single-file `mod` blocks,
+  `use` imports, visibility, and `::` paths are supported; see
+  [modules and visibility](#modules-and-visibility);
 - characters, floats, and general I/O;
 - character-aware string slicing: `slice` indexes bytes;
 - mutual recursion and mutual inductive types;
@@ -1981,20 +2077,20 @@ checked by the test suite.
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
 fn mul(a: Nat, b: Nat): Nat {
   match a {
-    zero => zero
-    succ(p) => add(b, mul(p, b))
+    Zero => Zero
+    Succ(p) => add(b, mul(p, b))
   }
 }
 
 fn main(): IO[Nat] {
-  io_pure(mul(6, 7))
+  IO::pure(mul(6, 7))
 }
 ```
 
@@ -2007,24 +2103,24 @@ Output: `42`.
 ```neo
 fn not(b: Bool): Bool {
   match b {
-    true => false
-    false => true
+    True => False
+    False => True
   }
 }
 
 fn both(a: Bool, b: Bool): Bool {
   match a {
-    true => b
-    false => false
+    True => b
+    False => False
   }
 }
 
 fn main(): IO[Bool] {
-  io_pure(both(not(false), true))
+  IO::pure(both(not(False), True))
 }
 ```
 
-Output: `true`.
+Output: `True`.
 
 ### Generic list append
 
@@ -2033,24 +2129,24 @@ Output: `true`.
 ```neo
 fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   match xs {
-    nil => ys
-    cons(h, t) => cons(h, append(t, ys))
+    Nil => ys
+    Cons(h, t) => Cons(h, append(t, ys))
   }
 }
 
 fn range(n: Nat): List[Nat] {
   match n {
-    zero => nil
-    succ(p) => cons(p, range(p))
+    Zero => Nil
+    Succ(p) => Cons(p, range(p))
   }
 }
 
 fn main(): IO[List[Nat]] {
-  io_pure(append(range(3), range(2)))
+  IO::pure(append(range(3), range(2)))
 }
 ```
 
-Output: `cons(2, cons(1, cons(0, cons(1, cons(0, nil)))))`.
+Output: `Cons(2, Cons(1, Cons(0, Cons(1, Cons(0, Nil)))))`.
 
 ### Closures
 
@@ -2059,8 +2155,8 @@ Output: `cons(2, cons(1, cons(0, cons(1, cons(0, nil)))))`.
 ```neo
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
@@ -2073,7 +2169,7 @@ fn twice(f: fn(x: Nat) -> Nat, x: Nat): Nat {
 }
 
 fn main(): IO[Nat] {
-  io_pure(twice(addn(2), 3))
+  IO::pure(twice(addn(2), 3))
 }
 ```
 
@@ -2098,25 +2194,25 @@ fn area(s: Shape): Nat {
 }
 ```
 
-With `main` returning `io_pure(area(rect(3, 4)))`, the output is `12`.
+With `main` returning `IO::pure(area(rect(3, 4)))`, the output is `12`.
 
 ### Equality proofs
 
 `examples/proofs.neo` (which also defines `add` and `sym`):
 
 ```neo
-fn add_zero(a: Nat): add(a, zero) = a {
+fn add_zero(a: Nat): add(a, Zero) = a {
   match a {
-    zero => refl
-    succ(p) => match sym(add(p, zero), p, add_zero(p)) {
-      refl => refl
+    Zero => Refl
+    Succ(p) => match sym(add(p, Zero), p, add_zero(p)) {
+      Refl => Refl
     }
   }
 }
 
 fn main(): IO[Nat] {
   let proof = add_zero(3)
-  io_pure(7)
+  IO::pure(7)
 }
 ```
 
@@ -2128,21 +2224,21 @@ Output: `7`. The proof is checked and erased.
 
 ```neo
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
+  vnil : Vec[T, Zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -2162,27 +2258,27 @@ fn three(): Vec[Nat, 3] {
 }
 
 fn main(): IO[Nat] {
-  io_pure(length(three()))
+  IO::pure(length(three()))
 }
 ```
 
 The REPL can display `two()` as `vcons(1, 4, vcons(0, 3, vnil))`. The program
 builds because `main`'s action produces `Nat`; a `main` producing `Vec` itself
 is not printable. `length` matches on its implicit index `n`; refinement learns `n` is
-`zero` or `succ(m)` in the two branches, which is what makes the recursive call
-`length(xs)` well typed. `append` learns `n := succ(k)` in its `vcons` branch.
+`Zero` or `Succ(m)` in the two branches, which is what makes the recursive call
+`length(xs)` well typed. `append` learns `n := Succ(k)` in its `vcons` branch.
 Output: `3`.
 
 `examples/indexed_match.neo` shows branch-field refinement:
 
 ```neo
-fn head[T: Type, n: Nat](v: Vec[T, succ(n)]): T {
+fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
     vcons(m, x, xs) => x
   }
 }
 
-fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
+fn tail[T: Type, n: Nat](v: Vec[T, Succ(n)]): Vec[T, n] {
   match v {
     vcons(m, x, xs) => xs
   }
@@ -2191,7 +2287,7 @@ fn tail[T: Type, n: Nat](v: Vec[T, succ(n)]): Vec[T, n] {
 
 The `vnil` constructor is impossible for the scrutinee type, so it is omitted.
 The `m` field is refined to `n`, which gives `xs` the type `Vec[Nat, n]`. With
-`main` returning `io_pure(head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil))))`,
+`main` returning `IO::pure(head(vcons(1, (4 : Nat), vcons(0, (3 : Nat), vnil))))`,
 the output is `4`. The ascriptions are needed because `head`'s type parameters are
 inferred, so the elements have no expected type of their own.
 
@@ -2206,9 +2302,9 @@ enum Tree {
 
 fn count(t: Tree): Nat {
   match t {
-    leaf => zero
-    node(leaf, r) => succ(count(r))
-    node(node(a, b), r) => succ(add(succ(add(count(a), count(b))), count(r)))
+    leaf => Zero
+    node(leaf, r) => Succ(count(r))
+    node(node(a, b), r) => Succ(add(Succ(add(count(a), count(b))), count(r)))
   }
 }
 ```
@@ -2222,8 +2318,8 @@ subterms of `t`. Output: `4`.
 ```neo
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -2235,7 +2331,7 @@ fn append[T: Type, n: Nat, m: Nat](xs: Vec[T, n], ys: Vec[T, m]): Vec[T, add(n, 
 }
 
 fn main(): IO[Nat] {
-  io_pure(length(append(v1(), v2())))
+  IO::pure(length(append(v1(), v2())))
 }
 ```
 
@@ -2248,7 +2344,7 @@ remaining arguments determine the arguments to `length`. Output: `3`.
 
 ```neo
 fn main(): IO[String] {
-  io_pure("hello, world".slice(7, 12).concat("!"))
+  IO::pure("hello, world".slice(7, 12).concat("!"))
 }
 ```
 
@@ -2263,7 +2359,7 @@ world!
 
 ```neo
 fn main(): IO[Bytes] {
-  io_pure(b"neo".concat(b"\x00\xff"))
+  IO::pure(b"neo".concat(b"\x00\xff"))
 }
 ```
 
@@ -2276,10 +2372,12 @@ b"\x6e\x65\x6f\x00\xff"
 `examples/methods.neo` declares methods on `Bool` and a user enum:
 
 ```neo
-fn Bool.not(self: Bool): Bool {
-  match self {
-    false => true
-    true => false
+impl Bool {
+  pub fn not(self: Bool): Bool {
+    match self {
+      False => True
+      True => False
+    }
   }
 }
 
@@ -2288,10 +2386,12 @@ enum Shape {
   rect(U32, U32)
 }
 
-fn Shape.area(self: Shape): U32 {
-  match self {
-    circle(r) => r * r * 3u32
-    rect(w, h) => w * h
+impl Shape {
+  pub fn area(self: Shape): U32 {
+    match self {
+      circle(r) => r * r * 3u32
+      rect(w, h) => w * h
+    }
   }
 }
 ```
@@ -2313,7 +2413,7 @@ all exist at once.
 | `forall (x: T), P x` | `fn(x: T) -> P(x)` |
 | `theorem name: P := proof` | `fn name(): P { proof }` |
 | `induction n` | recursive `match n { ... }` |
-| `if b then x else y` | `match b {`<br>`true => x`<br>`false => y`<br>`}` |
+| `if b then x else y` | `match b {`<br>`True => x`<br>`False => y`<br>`}` |
 | `f(x); g(y)` | one expression per tail; use `let` bindings |
 
 There are no semicolons, no mutable variables, and no tactics.

@@ -1,3 +1,3 @@
 fn main(): IO[Nat] {
-  io_pure(1000001)
+  IO::pure(1000001)
 }

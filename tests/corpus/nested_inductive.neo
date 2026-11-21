@@ -3,5 +3,5 @@ enum Bad {
 }
 
 fn main(): IO[Nat] {
-  io_pure(0)
+  IO::pure(0)
 }

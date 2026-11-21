@@ -3,5 +3,5 @@ fn f[T: Type](x: T): U32 {
 }
 
 fn main(): IO[U32] {
-  io_pure(0)
+  IO::pure(0)
 }

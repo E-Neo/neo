@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::check::{self, Ctx};
 use crate::conv::{conv, conv_ty};
 use crate::core::{
@@ -7,21 +9,82 @@ use crate::core::{
 use crate::env::{CtorInfo, EnumInfo, ExternInfo, GlobalDef, Globals, Sort};
 use crate::eval::{apply_pi, eval, eval_closure, force, vapp};
 use crate::quote::quote;
+use crate::resolve::{self, Mode};
 use crate::surface::*;
 use crate::value::*;
 use neo_common::error::{Error, Result, Span};
 
-/// Elaborate and register every declaration in the program.
+/// Elaborate and register every declaration in a user program.
 pub fn elaborate_program(globals: &mut Globals, program: &Program) -> Result<()> {
-    for decl in &program.decls {
-        match decl {
-            Decl::Enum(e) => elab_enum(globals, e)?,
-            Decl::Extern(e) => elab_extern(globals, e)?,
-            Decl::Fn(f) => elab_fn(globals, f)?,
+    let resolution = resolve::resolve(globals, program, Mode::Program)?;
+    let saved = globals.clone();
+    resolution.commit(globals);
+    match elaborate_resolved(globals, &resolution.program) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            *globals = saved;
+            Err(err)
+        }
+    }
+}
+
+/// Elaborate the prelude and install its auto-import table.
+pub fn elaborate_prelude(globals: &mut Globals, program: &Program) -> Result<()> {
+    let resolution = resolve::resolve(globals, program, Mode::Prelude)?;
+    resolution.commit(globals);
+    elaborate_resolved(globals, &resolution.program)
+}
+
+fn elaborate_resolved(globals: &mut Globals, program: &Program) -> Result<()> {
+    // Enums come first so every constructor and index in a signature is known.
+    for item in &program.items {
+        if let Item::Enum(decl) = item {
+            elab_enum(globals, decl)?;
+        }
+    }
+
+    // Register every signature before any body. Method dispatch only needs a
+    // callee's type, so this removes any dependence on body order.
+    let mut signatures = HashMap::new();
+    for item in &program.items {
+        match item {
+            Item::Extern(decl) => elab_extern(globals, decl)?,
+            Item::Fn(decl) => {
+                let info = elab_fn_signature(globals, decl)?;
+                signatures.insert(fn_global_name(decl), info);
+            }
+            Item::Enum(_) => {}
+            Item::Mod(_) | Item::Use(_) | Item::Impl(_) => {
+                return Err(Error::at(
+                    item_span(item),
+                    "internal: unresolved item reached the elaborator",
+                ));
+            }
+        }
+    }
+
+    for item in &program.items {
+        if let Item::Fn(decl) = item {
+            let name = fn_global_name(decl);
+            let info = signatures
+                .get(&name)
+                .ok_or_else(|| Error::new("internal: missing function signature"))?;
+            elab_fn_body(globals, decl, &name, info)?;
         }
     }
     crate::recursion::check_program(globals)?;
     Ok(())
+}
+
+fn item_span(item: &Item) -> Span {
+    match item {
+        Item::Mod(decl) => decl.span,
+        Item::Use(decl) => decl.span,
+        Item::Enum(decl) => decl.span,
+        Item::Extern(decl) => decl.span,
+        Item::Fn(decl) => decl.span,
+        Item::Impl(decl) => decl.span,
+    }
 }
 
 fn show_sort(sort: Sort) -> String {
@@ -40,7 +103,7 @@ fn reserved_name(name: &str) -> Option<String> {
     if PrimOp::from_name(name).is_some() {
         return Some(format!("`{}` is a primitive operation", name));
     }
-    if matches!(name, "IO" | "io_pure" | "io_bind") {
+    if name == "IO" {
         return Some(format!("`{}` is built in", name));
     }
     None
@@ -62,15 +125,6 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
         return Err(Error::at(
             decl.span,
             format!("`{}` is already defined", decl.name),
-        ));
-    }
-    if let Some(full) = globals.extern_namespace(&decl.name) {
-        return Err(Error::at(
-            decl.span,
-            format!(
-                "`{}` is a capability namespace (`{}`); choose another name",
-                decl.name, full
-            ),
         ));
     }
     if let Some(message) = reserved_name(&decl.name) {
@@ -130,22 +184,14 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
     let mut ctor_infos: Vec<CtorInfo> = Vec::new();
     let mut ctor_singleton_ok = Vec::new();
     for (idx, c) in decl.ctors.iter().enumerate() {
-        if globals.defs.contains_key(&c.name)
-            || globals.enums.contains_key(&c.name)
-            || globals.externs.contains_key(&c.name)
+        let ctor_key = format!("{}::{}", decl.name, c.name);
+        if globals.defs.contains_key(&ctor_key)
+            || globals.enums.contains_key(&ctor_key)
+            || globals.externs.contains_key(&ctor_key)
         {
             return Err(Error::at(
                 c.span,
                 format!("`{}` is already defined", c.name),
-            ));
-        }
-        if let Some(full) = globals.extern_namespace(&c.name) {
-            return Err(Error::at(
-                c.span,
-                format!(
-                    "`{}` is a capability namespace (`{}`); choose another name",
-                    c.name, full
-                ),
             ));
         }
         if ctor_infos.iter().any(|info| info.name == c.name) {
@@ -282,7 +328,7 @@ fn elab_enum_inner(globals: &mut Globals, decl: &EnumDecl) -> Result<()> {
     enum_info.prop_eliminable = prop_eliminable;
     for info in ctor_infos {
         globals.defs.insert(
-            info.name.clone(),
+            format!("{}::{}", decl.name, info.name),
             GlobalDef::Ctor {
                 enum_name: info.enum_name.clone(),
                 index: info.index,
@@ -324,7 +370,8 @@ fn build_sig_type(globals: &Globals, params: &[Param], ret: &Expr) -> Result<FnT
 fn fn_global_name(decl: &FnDecl) -> String {
     match &decl.namespace {
         Some(ns) => format!("{}.{}", ns, decl.name),
-        None => decl.name.clone(),
+        None if decl.module.is_empty() => decl.name.clone(),
+        None => format!("{}::{}", decl.module, decl.name),
     }
 }
 
@@ -381,25 +428,27 @@ fn internal_primitive_error(op: PrimOp, span: Span) -> Option<Error> {
 
 fn elab_extern(globals: &mut Globals, decl: &ExternDecl) -> Result<()> {
     let name = decl.full_name();
-    if PrimTy::from_name(&decl.namespace).is_some() || globals.get_enum(&decl.namespace).is_some() {
-        return Err(Error::at(
-            decl.span,
-            format!(
-                "`{}` is a type, so it cannot be a capability namespace",
-                decl.namespace
-            ),
-        ));
+    if !decl.module.is_empty() {
+        if PrimTy::from_name(&decl.module).is_some() || globals.get_enum(&decl.module).is_some() {
+            return Err(Error::at(
+                decl.span,
+                format!(
+                    "`{}` is a type, so it cannot be a capability namespace",
+                    decl.module
+                ),
+            ));
+        }
+        if globals.defs.contains_key(&decl.module) {
+            return Err(Error::at(
+                decl.span,
+                format!(
+                    "`{}` is already a value; choose another capability namespace",
+                    decl.module
+                ),
+            ));
+        }
     }
-    if globals.defs.contains_key(&decl.namespace) {
-        return Err(Error::at(
-            decl.span,
-            format!(
-                "`{}` is already a value; choose another capability namespace",
-                decl.namespace
-            ),
-        ));
-    }
-    if let Some(message) = reserved_name(&decl.namespace) {
+    if let Some(message) = reserved_name(&decl.name) {
         return Err(Error::at(decl.span, message));
     }
     if globals.defs.contains_key(&name)
@@ -464,7 +513,7 @@ fn elab_extern(globals: &mut Globals, decl: &ExternDecl) -> Result<()> {
     Ok(())
 }
 
-fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
+fn elab_fn_signature(globals: &mut Globals, decl: &FnDecl) -> Result<FnTypeInfo> {
     let name = fn_global_name(decl);
     check_method_decl(globals, decl, &name)?;
     if globals.defs.contains_key(&name)
@@ -476,18 +525,7 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
             format!("`{}` is already defined", name),
         ));
     }
-    if decl.namespace.is_none()
-        && let Some(full) = globals.extern_namespace(&name)
-    {
-        return Err(Error::at(
-            decl.span,
-            format!(
-                "`{}` is a capability namespace (`{}`); choose another name",
-                name, full
-            ),
-        ));
-    }
-    if let Some(message) = reserved_name(&name) {
+    if let Some(message) = reserved_name(&decl.name) {
         return Err(Error::at(decl.span, message));
     }
 
@@ -498,13 +536,7 @@ fn elab_fn(globals: &mut Globals, decl: &FnDecl) -> Result<()> {
         .filter(|(_, _, implicit)| !implicit)
         .count();
     globals.add_fn_placeholder(&name, info.ty.clone(), info.domains.len(), num_explicit);
-
-    let result = elab_fn_body(globals, decl, &name, &info);
-    if result.is_err() {
-        // Do not leave a bodyless placeholder behind after a failed definition.
-        globals.defs.remove(&name);
-    }
-    result
+    Ok(info)
 }
 
 fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, name: &str, info: &FnTypeInfo) -> Result<()> {
@@ -550,15 +582,72 @@ fn elab_fn_body(globals: &mut Globals, decl: &FnDecl, name: &str, info: &FnTypeI
 }
 
 fn elab_type(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<RcTm> {
+    match expr {
+        Expr::Var(name, span) if name.starts_with(resolve::AMBIG_PREFIX) => {
+            let chosen = choose_ambiguous_type(globals, name, *span)?;
+            return elab_type(globals, ctx, &Expr::Var(chosen, *span));
+        }
+        Expr::App {
+            f,
+            implicit,
+            args,
+            span,
+        } => {
+            if let Expr::Var(name, name_span) = &**f
+                && name.starts_with(resolve::AMBIG_PREFIX)
+            {
+                let chosen = choose_ambiguous_type(globals, name, *name_span)?;
+                let rewritten = Expr::App {
+                    f: Box::new(Expr::Var(chosen, *name_span)),
+                    implicit: implicit.clone(),
+                    args: args.clone(),
+                    span: *span,
+                };
+                return elab_type(globals, ctx, &rewritten);
+            }
+        }
+        _ => {}
+    }
     let (tm, ty) = elab_infer(globals, ctx, expr)?;
     check::sort_of_val_in(globals, ctx, &ty)
         .map_err(|e| Error::at(expr.span(), format!("expected a type: {}", e.message)))?;
     Ok(tm)
 }
 
+fn choose_ambiguous_type(globals: &Globals, name: &str, span: Span) -> Result<String> {
+    let simple = name.trim_start_matches(resolve::AMBIG_PREFIX);
+    let mut types: Vec<String> = resolve::ambiguous_candidates(globals, name)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|key| globals.get_enum(key).is_some())
+        .cloned()
+        .collect();
+    types.sort();
+    types.dedup();
+    match types.len() {
+        1 => Ok(types.remove(0)),
+        0 => Err(Error::at(span, format!("`{}` is not a type", simple))),
+        _ => Err(Error::at(
+            span,
+            format!(
+                "`{}` names more than one type ({}); qualify it",
+                simple,
+                types.join(" or ")
+            ),
+        )),
+    }
+}
+
 pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm, V)> {
     match expr {
         Expr::Var(name, span) => elab_var(globals, ctx, name, *span),
+        Expr::Path(segments, span) => Err(Error::at(
+            *span,
+            format!(
+                "internal: unresolved path `{}`; paths are resolved before elaboration",
+                segments.join("::")
+            ),
+        )),
         Expr::Numeral(n, suffix, span) => elab_numeral_infer(*n, *suffix, *span),
         Expr::Str(bytes, _) => Ok((
             prim_lit(PrimLit::Str(std::rc::Rc::from(bytes.as_slice()))),
@@ -601,7 +690,7 @@ pub fn elab_infer(globals: &Globals, ctx: &mut Ctx, expr: &Expr) -> Result<(RcTm
         Expr::Eq(lhs, rhs, _) => elab_eq(globals, ctx, lhs, rhs),
         Expr::Refl(span) => Err(Error::at(
             *span,
-            "`refl` needs an expected equality type; use it where the type is known",
+            "`Refl` needs an expected equality type; use it where the type is known",
         )),
         Expr::Ascribe(e, ty, _) => {
             let tm_ty = elab_type(globals, ctx, ty)?;
@@ -625,11 +714,26 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
     if name == "IO" {
         return Err(Error::at(span, "`IO` expects one parameter in `[]`"));
     }
-    if name == "io_pure" {
-        return Err(Error::at(span, "`io_pure` expects one argument in `()`"));
+    if name == "IO::pure" {
+        return Err(Error::at(span, "`IO::pure` expects one argument in `()`"));
     }
-    if name == "io_bind" {
-        return Err(Error::at(span, "`io_bind` expects two arguments in `()`"));
+    if name == "IO::bind" {
+        return Err(Error::at(span, "`IO::bind` expects two arguments in `()`"));
+    }
+    if name.starts_with(resolve::AMBIG_PREFIX) {
+        let simple = name.trim_start_matches(resolve::AMBIG_PREFIX);
+        let mut candidates = resolve::ambiguous_candidates(globals, name)
+            .map(|c| c.to_vec())
+            .unwrap_or_default();
+        candidates.sort();
+        return Err(Error::at(
+            span,
+            format!(
+                "`{}` is ambiguous (could be {}); use it where the expected type is known",
+                simple,
+                candidates.join(" or ")
+            ),
+        ));
     }
     if let Some(ty) = PrimTy::from_name(name) {
         return Ok((prim_ty(ty), vtype(0)));
@@ -665,12 +769,12 @@ fn elab_var(globals: &Globals, ctx: &Ctx, name: &str, span: Span) -> Result<(RcT
         let ty = eval(globals, &Vec::new(), ty);
         return Ok((const_(name), ty));
     }
-    if let Some(full) = globals.extern_namespace(name) {
+    if globals.is_extern(name) {
         return Err(Error::at(
             span,
             format!(
-                "`{}` is a capability namespace; call `{}` with `(...)`",
-                name, full
+                "`{}` is a host capability; call it with `(...)` arguments",
+                name
             ),
         ));
     }
@@ -961,9 +1065,12 @@ fn elab_app_with(
     {
         match name.as_str() {
             "IO" => return elab_io_ty(globals, ctx, implicit, args, span),
-            "io_pure" => return elab_io_pure(globals, ctx, implicit, args, expected, span),
-            "io_bind" => return elab_io_bind(globals, ctx, implicit, args, expected, span),
+            "IO::pure" => return elab_io_pure(globals, ctx, implicit, args, expected, span),
+            "IO::bind" => return elab_io_bind(globals, ctx, implicit, args, expected, span),
             _ => {}
+        }
+        if globals.is_extern(name) {
+            return elab_extern_call(globals, ctx, name, implicit, args, expected, span);
         }
     }
 
@@ -1073,6 +1180,7 @@ fn elab_method(
     let Expr::Method {
         receiver,
         name,
+        site,
         implicit,
         args,
         span,
@@ -1081,15 +1189,7 @@ fn elab_method(
         return Err(Error::new("internal: expected a method call"));
     };
     let span = *span;
-    if let Expr::Var(ns, _) = &**receiver
-        && ctx.lookup_index(ns).is_none()
-    {
-        let full = format!("{}.{}", ns, name);
-        if globals.is_extern(&full) {
-            return elab_extern_call(globals, ctx, &full, implicit, args, expected, span);
-        }
-    }
-    let method = method_global_name(globals, ctx, receiver, name, span)?;
+    let method = method_global_name(globals, ctx, receiver, name, site, span)?;
     let arity = globals
         .get_fn_num_explicit(&method)
         .ok_or_else(|| Error::at(span, format!("no method `{}` on type", name)))?;
@@ -1124,6 +1224,7 @@ fn method_global_name(
     ctx: &Ctx,
     receiver: &Expr,
     name: &str,
+    site: &str,
     span: Span,
 ) -> Result<String> {
     let mut probe = ctx.clone();
@@ -1148,6 +1249,14 @@ fn method_global_name(
         return Err(Error::at(
             span,
             format!("no method `{}` on type `{}`", name, head),
+        ));
+    }
+    if let Some(vis) = globals.names.visibility.get(&full)
+        && !vis.visible_from(site)
+    {
+        return Err(Error::at(
+            span,
+            format!("method `{}` on `{}` is private here", name, head),
         ));
     }
     Ok(full)
@@ -1759,6 +1868,10 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
         }
         Expr::Refl(span) => elab_refl(globals, ctx, expected, *span),
         Expr::Var(n, span) => {
+            if ctx.lookup_index(n).is_none() && n.starts_with(resolve::AMBIG_PREFIX) {
+                let chosen = choose_ambiguous_name(globals, n, expected, *span)?;
+                return elab_check(globals, ctx, &Expr::Var(chosen, *span), expected);
+            }
             if ctx.lookup_index(n).is_none() && globals.is_constructor(n) {
                 elab_ctor_check(globals, ctx, n, &[], expected, *span)
             } else {
@@ -1771,6 +1884,24 @@ pub fn elab_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) -
             args,
             span,
         } => {
+            if let Expr::Var(n, _) = &**f
+                && ctx.lookup_index(n).is_none()
+                && n.starts_with(resolve::AMBIG_PREFIX)
+            {
+                let chosen = choose_ambiguous_name(globals, n, expected, *span)?;
+                let f = Expr::Var(chosen, f.span());
+                return elab_check(
+                    globals,
+                    ctx,
+                    &Expr::App {
+                        f: Box::new(f),
+                        implicit: implicit.clone(),
+                        args: args.clone(),
+                        span: *span,
+                    },
+                    expected,
+                );
+            }
             if let Expr::Var(n, _) = &**f
                 && ctx.lookup_index(n).is_none()
                 && globals.is_constructor(n)
@@ -1841,6 +1972,47 @@ fn infer_and_check(globals: &Globals, ctx: &mut Ctx, expr: &Expr, expected: &V) 
     Err(Error::at(
         expr.span(),
         format!("type mismatch: expected `{}`, found `{}`", want, found),
+    ))
+}
+
+fn choose_ambiguous_name(
+    globals: &Globals,
+    name: &str,
+    expected: &V,
+    span: Span,
+) -> Result<String> {
+    let simple = name.trim_start_matches(resolve::AMBIG_PREFIX);
+    let mut candidates = resolve::ambiguous_candidates(globals, name)
+        .map(|c| c.to_vec())
+        .unwrap_or_default();
+    if candidates.is_empty() {
+        return Err(Error::at(span, format!("unknown name `{}`", simple)));
+    }
+    candidates.sort();
+    let expected = force(globals, expected.clone());
+    if let Val::Ind(enum_name, _) = &*expected {
+        for key in &candidates {
+            if let Some(info) = globals.get_ctor(key)
+                && &info.enum_name == enum_name
+            {
+                return Ok(key.clone());
+            }
+        }
+    }
+    if matches!(&*expected, Val::Type(_) | Val::Prop) {
+        for key in &candidates {
+            if globals.get_enum(key).is_some() {
+                return Ok(key.clone());
+            }
+        }
+    }
+    Err(Error::at(
+        span,
+        format!(
+            "`{}` is ambiguous (could be {}); use it where the expected type is known",
+            simple,
+            candidates.join(" or ")
+        ),
     ))
 }
 
@@ -2033,14 +2205,14 @@ fn elab_refl(globals: &Globals, ctx: &mut Ctx, expected: &V, span: Span) -> Resu
     let expected = force(globals, expected.clone());
     let (lhs, rhs) = match &*expected {
         Val::Eq(_, lhs, rhs) => (lhs.clone(), rhs.clone()),
-        _ => return Err(Error::at(span, "`refl` can only prove an equality")),
+        _ => return Err(Error::at(span, "`Refl` can only prove an equality")),
     };
     if !conv(globals, ctx.level(), &lhs, &rhs) {
         let l = crate::pretty::show_val(globals, ctx.level(), &lhs);
         let r = crate::pretty::show_val(globals, ctx.level(), &rhs);
         return Err(Error::at(
             span,
-            format!("`refl` cannot prove `{} == {}` (sides are not equal)", l, r),
+            format!("`Refl` cannot prove `{} == {}` (sides are not equal)", l, r),
         ));
     }
     Ok(rc(Tm::Refl(quote(globals, ctx.level(), &lhs))))
@@ -2482,18 +2654,28 @@ fn nat_literal(globals: &Globals, n: u64, span: Span) -> Result<RcTm> {
     let zero = info
         .ctors
         .iter()
-        .position(|c| c.name == "zero")
-        .ok_or_else(|| Error::at(span, "`Nat` must have a `zero` constructor"))?;
+        .position(|c| c.name == "Zero")
+        .ok_or_else(|| Error::at(span, "`Nat` must have a `Zero` constructor"))?;
     let succ = info
         .ctors
         .iter()
-        .position(|c| c.name == "succ")
-        .ok_or_else(|| Error::at(span, "`Nat` must have a `succ` constructor"))?;
+        .position(|c| c.name == "Succ")
+        .ok_or_else(|| Error::at(span, "`Nat` must have a `Succ` constructor"))?;
     let mut tm = rc(Tm::Ctor("Nat".to_string(), zero, Vec::new()));
     for _ in 0..n {
         tm = rc(Tm::Ctor("Nat".to_string(), succ, vec![tm]));
     }
     Ok(tm)
+}
+
+fn simplify_pattern(pattern: &mut Pattern) {
+    if let Pattern::Ctor(name, subpats, _) = pattern {
+        let simple = name.rsplit("::").next().unwrap_or(name).to_string();
+        *name = simple;
+        for subpat in subpats {
+            simplify_pattern(subpat);
+        }
+    }
 }
 
 fn elab_match(
@@ -2545,17 +2727,13 @@ fn elab_match(
         refinements.push(check::refine_ctor(globals, ctx, ctor, &params, &scrut_ty)?);
     }
 
-    // A bare identifier naming a nullary constructor is a constructor pattern,
-    // not a binder.
+    // Resolved patterns carry canonical `Enum::Variant` keys; branch matching
+    // works with the variant names that the kernel stores per enum.
     let arms: Vec<Arm> = arms
         .iter()
         .map(|arm| {
             let mut arm = arm.clone();
-            if let Pattern::Var(n, s) = &arm.pattern
-                && info.ctors.iter().any(|c| c.name == *n && c.num_fields == 0)
-            {
-                arm.pattern = Pattern::Ctor(n.clone(), Vec::new(), *s);
-            }
+            simplify_pattern(&mut arm.pattern);
             arm
         })
         .collect();
@@ -3529,12 +3707,12 @@ fn elab_eq_match(
         ));
     }
     match &arms[0].pattern {
-        Pattern::Var(name, _) if name == "refl" => {}
+        Pattern::Var(name, _) if name == "Refl" => {}
         Pattern::Wild(_) => {}
         _ => {
             return Err(Error::at(
                 arms[0].span,
-                "a match on an equality proof must use the pattern `refl`",
+                "a match on an equality proof must use the pattern `Refl`",
             ));
         }
     }

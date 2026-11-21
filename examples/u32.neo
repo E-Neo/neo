@@ -6,7 +6,7 @@ fn is_even(n: U32): Bool {
 
 fn main(): IO[U32] {
   match is_even(4u32) {
-    true => io_pure(6u32 * 7u32 + 1u32 / 0u32)
-    false => io_pure(0u32 - 1u32)
+    True => IO::pure(6u32 * 7u32 + 1u32 / 0u32)
+    False => IO::pure(0u32 - 1u32)
   }
 }

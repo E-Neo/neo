@@ -150,7 +150,7 @@ impl<'g> Codegen<'g> {
     fn new(globals: &'g Globals) -> Self {
         let succ_index = globals
             .get_enum("Nat")
-            .and_then(|e| e.ctors.iter().position(|c| c.name == "succ"))
+            .and_then(|e| e.ctors.iter().position(|c| c.name == "Succ"))
             .unwrap_or(1) as i32;
         Self {
             globals,
@@ -512,8 +512,8 @@ impl<'g> Codegen<'g> {
     }
 
     fn gen_print_bool(&mut self) {
-        let (t_ptr, t_len) = self.intern("true");
-        let (f_ptr, f_len) = self.intern("false");
+        let (t_ptr, t_len) = self.intern("True");
+        let (f_ptr, f_len) = self.intern("False");
         let pb = self.print_bytes_fn();
         let mut fc = FnCompiler::new(self, 1);
         fc.emit(I::LocalGet(0));
@@ -533,7 +533,7 @@ impl<'g> Codegen<'g> {
     }
 
     fn gen_print_unit(&mut self) {
-        let (ptr, len) = self.intern("unit");
+        let (ptr, len) = self.intern("Unit");
         let pb = self.print_bytes_fn();
         let mut fc = FnCompiler::new(self, 1);
         fc.emit(I::I32Const(ptr));
@@ -1643,10 +1643,10 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
             Tm::Ctor(enum_name, index, args) => self.compile_ctor(enum_name, *index, args)?,
             Tm::App(f, a) => self.compile_app(f, a)?,
             Tm::Match {
-                motive: _,
+                motive,
                 scrut,
                 branches,
-            } => self.compile_match(scrut, branches)?,
+            } => self.compile_match(motive, scrut, branches)?,
             Tm::J { refl_case, .. } => self.compile(refl_case)?,
             Tm::Lam { body, .. } => self.compile_lambda(body)?,
         }
@@ -1696,11 +1696,11 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         self.emit(I::Call(IMPORT_DROP_STREAM));
 
         let globals = self.cg.globals;
-        let ok = ctor_index(globals, "Result", "ok")?;
-        let err = ctor_index(globals, "Result", "err")?;
-        let unit = ctor_index(globals, "Unit", "unit")?;
-        let closed = ctor_index(globals, "IoError", "closed")?;
-        let failed = ctor_index(globals, "IoError", "failed")?;
+        let ok = ctor_index(globals, "Result", "Ok")?;
+        let err = ctor_index(globals, "Result", "Err")?;
+        let unit = ctor_index(globals, "Unit", "Unit")?;
+        let closed = ctor_index(globals, "IoError", "Closed")?;
+        let failed = ctor_index(globals, "IoError", "Failed")?;
 
         self.emit(I::LocalGet(status));
         self.emit(I::I32Eqz);
@@ -2060,16 +2060,29 @@ impl<'a, 'g> FnCompiler<'a, 'g> {
         Ok(())
     }
 
-    fn compile_match(&mut self, scrut: &RcTm, branches: &[crate::core::Branch]) -> Result<()> {
+    fn compile_match(
+        &mut self,
+        motive: &RcTm,
+        scrut: &RcTm,
+        branches: &[crate::core::Branch],
+    ) -> Result<()> {
+        let Tm::Lam { dom, .. } = &**motive else {
+            return Err(Error::new("match motive is not a lambda"));
+        };
+        let Tm::Ind(enum_name, _) = &**dom else {
+            return Err(Error::new("match motive does not range over an enum"));
+        };
+        let enum_name = enum_name.clone();
         let mut entries: Vec<(usize, usize, RcTm)> = Vec::new();
         for b in branches {
             if b.impossible {
                 continue;
             }
-            let ci =
-                self.cg.globals.get_ctor(&b.ctor).ok_or_else(|| {
-                    Error::new(format!("unknown constructor `{}` in match", b.ctor))
-                })?;
+            let ci = self
+                .cg
+                .globals
+                .get_ctor(&format!("{}::{}", enum_name, b.ctor))
+                .ok_or_else(|| Error::new(format!("unknown constructor `{}` in match", b.ctor)))?;
             entries.push((ci.index, b.binders, b.body.clone()));
         }
         entries.sort_by_key(|e| e.0);

@@ -3,5 +3,5 @@
 //
 // `main` prints a byte result as `b"..."` with two hex digits per byte.
 fn main(): IO[Bytes] {
-  io_pure(b"neo".concat(b"\x00\xff"))
+  IO::pure(b"neo".concat(b"\x00\xff"))
 }

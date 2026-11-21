@@ -4,21 +4,21 @@
 // index `n := succ(k)`. The branch may therefore build a vector of index
 // `add(succ(k), m)`, which converts to `succ(add(k, m))` by unfolding `add`.
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
+  vnil : Vec[T, Zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -33,5 +33,5 @@ fn append[T: Type, n: Nat, m: Nat](
 }
 
 fn main(): IO[Nat] {
-  io_pure(length(append(vcons(1, (10 : Nat), vcons(0, (20 : Nat), vnil)), vcons(0, (30 : Nat), vnil))))
+  IO::pure(length(append(vcons(1, (10 : Nat), vcons(0, (20 : Nat), vnil)), vcons(0, (30 : Nat), vnil))))
 }

@@ -4,21 +4,21 @@
 // from the types of the explicit arguments and from the expected type. The
 // explicit form `append[Nat, 1, 2](v1(), v2())` is also accepted.
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
+  vnil : Vec[T, Zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -43,5 +43,5 @@ fn v2(): Vec[Nat, 2] {
 fn main(): IO[Nat] {
   // Both recursive calls omit their implicit arguments. The explicit form
   // `append[Nat, 1, 2](v1(), v2())` is still accepted.
-  io_pure(length(append(v1(), v2())))
+  IO::pure(length(append(v1(), v2())))
 }

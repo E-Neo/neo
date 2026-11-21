@@ -29,8 +29,8 @@ fn main_value(globals: &Globals) -> V {
 
 fn as_nat(globals: &Globals, v: &V) -> u64 {
     let info = globals.get_enum("Nat").unwrap();
-    let zero = info.ctors.iter().position(|c| c.name == "zero").unwrap();
-    let succ = info.ctors.iter().position(|c| c.name == "succ").unwrap();
+    let zero = info.ctors.iter().position(|c| c.name == "Zero").unwrap();
+    let succ = info.ctors.iter().position(|c| c.name == "Succ").unwrap();
     fn go(v: &V, zero: usize, succ: usize) -> u64 {
         match &**v {
             Val::Ctor(name, i, _) if name == "Nat" && *i == zero => 0,
@@ -84,15 +84,17 @@ fn main(): U32 {
 fn generic_list_length() {
     let globals = define(
         r#"
-fn List.length[T: Type](xs: List[T]): Nat {
-  match xs {
-    nil => zero
-    cons(_, rest) => succ(rest.length())
+impl[T: Type] List[T] {
+  pub fn length(xs: List[T]): Nat {
+    match xs {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.length())
+    }
   }
 }
 
 fn main(): Nat {
-  let xs: List[Nat] = cons(1, cons(2, cons(3, nil)))
+  let xs: List[Nat] = Cons(1, Cons(2, Cons(3, Nil)))
   xs.length()
 }
 "#,
@@ -104,15 +106,17 @@ fn main(): Nat {
 fn explicit_implicit_method_argument() {
     let globals = define(
         r#"
-fn List.length[T: Type](xs: List[T]): Nat {
-  match xs {
-    nil => zero
-    cons(_, rest) => succ(rest.length())
+impl[T: Type] List[T] {
+  pub fn length(xs: List[T]): Nat {
+    match xs {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.length())
+    }
   }
 }
 
 fn main(): Nat {
-  let xs: List[Nat] = cons(1, nil)
+  let xs: List[Nat] = Cons(1, Nil)
   xs.length[Nat]()
 }
 "#,
@@ -124,10 +128,12 @@ fn main(): Nat {
 fn user_defined_methods_on_enums() {
     let globals = define(
         r#"
-fn Bool.not(self: Bool): Bool {
-  match self {
-    false => true
-    true => false
+impl Bool {
+  pub fn not(self: Bool): Bool {
+    match self {
+      False => True
+      True => False
+    }
   }
 }
 
@@ -136,17 +142,19 @@ enum Shape {
   rect(U32, U32)
 }
 
-fn Shape.area(self: Shape): U32 {
-  match self {
-    circle(r) => r * r * 3u32
-    rect(w, h) => w * h
+impl Shape {
+  pub fn area(self: Shape): U32 {
+    match self {
+      circle(r) => r * r * 3u32
+      rect(w, h) => w * h
+    }
   }
 }
 
 fn main(): U32 {
-  match false.not() {
-    true => rect(3u32, 4u32).area()
-    false => 0u32
+  match Bool::False.not() {
+    True => rect(3u32, 4u32).area()
+    False => 0u32
   }
 }
 "#,
@@ -161,10 +169,12 @@ fn main(): U32 {
 fn overloaded_names_are_selected_by_receiver_type() {
     let globals = define(
         r#"
-fn List.length[T: Type](xs: List[T]): Nat {
-  match xs {
-    nil => zero
-    cons(_, rest) => succ(rest.length())
+impl[T: Type] List[T] {
+  pub fn length(xs: List[T]): Nat {
+    match xs {
+      Nil => Zero
+      Cons(_, rest) => Succ(rest.length())
+    }
   }
 }
 
@@ -183,8 +193,10 @@ fn main(): U32 {
 fn methods_on_primitive_types() {
     let globals = define(
         r#"
-fn U32.inc(self: U32): U32 {
-  self + 1u32
+impl U32 {
+  pub fn inc(self: U32): U32 {
+    self + 1u32
+  }
 }
 
 fn main(): U32 {
@@ -201,7 +213,7 @@ fn main(): U32 {
 #[test]
 fn rejects_unknown_method() {
     assert_rejected(
-        "fn main(): Nat { zero.length() }",
+        "fn main(): Nat { Zero.length() }",
         "no method `length` on type `Nat`",
     );
 }
@@ -228,7 +240,7 @@ fn main(): U32 { 0 }
 #[test]
 fn rejects_method_without_receiver() {
     assert_rejected(
-        "fn String.length(): U32 { 0 }\nfn main(): U32 { 0 }",
+        "impl String { pub fn nope(): U32 { 0 } }\nfn main(): U32 { 0 }",
         "needs a receiver parameter",
     );
 }
@@ -236,7 +248,7 @@ fn rejects_method_without_receiver() {
 #[test]
 fn rejects_method_with_wrong_receiver_parameter() {
     assert_rejected(
-        "fn String.length(self: Bytes): U32 { 0 }\nfn main(): U32 { 0 }",
+        "impl String { pub fn nope(self: Bytes): U32 { 0 } }\nfn main(): U32 { 0 }",
         "must have type `String`",
     );
 }
@@ -244,8 +256,8 @@ fn rejects_method_with_wrong_receiver_parameter() {
 #[test]
 fn rejects_method_on_non_type_namespace() {
     assert_rejected(
-        "fn Nope.length(self: Nope): U32 { 0 }\nfn main(): U32 { 0 }",
-        "is not a type",
+        "impl Nope { pub fn length(self: Nope): U32 { 0 } }\nfn main(): U32 { 0 }",
+        "is not an enum or primitive type",
     );
 }
 
@@ -253,11 +265,13 @@ fn rejects_method_on_non_type_namespace() {
 fn rejects_duplicate_method() {
     assert_rejected(
         r#"
-fn String.length(self: String): U32 { 0u32 }
-fn String.length(self: String): U32 { 1u32 }
+impl String {
+  pub fn nope(self: String): U32 { 0u32 }
+  pub fn nope(self: String): U32 { 1u32 }
+}
 fn main(): U32 { 0 }
 "#,
-        "`String.length` is already defined",
+        "method `nope` is defined twice",
     );
 }
 
@@ -273,10 +287,12 @@ fn rejects_wrong_method_arity() {
 fn rejects_non_decreasing_method_recursion() {
     assert_rejected(
         r#"
-fn List.loop[T: Type](xs: List[T]): Nat {
-  xs.loop()
+impl[T: Type] List[T] {
+  pub fn loop(xs: List[T]): Nat {
+    xs.loop()
+  }
 }
-fn main(): Nat { zero }
+fn main(): Nat { Zero }
 "#,
         "not structurally decreasing",
     );
@@ -286,8 +302,12 @@ fn main(): Nat { zero }
 fn method_can_return_a_function() {
     let globals = define(
         r#"
-fn Nat.apply_twice(self: Nat): fn(x: Nat) -> Nat {
-  fn(x: Nat) => nat_add(self, nat_add(x, self))
+use nat_add
+
+impl Nat {
+  pub fn apply_twice(self: Nat): fn(x: Nat) -> Nat {
+    fn(x: Nat) => nat_add(self, nat_add(x, self))
+  }
 }
 
 fn main(): Nat {
@@ -306,9 +326,11 @@ enum Box[T: Type] {
   box(T)
 }
 
-fn Box.get[T: Type](self: Box[T]): T {
-  match self {
-    box(n) => n
+impl[T: Type] Box[T] {
+  pub fn get(self: Box[T]): T {
+    match self {
+      box(n) => n
+    }
   }
 }
 
@@ -329,9 +351,11 @@ enum Box[T: Type] {
   box(T)
 }
 
-fn Box.get[T: Type](self: Box[T]): T {
-  match self {
-    box(n) => n
+impl[T: Type] Box[T] {
+  pub fn get(self: Box[T]): T {
+    match self {
+      box(n) => n
+    }
   }
 }
 
@@ -339,6 +363,6 @@ fn main(): Nat {
   box(3).get()
 }
 "#,
-        "cannot infer the type arguments of `box`",
+        "cannot infer the type arguments of `Box::box`",
     );
 }

@@ -73,7 +73,7 @@ fn rejects_lambda_escaped_recursive_call() {
     assert_rejected(
         r#"
 fn boom(n: Nat): Nat {
-  (fn(g: fn(Nat) -> Nat) => g(zero))(boom)
+  (fn(g: fn(Nat) -> Nat) => g(Zero))(boom)
 }
 "#,
         "structurally decreasing",
@@ -86,8 +86,8 @@ fn accepts_structural_recursion() {
         r#"
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 "#,
@@ -100,8 +100,8 @@ fn accepts_smaller_field_through_alias() {
         r#"
 fn f(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(p) => {
+    Zero => Zero
+    Succ(p) => {
       let q = p
       f(q)
     }
@@ -128,10 +128,10 @@ fn rejects_equal_pi_types_with_different_domains() {
     assert_rejected(
         r#"
 fn bad(): (fn(x: Type 0) -> Type 1) = (fn(x: Type 1) -> Type 1) {
-  refl
+  Refl
 }
 "#,
-        "refl",
+        "Refl",
     );
 }
 
@@ -164,8 +164,8 @@ fn accepts_indexed_vec() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 "#,
     );
@@ -176,14 +176,14 @@ fn accepts_indexed_length() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 "#,
@@ -195,14 +195,14 @@ fn accepts_indexed_append() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
@@ -221,14 +221,14 @@ fn accepts_fin_elimination() {
     elaborate_ok(
         r#"
 enum Fin[n: Nat] {
-  fzero(m: Nat) : Fin[succ(m)]
-  fsucc(m: Nat, f: Fin[m]) : Fin[succ(m)]
+  fzero(m: Nat) : Fin[Succ(m)]
+  fsucc(m: Nat, f: Fin[m]) : Fin[Succ(m)]
 }
 
 fn fin_to_nat[n: Nat](f: Fin[n]): Nat {
   match f {
-    fzero(m) => zero
-    fsucc(m, g) => succ(fin_to_nat(g))
+    fzero(m) => Zero
+    fsucc(m, g) => Succ(fin_to_nat(g))
   }
 }
 "#,
@@ -240,11 +240,11 @@ fn accepts_impossible_branch_with_unchecked_body() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
-fn head[T: Type, n: Nat](v: Vec[T, succ(n)]): T {
+fn head[T: Type, n: Nat](v: Vec[T, Succ(n)]): T {
   match v {
     vnil => False
     vcons(m, x, xs) => x
@@ -260,19 +260,19 @@ fn accepts_nested_constructor_patterns() {
         r#"
 fn classify(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(zero) => 1
-    succ(succ(zero)) => 2
-    succ(succ(succ(k))) => 3
+    Zero => Zero
+    Succ(Zero) => 1
+    Succ(Succ(Zero)) => 2
+    Succ(Succ(Succ(k))) => 3
   }
 }
 
 fn heads(xs: List[Nat]): Nat {
   match xs {
-    nil => zero
-    cons(zero, rest) => zero
-    cons(succ(k), cons(x, rest)) => succ(x)
-    cons(succ(k), nil) => k
+    Nil => Zero
+    Cons(Zero, rest) => Zero
+    Cons(Succ(k), Cons(x, rest)) => Succ(x)
+    Cons(Succ(k), Nil) => k
   }
 }
 "#,
@@ -284,14 +284,14 @@ fn accepts_implicit_arguments() {
     elaborate_ok(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -345,7 +345,7 @@ fn rejects_enum_parameters_in_parentheses() {
     assert_rejected(
         r#"
 fn bad(): List(Nat) {
-  nil
+  Nil
 }
 "#,
         "written in `[]`",
@@ -373,7 +373,7 @@ fn rejects_constructor_bracket_arguments() {
     assert_rejected(
         r#"
 fn bad(): List[Nat] {
-  cons[Nat](1, nil)
+  Cons[Nat](1, Nil)
 }
 "#,
         "constructor type arguments are inferred",
@@ -402,8 +402,8 @@ fn rejects_non_exhaustive_nested_pattern() {
         r#"
 fn bad(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(zero) => 1
+    Zero => Zero
+    Succ(Zero) => 1
   }
 }
 "#,
@@ -417,8 +417,8 @@ fn rejects_nested_pattern_with_wrong_arity() {
         r#"
 fn bad(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(succ(zero, zero)) => 1
+    Zero => Zero
+    Succ(Succ(Zero, Zero)) => 1
   }
 }
 "#,
@@ -431,12 +431,12 @@ fn rejects_cyclic_index_refinement() {
     assert_rejected(
         r#"
 enum T[a: Nat, b: Nat] {
-  c(m: Nat) : T[m, succ(m)]
+  c(m: Nat) : T[m, Succ(m)]
 }
 
-fn bad[n: Nat](x: T[succ(n), n]): Nat {
+fn bad[n: Nat](x: T[Succ(n), n]): Nat {
   match x {
-    c(m) => zero
+    c(m) => Zero
   }
 }
 "#,
@@ -450,20 +450,20 @@ fn rejects_non_refinable_index_match() {
         r#"
 fn pred(n: Nat): Nat {
   match n {
-    zero => zero
-    succ(k) => k
+    Zero => Zero
+    Succ(k) => k
   }
 }
 
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn bad[n: Nat](v: Vec[Nat, pred(n)]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => zero
+    vnil => Zero
+    vcons(m, x, xs) => Zero
   }
 }
 "#,
@@ -476,11 +476,11 @@ fn rejects_missing_reachable_indexed_constructor() {
     assert_rejected(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
-fn bad(v: Vec[Nat, zero]): Nat {
+fn bad(v: Vec[Nat, Zero]): Nat {
   match v {
     vcons(m, x, xs) => x
   }
@@ -495,8 +495,8 @@ fn rejects_indexed_constructor_with_wrong_index() {
     assert_rejected(
         r#"
 enum Vec[A: Type, n: Nat] {
-  vnil : Vec[A, zero]
-  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, succ(m)]
+  vnil : Vec[A, Zero]
+  vcons(m: Nat, x: A, xs: Vec[A, m]) : Vec[A, Succ(m)]
 }
 
 fn bad(): Vec[Nat, 1] {
@@ -511,16 +511,20 @@ fn bad(): Vec[Nat, 1] {
 fn rejects_misapplied_text_primitives() {
     assert_rejected(
         r#"fn main(): U32 { str_length("a", "b") }"#,
-        "takes 1 argument",
+        "low-level primitive",
     );
-    assert_rejected(r#"fn f(n: Nat): U32 { str_length(n) }"#, "type mismatch");
+    assert_rejected(r#"fn main(): U32 { "a".length(1) }"#, "takes 0 arguments");
+    assert_rejected(
+        r#"fn f(n: Nat): U32 { n.length() }"#,
+        "no method `length` on type `Nat`",
+    );
     assert_rejected(
         r#"fn main(): Bytes { bytes_get(b"a") }"#,
-        "takes 2 arguments",
+        "low-level primitive",
     );
     assert_rejected(
         r#"fn main(): String { str_slice("abc", 0u32) }"#,
-        "takes 3 arguments",
+        "low-level primitive",
     );
     assert_rejected(r#"fn main(): U32 { bytes_to_str(b"a") }"#, "unknown");
 }
@@ -532,11 +536,11 @@ fn rejects_arithmetic_and_matching_on_text() {
         "requires `Nat` or `U32`",
     );
     assert_rejected(
-        r#"fn f(s: String): Nat { match s { x => zero } }"#,
+        r#"fn f(s: String): Nat { match s { x => Zero } }"#,
         "not an enum value",
     );
     assert_rejected(
-        r#"fn f(s: Bytes): Nat { match s { x => zero } }"#,
+        r#"fn f(s: Bytes): Nat { match s { x => Zero } }"#,
         "not an enum value",
     );
 }
@@ -554,14 +558,14 @@ fn accepts_text_primitives() {
     elaborate_ok(
         r#"
 fn main(): Bool {
-  str_eq(str_concat(str_slice("abc", 1, 2), "!"), "b!")
+  "abc".slice(1, 2).concat("!") == "b!"
 }
 "#,
     );
     elaborate_ok(
         r#"
 fn main(): Bytes {
-  bytes_concat(bytes_slice(b"abc", 0, 1), b"\xff")
+  b"abc".slice(0, 1).concat(b"\xff")
 }
 "#,
     );

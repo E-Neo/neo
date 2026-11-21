@@ -12,7 +12,7 @@ and milestones are in [`docs/bootstrap.md`](docs/bootstrap.md).
 
 Implemented:
 
-- `enum` and `fn` declarations, `match`, equality and `refl`;
+- `enum`, `fn`, `impl`, `mod`, and `use` items, `match`, equality, and `Refl`;
 - immutable `let` bindings with optional annotations;
 - expected-type-directed numerals and `(e : T)` ascription;
 - infix arithmetic, bitwise, shift, comparison, and boolean equality over
@@ -26,8 +26,11 @@ Implemented:
   `Or`, `Exists`);
 - a primitive 32-bit word type `U32` with total arithmetic, bitwise, and
   comparison operations, compiled to unboxed WebAssembly `i32`s;
-- receiver-keyed methods: `fn Type.name(...)` declarations, `x.name(args)`
-  calls with static dispatch, generic receivers, and user-defined methods;
+- modules with nested items, `use` paths, aliases, and constructor globs;
+  private-by-default visibility with `pub`;
+- `impl` blocks and receiver-keyed methods: `impl Type { ... }` declarations,
+  `x.name(args)` calls with static dispatch, generic receivers, and `pub`
+  methods;
 - primitive `String` (UTF-8) and `Bytes` with O(1) length and slicing,
   concatenation, equality, and printing, exposed as methods;
 - prelude `Option` and `Result` types, and checked `Bytes.to_str` with a
@@ -36,8 +39,8 @@ Implemented:
   component.
 
 Not implemented yet: references/ownership (`&T`, `&mut T`, `own T`), arrays
-and growable vectors (`Array[T, n]`, `Vec[T]`), modules, and general I/O. See
-the
+and growable vectors (`Array[T, n]`, `Vec[T]`), multiple source files,
+`pub use` re-exports, and general I/O. See the
 [language reference](docs/reference.md#17-limitations-and-not-yet-supported)
 for the complete list.
 
@@ -74,25 +77,25 @@ The smallest program:
 
 ```neo
 fn main(): IO[Nat] {
-  io_pure(5)
+  IO::pure(5)
 }
 ```
 
-`main` produces an `IO` action. `io_pure(v)` produces `v`; `io_bind(m, k)`
+`main` produces an `IO` action. `IO::pure(v)` produces `v`; `IO::bind(m, k)`
 runs `m` and passes its result to `k`. Host I/O arrives through `extern`
-capabilities; this milestone provides `stderr.write`. The runtime runs
-`main`'s action once and prints its result, including strings.
+capabilities inside modules; the prelude provides `stderr::write`. The runtime
+runs `main`'s action once and prints its result, including strings.
 
 More examples live in [`examples/`](examples):
 
 | File | Demonstrates | Output |
 | --- | --- | --- |
 | `hello.neo` | minimal program | `5` |
-| `io.neo` | `IO` actions and `io_bind` | `42` |
+| `io.neo` | `IO` actions and `IO::bind` | `42` |
 | `stderr.neo` | `extern` host capability | `0` |
 | `nat.neo` | structural recursion | `42` |
-| `bool.neo` | booleans, `match` | `true` |
-| `list.neo` | generics, lists | `cons(2, cons(1, cons(0, cons(1, cons(0, nil)))))` |
+| `bool.neo` | booleans, `match` | `True` |
+| `list.neo` | generics, lists | `Cons(2, Cons(1, Cons(0, Cons(1, Cons(0, Nil)))))` |
 | `closures.neo` | closures, first-class functions | `7` |
 | `enums.neo` | user enums and patterns | `12` |
 | `proofs.neo` | equality proofs, proof erasure | `7` |

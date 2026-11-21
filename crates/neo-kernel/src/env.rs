@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::RcTm;
 
@@ -81,11 +81,47 @@ pub struct ExternInfo {
     pub import: String,
 }
 
+/// The visibility site of a surface item. An item is visible from its
+/// declaring module and that module's descendants; `public` items are visible
+/// everywhere.
+#[derive(Clone, Debug)]
+pub struct ItemVisibility {
+    pub module: String,
+    pub public: bool,
+}
+
+impl ItemVisibility {
+    pub fn visible_from(&self, module: &str) -> bool {
+        self.public || module == self.module || module.starts_with(&format!("{}::", self.module))
+    }
+}
+
+/// Surface-level name metadata shared by the resolver and the REPL.
+///
+/// The kernel never consults these fields; they only describe how canonical
+/// names are spelled and reached.
+#[derive(Clone, Debug, Default)]
+pub struct SurfaceNames {
+    /// Simple names auto-imported from the prelude, mapped to canonical
+    /// candidates. A name may have several candidates when a type and a
+    /// constructor share a spelling, such as `True`.
+    pub prelude: HashMap<String, Vec<String>>,
+    /// Canonical module paths known to surface name resolution.
+    pub modules: HashSet<String>,
+    /// Canonical item keys to their visibility site.
+    pub visibility: HashMap<String, ItemVisibility>,
+    /// Root-level simple names, for incremental REPL resolution.
+    pub root: HashMap<String, Vec<String>>,
+    /// Root-level module names, for incremental REPL resolution.
+    pub root_modules: HashSet<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Globals {
     pub defs: HashMap<String, GlobalDef>,
     pub enums: HashMap<String, EnumInfo>,
     pub externs: HashMap<String, ExternInfo>,
+    pub names: SurfaceNames,
 }
 
 impl Globals {
@@ -208,14 +244,6 @@ impl Globals {
         names
     }
 
-    pub fn extern_namespace(&self, namespace: &str) -> Option<&str> {
-        let prefix = format!("{}.", namespace);
-        self.externs
-            .keys()
-            .find(|name| name.starts_with(&prefix))
-            .map(|name| name.as_str())
-    }
-
     pub fn get_ctor(&self, name: &str) -> Option<&CtorInfo> {
         match self.defs.get(name) {
             Some(GlobalDef::Ctor {
@@ -255,7 +283,7 @@ impl Globals {
     /// neutral instead of inventing a representation.
     pub fn bool_ctor(&self, value: bool) -> Option<(String, usize)> {
         let info = self.enums.get("Bool")?;
-        let name = if value { "true" } else { "false" };
+        let name = if value { "True" } else { "False" };
         let index = info.ctors.iter().position(|c| c.name == name)?;
         Some((info.name.clone(), index))
     }

@@ -70,8 +70,8 @@ fn bool_main(body: &str) -> bool {
 
 fn as_nat(globals: &Globals, v: &V) -> u64 {
     let info = globals.get_enum("Nat").unwrap();
-    let zero = info.ctors.iter().position(|c| c.name == "zero").unwrap();
-    let succ = info.ctors.iter().position(|c| c.name == "succ").unwrap();
+    let zero = info.ctors.iter().position(|c| c.name == "Zero").unwrap();
+    let succ = info.ctors.iter().position(|c| c.name == "Succ").unwrap();
     fn go(v: &V, zero: usize, succ: usize) -> u64 {
         match &**v {
             Val::Ctor(name, i, _) if name == "Nat" && *i == zero => 0,
@@ -121,8 +121,8 @@ fn comparisons_reduce_during_elaboration() {
         r#"
 fn pick(): Nat {
   match 1u32 < 2u32 {
-    true => 10
-    false => 20
+    True => 10
+    False => 20
   }
 }
 

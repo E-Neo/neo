@@ -2,5 +2,5 @@
 // methods: `length`, `slice`, `concat`, and `to_bytes`.
 // `main` prints string results as text in both the interpreter and `neo build`.
 fn main(): IO[String] {
-  io_pure("hello, world".slice(7, 12).concat("!"))
+  IO::pure("hello, world".slice(7, 12).concat("!"))
 }

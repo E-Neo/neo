@@ -7,13 +7,18 @@ pub enum Tok {
     Numeral(u64, Option<NumSuffix>),
     Str(Vec<u8>),
     Bytes(Vec<u8>),
+    As,
     Enum,
     Extern,
     Fn,
+    Impl,
     Let,
     Match,
-    Type,
+    Mod,
     Prop,
+    Pub,
+    Type,
+    Use,
     EqEq,
     Arrow,
     FatArrow,
@@ -42,6 +47,7 @@ pub enum Tok {
     Comma,
     Dot,
     Colon,
+    ColonColon,
     Underscore,
     Newline,
     Eof,
@@ -126,11 +132,16 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
             let text: String = chars[start..i].iter().collect();
             let tok = match text.as_str() {
                 "_" => Tok::Underscore,
+                "as" => Tok::As,
                 "enum" => Tok::Enum,
                 "extern" => Tok::Extern,
                 "fn" => Tok::Fn,
+                "impl" => Tok::Impl,
                 "let" => Tok::Let,
                 "match" => Tok::Match,
+                "mod" => Tok::Mod,
+                "pub" => Tok::Pub,
+                "use" => Tok::Use,
                 "Type" => Tok::Type,
                 "Prop" => Tok::Prop,
                 _ => Tok::Ident(text),
@@ -243,10 +254,18 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
             }
             ':' => {
                 advance(&mut i, &mut line, &mut col);
-                out.push(Token {
-                    tok: Tok::Colon,
-                    span,
-                });
+                if i < chars.len() && chars[i] == ':' {
+                    advance(&mut i, &mut line, &mut col);
+                    out.push(Token {
+                        tok: Tok::ColonColon,
+                        span,
+                    });
+                } else {
+                    out.push(Token {
+                        tok: Tok::Colon,
+                        span,
+                    });
+                }
             }
             '=' => {
                 if i + 1 < chars.len() && chars[i + 1] == '=' {

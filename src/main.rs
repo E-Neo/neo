@@ -282,7 +282,8 @@ fn repl() -> Result<()> {
         }
         if input == ":help" {
             println!(
-                "enter declarations (`enum ...`, `fn ...`) or expressions\n\
+                "enter declarations (`mod ...`, `use ...`, `enum ...`, `impl ...`, `fn ...`)\n\
+                 or expressions\n\
                  :quit  leave the REPL\n\
                  :help  show this message"
             );
@@ -328,7 +329,13 @@ fn brace_depth(s: &str) -> i32 {
 
 fn is_declaration(s: &str) -> bool {
     let t = s.trim_start();
-    if t.starts_with("enum ") || t.starts_with("extern fn ") {
+    let t = t.strip_prefix("pub ").unwrap_or(t).trim_start();
+    if t.starts_with("enum ")
+        || t.starts_with("mod ")
+        || t.starts_with("use ")
+        || t.starts_with("impl ")
+        || t.starts_with("extern ")
+    {
         return true;
     }
     // `fn name(` is a declaration; `fn(` is a lambda expression.
@@ -343,6 +350,7 @@ fn is_declaration(s: &str) -> bool {
 
 fn eval_expression(globals: &Globals, src: &str) -> Result<String> {
     let expr = parse_expr_source(src)?;
+    let expr = neo::resolve::resolve_expression(globals, &expr)?;
     let mut ctx = neo::check::Ctx::new();
     let (tm, ty) = elab_infer(globals, &mut ctx, &expr)?;
     neo::check::check(globals, &mut ctx, &tm, &ty).map_err(|e| {

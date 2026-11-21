@@ -36,8 +36,8 @@ t, A, B ::=
   | b                       primitive bytes literal
   | op(t1, ..., tn)         fully applied primitive operation
   | IO[A]                   action type
-  | io_pure(t)              pure action
-  | io_bind(t, k)           action sequencing
+  | IO::pure(t)              pure action
+  | IO::bind(t, k)           action sequencing
   | fn(x: A) -> B           dependent function type
   | fn(x: A) => t           lambda
   | t(u)                    application
@@ -45,17 +45,19 @@ t, A, B ::=
   | C(args)                 constructor value
   | match m, s { arms }     enum elimination
   | Eq(A, x, y)             equality type
-  | refl(x)                 reflexivity proof
+  | Refl(x)                 reflexivity proof
   | J(A, x, y, p, m, r)     equality elimination
 ```
 
 The core has **no let-binding**. Surface `let` bindings, blocks, and variable
 patterns elaborate to `(fn(x: A) => body)(value)`.
 
-The core also has no method concept. A surface method declaration
-`fn Type.name(...)` is an ordinary global constant named `Type.name`, and
+The core also has no method concept. A surface method declared inside
+`impl Type { ... }` is an ordinary global constant named `Type.name`, and
 `e.name(args)` elaborates to that constant applied to `e` followed by the
-remaining arguments. Dispatch by receiver type happens only in the elaborator.
+remaining arguments. Dispatch by receiver type and visibility checks happen
+only in the elaborator. Module structure likewise disappears: resolved names
+are canonical (`module::item`, `Type::Constructor`).
 
 A `Pi` term also carries a binder name and an `implicit` boolean. Both are
 metadata: conversion and type checking ignore them. The flag records whether
@@ -94,7 +96,7 @@ v ::=
   | E(v*)                  enum type
   | C(v*)                  constructor
   | Eq(A, x, y)
-  | refl(x)
+  | Refl(x)
   | IO(v)                  action type
   | pure(v)                action that produces `v`
   | bind(m, k)             action that runs `m`, then `k`'s action
@@ -117,7 +119,7 @@ Gamma |- t <= A      check
 ```
 
 - `infer` computes a type for `t`.
-- `check` verifies `t` against a known expected type. Lambdas and `refl` are
+- `check` verifies `t` against a known expected type. Lambdas and `Refl` are
   checked structurally; every other term is inferred and then compared with
   `conv_ty`.
 
@@ -283,7 +285,7 @@ bytes_get                     : Bytes, U32 -> U32
 bytes_utf8_check              : Bytes -> U32
 ```
 
-`Bool` is the prelude enum; comparisons reduce to its `false` and `true`
+`Bool` is the prelude enum; comparisons reduce to its `False` and `True`
 constructors. Operations are not values: a bare operation name is not a term,
 so it can never escape into a position the evaluator does not reduce. The
 `u32_*` names shown above are core operation names; the surface spells those
@@ -324,29 +326,29 @@ Gamma |- IO[A] : Type u
 
 Gamma |- A : Type u    Gamma |- t <= A
 --------------------------------------
-Gamma |- io_pure(t) : IO[A]
+Gamma |- IO::pure(t) : IO[A]
 
 Gamma |- m <= IO[A]
 Gamma |- k <= (x: A) -> IO[B]
 x is not free in B
 ------------------------------------------
-Gamma |- io_bind(m, k) : IO[B]
+Gamma |- IO::bind(m, k) : IO[B]
 ```
 
-The implicit type arguments of `io_pure` and `io_bind` are inferred; the
-kernel rules above show the fully applied form. The result type of `io_bind`
+The implicit type arguments of `IO::pure` and `IO::bind` are inferred; the
+kernel rules above show the fully applied form. The result type of `IO::bind`
 may not depend on the value produced by the first action, which is what lets
 the two implicit type arguments be solved from the expected type.
 
-There are **no computation rules**. `io_pure(t)` and `io_bind(m, k)` are
-canonical values of type `IO[A]`, compared structurally: `io_pure(t)` with
-`io_pure(t')` when `t` and `t'` are convertible, and `io_bind(m, k)` with
-`io_bind(m', k')` when the components are convertible. `eval` never executes
+There are **no computation rules**. `IO::pure(t)` and `IO::bind(m, k)` are
+canonical values of type `IO[A]`, compared structurally: `IO::pure(t)` with
+`IO::pure(t')` when `t` and `t'` are convertible, and `IO::bind(m, k)` with
+`IO::bind(m', k')` when the components are convertible. `eval` never executes
 an action, so evaluating an `IO` term cannot perform a side effect.
 
 Canonicity is therefore stated only for types other than `IO`: a closed value
 of an enum, primitive, function, or equality type is canonical, while a closed
-`IO[A]` value may be `io_pure`, `io_bind`, or an opaque host action introduced
+`IO[A]` value may be `IO::pure`, `IO::bind`, or an opaque host action introduced
 by an `extern` declaration. The program entry point, outside the kernel,
 interprets `main`'s action once; that interpretation is not part of typing.
 
@@ -400,7 +402,7 @@ Gamma |- Eq(A, x, y) : Prop
 
 Gamma |- x <= A
 ----------------------------
-Gamma |- refl(x) : Eq(A, x, x)
+Gamma |- Refl(x) : Eq(A, x, x)
 ```
 
 `Eq` is a propositional equality. It is not built in as a rewrite rule. Surface
@@ -420,11 +422,11 @@ Gamma |- J(A, x, y, p, m, r) : m(y)
 ```
 
 The kernel checks the motive is a function whose domain is `A`, checks the
-`refl` case at `x`, and returns the motive applied to `y`. The motive is applied
+`Refl` case at `x`, and returns the motive applied to `y`. The motive is applied
 by evaluation; there is no textual replacement of `x` by `y`. This makes `J`
 capture-avoiding even under binders.
 
-Evaluation of `J` with a `refl` proof returns the `refl` case.
+Evaluation of `J` with a `Refl` proof returns the `Refl` case.
 
 ## 7. Match
 
@@ -460,8 +462,8 @@ corresponding `s*`. Refinement is deliberately first-order:
   proofs) together with the constructor's fields.
 - A flexible variable may be solved by any index term, including one that
   mentions constructor fields. For example, matching `Vec[A, n]` against
-  `vcons` solves the context index `n := succ(m)`.
-- A constructor clash (`zero` against `succ(n)`, two different constructors, or
+  `vcons` solves the context index `n := Succ(m)`.
+- A constructor clash (`Zero` against `Succ(n)`, two different constructors, or
   two different enum names) means the branch is **impossible**.
 - Any equation that is neither already definitionally equal nor a solvable
   flexible variable is **stuck**, and the match is rejected with an error.
@@ -497,7 +499,7 @@ surface branch is elaborated in the refined context. It additionally replaces
 every solved branch-field variable in the body by its solution.
 
 An impossible branch has no reachable value. The kernel does **not** check its
-body. The branch is stored with `impossible: true`, and evaluation and code
+body. The branch is stored with `impossible: True`, and evaluation and code
 generation never select it. A user may omit the arm entirely; if an arm is
 written, its body is ignored. Writing an arm for a *reachable* constructor is
 mandatory.
@@ -511,9 +513,9 @@ match is rejected as non-exhaustive.
 
 Refinement is still first-order and conservative. A context index is refined
 only when the equations determine it: matching `Vec[A, n]` works because the
-branches force `n := zero` and `n := succ(m)`. An index whose head is stuck, for
+branches force `n := Zero` and `n := Succ(m)`. An index whose head is stuck, for
 example `Vec[A, pred(n)]` where `pred` is an ordinary recursive function, cannot
-be related to `zero` or `succ(...)`, so the match is rejected. `Prop`-typed
+be related to `Zero` or `Succ(...)`, so the match is rejected. `Prop`-typed
 evidence is never solved, because it cannot occur in an index and solving it
 would amount to proof search.
 
@@ -563,7 +565,7 @@ equation.
 Evaluation is normalisation by evaluation. `quote` is its inverse at a given
 level. A `match` reduces only when the scrutinee is a constructor; otherwise it
 is a neutral. An impossible branch is never selected. `J` reduces only when its
-proof is `refl`. `IO` terms evaluate to action values but never run: execution
+proof is `Refl`. `IO` terms evaluate to action values but never run: execution
 belongs to the entry point.
 
 Type-level terms, proofs, and equality witnesses are erased by the backend.

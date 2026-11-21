@@ -1,5 +1,5 @@
 fn main(): IO[Nat] {
   let n: Nat = 1
   let x = 1u32 + n
-  io_pure(0)
+  IO::pure(0)
 }

@@ -1,15 +1,15 @@
 // Types are first-class: `mul` is defined after the `add` it calls.
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(p) => succ(add(p, b))
+    Zero => b
+    Succ(p) => Succ(add(p, b))
   }
 }
 
 fn mul(a: Nat, b: Nat): Nat {
   match a {
-    zero => zero
-    succ(p) => add(b, mul(p, b))
+    Zero => Zero
+    Succ(p) => add(b, mul(p, b))
   }
 }
 
@@ -26,5 +26,5 @@ fn area(s: Shape): Nat {
 }
 
 fn main(): IO[Nat] {
-  io_pure(area(rect(3, 4)))
+  IO::pure(area(rect(3, 4)))
 }

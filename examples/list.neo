@@ -1,18 +1,18 @@
 // Implicit parameters are inferred at calls.
 fn append[T: Type](xs: List[T], ys: List[T]): List[T] {
   match xs {
-    nil => ys
-    cons(h, t) => cons(h, append(t, ys))
+    Nil => ys
+    Cons(h, t) => Cons(h, append(t, ys))
   }
 }
 
 fn range(n: Nat): List[Nat] {
   match n {
-    zero => nil
-    succ(p) => cons(p, range(p))
+    Zero => Nil
+    Succ(p) => Cons(p, range(p))
   }
 }
 
 fn main(): IO[List[Nat]] {
-  io_pure(append(range(3), range(2)))
+  IO::pure(append(range(3), range(2)))
 }

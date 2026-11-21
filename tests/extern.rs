@@ -12,7 +12,9 @@ use neo::prelude::new_globals;
 use neo::pretty::show_val;
 use neo::value::{V, Val};
 
-const STDERR_WRITE: &str = r#"extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write""#;
+const STDERR_WRITE: &str = r#"mod log {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+}"#;
 
 fn define(source: &str) -> Globals {
     let mut globals = new_globals().expect("prelude");
@@ -46,7 +48,7 @@ impl Host for RecordingHost {
     fn run(&mut self, capability: &Capability, args: &[V]) -> neo::error::Result<V> {
         assert_eq!(capability.lowering, Lowering::StderrWrite);
         let [arg] = args else {
-            panic!("`stderr.write` takes one argument");
+            panic!("`log::write` takes one argument");
         };
         match &**arg {
             Val::PrimLit(PrimLit::Str(bytes)) => self.writes.push(bytes.to_vec()),
@@ -72,30 +74,30 @@ fn run_main(globals: &Globals, outcome: StderrOutcome) -> (V, Vec<Vec<u8>>) {
 const PROGRAM: &str = r#"
 fn exit_code(r: Result[Unit, IoError]): IO[U32] {
   match r {
-    ok(_) => io_pure(0u32)
-    err(_) => io_pure(1u32)
+    Ok(_) => IO::pure(0u32)
+    Err(_) => IO::pure(1u32)
   }
 }
 
 fn main(): IO[U32] {
-  io_bind(stderr.write("hello\n"), exit_code)
+  IO::bind(log::write("hello\n"), exit_code)
 }
 "#;
 
 #[test]
 fn a_later_declaration_cannot_take_a_namespace() {
     assert_error(
-        &format!("{STDERR_WRITE}\nfn stderr(): U32 {{ 0u32 }}"),
-        "capability namespace",
+        &format!("{STDERR_WRITE}\nfn log(): U32 {{ 0u32 }}"),
+        "already defined",
     );
     assert_error(
-        &format!("{STDERR_WRITE}\nenum stderr {{ x }}"),
-        "capability namespace",
+        &format!("{STDERR_WRITE}\nenum log {{ x }}"),
+        "already defined",
     );
 }
 
 #[test]
-fn dotted_extern_call_runs_once() {
+fn scoped_extern_call_runs_once() {
     let globals = define(&format!("{STDERR_WRITE}\n{PROGRAM}"));
     let (value, writes) = run_main(&globals, StderrOutcome::Ok);
     assert_eq!(show_val(&globals, 0, &value), "0");
@@ -113,7 +115,9 @@ fn closed_stream_is_visible_to_the_program() {
 #[test]
 fn unknown_import_is_rejected() {
     assert_error(
-        r#"extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#nope""#,
+        r#"mod log {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#nope"
+}"#,
         "unknown host capability",
     );
 }
@@ -121,7 +125,9 @@ fn unknown_import_is_rejected() {
 #[test]
 fn declared_type_must_match_the_capability() {
     assert_error(
-        r#"extern fn stderr.write(s: String): IO[Unit] = "wasi:cli/stderr@0.2.9#write""#,
+        r#"mod log {
+  pub extern fn write(s: String): IO[Unit] = "wasi:cli/stderr@0.2.9#write"
+}"#,
         "must have type",
     );
 }
@@ -129,7 +135,9 @@ fn declared_type_must_match_the_capability() {
 #[test]
 fn extern_must_return_io() {
     assert_error(
-        r#"extern fn stderr.write(s: String): Unit = "wasi:cli/stderr@0.2.9#write""#,
+        r#"mod log {
+  pub extern fn write(s: String): Unit = "wasi:cli/stderr@0.2.9#write"
+}"#,
         "must return an `IO` action",
     );
 }
@@ -137,7 +145,9 @@ fn extern_must_return_io() {
 #[test]
 fn implicit_parameters_are_rejected() {
     assert_error(
-        r#"extern fn stderr.write[T: Type](s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write""#,
+        r#"mod log {
+  pub extern fn write[T: Type](s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+}"#,
         "may not be implicit",
     );
 }
@@ -145,7 +155,9 @@ fn implicit_parameters_are_rejected() {
 #[test]
 fn only_primitive_parameters_are_allowed() {
     assert_error(
-        r#"extern fn stderr.write(s: Option[String]): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write""#,
+        r#"mod log {
+  pub extern fn write(s: Option[String]): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+}"#,
         "must have a primitive type",
     );
 }
@@ -153,7 +165,9 @@ fn only_primitive_parameters_are_allowed() {
 #[test]
 fn a_type_cannot_be_a_capability_namespace() {
     assert_error(
-        r#"extern fn Bool.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write""#,
+        r#"mod Bool {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+}"#,
         "is a type",
     );
 }
@@ -168,9 +182,9 @@ fn duplicate_externs_are_rejected() {
 
 #[test]
 fn a_capability_namespace_is_not_a_value() {
-    let error = elaborate_error(&format!("{STDERR_WRITE}\nfn bad(): U32 {{ stderr }}"));
+    let error = elaborate_error(&format!("{STDERR_WRITE}\nfn bad(): U32 {{ log }}"));
     assert!(
-        error.message.contains("capability namespace"),
+        error.message.contains("is a module"),
         "unexpected error: {}",
         error.message
     );
@@ -179,7 +193,7 @@ fn a_capability_namespace_is_not_a_value() {
 #[test]
 fn extern_arity_is_checked() {
     let globals_src = format!(
-        "{STDERR_WRITE}\nfn bad(): IO[Result[Unit, IoError]] {{ stderr.write(\"a\", \"b\") }}"
+        "{STDERR_WRITE}\nfn bad(): IO[Result[Unit, IoError]] {{ log::write(\"a\", \"b\") }}"
     );
     let error = elaborate_error(&globals_src);
     assert!(
@@ -191,8 +205,7 @@ fn extern_arity_is_checked() {
 
 #[test]
 fn extern_arguments_are_checked() {
-    let src =
-        format!("{STDERR_WRITE}\nfn bad(): IO[Result[Unit, IoError]] {{ stderr.write(1u32) }}");
+    let src = format!("{STDERR_WRITE}\nfn bad(): IO[Result[Unit, IoError]] {{ log::write(1u32) }}");
     let error = elaborate_error(&src);
     assert!(
         error.message.contains("type mismatch") || error.message.contains("expected"),
@@ -205,8 +218,8 @@ fn extern_arguments_are_checked() {
 fn extern_actions_are_structural_values() {
     let globals = define(&format!(
         r#"{STDERR_WRITE}
-fn first(): IO[Result[Unit, IoError]] {{ stderr.write("a") }}
-fn second(): IO[Result[Unit, IoError]] {{ stderr.write("a") }}
+fn first(): IO[Result[Unit, IoError]] {{ log::write("a") }}
+fn second(): IO[Result[Unit, IoError]] {{ log::write("a") }}
 "#
     ));
     let a = eval(&globals, &Vec::new(), &const_("first"));

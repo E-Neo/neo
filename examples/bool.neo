@@ -3,18 +3,18 @@
 // function is named `both`.
 fn not(b: Bool): Bool {
   match b {
-    true => false
-    false => true
+    True => False
+    False => True
   }
 }
 
 fn both(a: Bool, b: Bool): Bool {
   match a {
-    true => b
-    false => false
+    True => b
+    False => False
   }
 }
 
 fn main(): IO[Bool] {
-  io_pure(both(not(false), true))
+  IO::pure(both(not(False), True))
 }

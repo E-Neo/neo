@@ -53,10 +53,25 @@ fn main_value(globals: &Globals) -> V {
 }
 
 fn utf8_check(literal: &str) -> u32 {
-    let globals = elaborate(&format!("fn main(): U32 {{ bytes_utf8_check({literal}) }}"));
+    let globals = elaborate(&format!(
+        "fn main(): Result[String, Utf8Error] {{ {literal}.to_str() }}"
+    ));
     match &*main_value(&globals) {
-        Val::PrimLit(PrimLit::U32(n)) => *n,
-        other => panic!("`main` did not evaluate to a u32 literal: {other:?}"),
+        Val::Ctor(name, 0, _) if name == "Result" => 0,
+        Val::Ctor(name, _, args) if name == "Result" => {
+            let fields = ctor_fields(&globals, "Result", 1, args);
+            match &*fields[0] {
+                Val::Ctor(name, 0, args) if name == "Utf8Error" => {
+                    let fields = ctor_fields(&globals, "Utf8Error", 0, args);
+                    match &*fields[0] {
+                        Val::PrimLit(PrimLit::U32(n)) => *n + 1,
+                        other => panic!("`Invalid` did not carry a u32: {other:?}"),
+                    }
+                }
+                other => panic!("`Err` did not carry a Utf8Error: {other:?}"),
+            }
+        }
+        other => panic!("`main` did not evaluate to a Result: {other:?}"),
     }
 }
 
@@ -179,7 +194,7 @@ fn to_str_reports_the_first_invalid_byte() {
     assert_eq!(to_str(r#"b"\xff""#), Err(0));
     assert_eq!(to_str(r#"b"a\xff""#), Err(1));
     assert_eq!(to_str(r#"b"abc\xed\xa0\x80""#), Err(3));
-    assert_eq!(to_str(r#"b"ok\xe2\x82""#), Err(2));
+    assert_eq!(to_str(r#"b"Ok\xe2\x82""#), Err(2));
 }
 
 #[test]
@@ -194,11 +209,14 @@ fn validation_uses_the_slice_bounds() {
 }
 
 #[test]
-fn str_from_bytes_is_the_inverse_of_str_to_bytes() {
+fn to_str_is_the_inverse_of_to_bytes() {
     let globals = elaborate(
         r#"
 fn main(): Bool {
-  str_eq(str_from_bytes(str_to_bytes("neo")), "neo")
+  match "neo".to_bytes().to_str() {
+    Ok(text) => text == "neo"
+    Err(_) => Bool::False
+  }
 }
 "#,
     );
@@ -212,11 +230,11 @@ fn main(): Bool {
 fn rejects_wrong_argument_types() {
     assert_rejected(
         r#"fn main(): U32 { bytes_utf8_check("abc") }"#,
-        "expected `Bytes`, found `String`",
+        "low-level primitive",
     );
     assert_rejected(
         r#"fn main(): String { str_from_bytes("abc") }"#,
-        "expected `Bytes`, found `String`",
+        "low-level primitive",
     );
 }
 
@@ -225,7 +243,7 @@ fn option_and_result_are_printable_prelude_types() {
     let globals = elaborate(
         r#"
 fn main(): Option[Nat] {
-  some(3)
+  Some(3)
 }
 "#,
     );

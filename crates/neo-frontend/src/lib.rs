@@ -8,6 +8,7 @@ pub mod elab;
 pub mod lexer;
 pub mod parser;
 pub mod prelude;
+pub mod resolve;
 pub mod surface;
 
 pub use neo_kernel::{check, conv, core, env, eval, positivity, pretty, quote, recursion, value};

@@ -34,29 +34,150 @@ impl Parser {
     }
 
     pub fn parse_program(&mut self) -> Result<Program> {
-        let mut decls = Vec::new();
+        let items = self.parse_items_until_end()?;
+        Ok(Program { items })
+    }
+
+    fn parse_items_until_end(&mut self) -> Result<Vec<Item>> {
+        let mut items = Vec::new();
         loop {
             self.skip_newlines();
             if self.at(&Tok::Eof) {
-                break;
+                return Ok(items);
             }
-            let decl = match &self.peek().tok {
-                Tok::Enum => Decl::Enum(self.parse_enum()?),
-                Tok::Extern => Decl::Extern(self.parse_extern()?),
-                Tok::Fn => Decl::Fn(self.parse_fn()?),
-                _ => {
-                    return Err(Error::at(
-                        self.peek().span,
-                        "expected an `enum`, `extern fn`, or `fn` declaration",
-                    ));
-                }
-            };
-            decls.push(decl);
+            items.push(self.parse_item()?);
         }
-        Ok(Program { decls })
     }
 
-    fn parse_enum(&mut self) -> Result<EnumDecl> {
+    fn parse_items_until_brace(&mut self, open: neo_common::error::Span) -> Result<Vec<Item>> {
+        let mut items = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.at(&Tok::RBrace) {
+                self.advance();
+                return Ok(items);
+            }
+            if self.at(&Tok::Eof) {
+                return Err(Error::at(open, "unterminated module"));
+            }
+            items.push(self.parse_item()?);
+        }
+    }
+
+    fn parse_item(&mut self) -> Result<Item> {
+        let is_pub = if self.at(&Tok::Pub) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        match self.peek().tok.clone() {
+            Tok::Mod => Ok(Item::Mod(self.parse_mod(is_pub)?)),
+            Tok::Use => Ok(Item::Use(self.parse_use(is_pub)?)),
+            Tok::Enum => Ok(Item::Enum(self.parse_enum(is_pub)?)),
+            Tok::Extern => Ok(Item::Extern(self.parse_extern(is_pub)?)),
+            Tok::Fn => Ok(Item::Fn(self.parse_fn(is_pub)?)),
+            Tok::Impl if !is_pub => Ok(Item::Impl(self.parse_impl()?)),
+            Tok::Impl => Err(Error::at(
+                self.peek().span,
+                "`impl` blocks cannot be `pub`; declare individual methods `pub`",
+            )),
+            _ => Err(Error::at(
+                self.peek().span,
+                "expected `mod`, `use`, `enum`, `extern fn`, `fn`, or `impl`",
+            )),
+        }
+    }
+
+    fn parse_mod(&mut self, is_pub: bool) -> Result<ModDecl> {
+        let span = self.peek().span;
+        self.expect(&Tok::Mod, "expected `mod`")?;
+        let name = self.expect_ident("expected a module name")?;
+        if !self.at(&Tok::LBrace) {
+            return Err(Error::at(
+                self.peek().span,
+                "multi-file modules are not supported; write `mod name { ... }`",
+            ));
+        }
+        self.advance();
+        let items = self.parse_items_until_brace(span)?;
+        Ok(ModDecl {
+            name,
+            is_pub,
+            items,
+            span,
+        })
+    }
+
+    fn parse_use(&mut self, is_pub: bool) -> Result<UseDecl> {
+        let span = self.peek().span;
+        self.expect(&Tok::Use, "expected `use`")?;
+        let tree = self.parse_use_tree()?;
+        if !self.at(&Tok::Newline) && !self.at(&Tok::Eof) && !self.at(&Tok::RBrace) {
+            return Err(Error::at(
+                self.peek().span,
+                "expected a newline after `use`",
+            ));
+        }
+        Ok(UseDecl { is_pub, tree, span })
+    }
+
+    fn parse_use_tree(&mut self) -> Result<UseTree> {
+        let span = self.peek().span;
+        let mut segments = vec![self.expect_ident("expected a name in `use`")?];
+        loop {
+            if !self.at(&Tok::ColonColon) {
+                break;
+            }
+            self.advance();
+            if self.at(&Tok::Star) {
+                self.advance();
+                return Ok(UseTree::Glob { segments, span });
+            }
+            if self.at(&Tok::LBrace) {
+                self.advance();
+                let mut items = Vec::new();
+                self.skip_newlines();
+                if !self.at(&Tok::RBrace) {
+                    loop {
+                        items.push(self.parse_use_tree()?);
+                        if self.at(&Tok::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                            if self.at(&Tok::RBrace) {
+                                self.advance();
+                                break;
+                            }
+                            continue;
+                        }
+                        self.expect(&Tok::RBrace, "expected `}` in a `use` group")?;
+                        break;
+                    }
+                } else {
+                    self.advance();
+                }
+                return Ok(UseTree::Group {
+                    prefix: segments,
+                    items,
+                    span,
+                });
+            }
+            segments.push(self.expect_ident("expected a name after `::`")?);
+        }
+        let alias = if self.at(&Tok::As) {
+            self.advance();
+            Some(self.expect_ident("expected an alias after `as`")?)
+        } else {
+            None
+        };
+        Ok(UseTree::Name {
+            segments,
+            alias,
+            span,
+        })
+    }
+
+    fn parse_enum(&mut self, is_pub: bool) -> Result<EnumDecl> {
         let span = self.peek().span;
         self.expect(&Tok::Enum, "expected `enum`")?;
         let name = self.expect_ident("expected enum name")?;
@@ -94,6 +215,7 @@ impl Parser {
         }
         Ok(EnumDecl {
             name,
+            is_pub,
             params,
             sort,
             ctors,
@@ -130,17 +252,16 @@ impl Parser {
         })
     }
 
-    fn parse_fn(&mut self) -> Result<FnDecl> {
+    fn parse_fn(&mut self, is_pub: bool) -> Result<FnDecl> {
         let span = self.peek().span;
         self.expect(&Tok::Fn, "expected `fn`")?;
-        let first = self.expect_ident("expected function name")?;
-        let (namespace, name) = if self.at(&Tok::Dot) {
-            self.advance();
-            let method = self.expect_ident("expected a method name after `.`")?;
-            (Some(first), method)
-        } else {
-            (None, first)
-        };
+        let name = self.expect_ident("expected function name")?;
+        if self.at(&Tok::Dot) {
+            return Err(Error::at(
+                self.peek().span,
+                "methods are declared inside `impl Type { ... }`, not as `fn Type.name`",
+            ));
+        }
         let mut params = Vec::new();
         if self.at(&Tok::LBracket) {
             params.extend(self.parse_params(Tok::LBracket, Tok::RBracket, true)?);
@@ -152,8 +273,10 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_block()?;
         Ok(FnDecl {
-            namespace,
+            namespace: None,
+            module: String::new(),
             name,
+            is_pub,
             params,
             ret,
             body,
@@ -161,20 +284,61 @@ impl Parser {
         })
     }
 
-    /// `extern fn stderr.write(s: String): IO[T] = "import"`.
-    fn parse_extern(&mut self) -> Result<ExternDecl> {
+    fn parse_impl(&mut self) -> Result<ImplDecl> {
+        let span = self.peek().span;
+        self.expect(&Tok::Impl, "expected `impl`")?;
+        let params = if self.at(&Tok::LBracket) {
+            self.parse_params(Tok::LBracket, Tok::RBracket, true)?
+        } else {
+            Vec::new()
+        };
+        let target = self.parse_app()?;
+        self.skip_newlines();
+        self.expect(&Tok::LBrace, "expected `{` after the impl target")?;
+        let mut methods = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.at(&Tok::RBrace) {
+                self.advance();
+                break;
+            }
+            if self.at(&Tok::Eof) {
+                return Err(Error::at(span, "unterminated impl block"));
+            }
+            let is_pub = if self.at(&Tok::Pub) {
+                self.advance();
+                true
+            } else {
+                false
+            };
+            if !self.at(&Tok::Fn) {
+                return Err(Error::at(
+                    self.peek().span,
+                    "an impl block may only contain method declarations",
+                ));
+            }
+            methods.push(self.parse_fn(is_pub)?);
+        }
+        Ok(ImplDecl {
+            params,
+            target,
+            methods,
+            span,
+        })
+    }
+
+    /// `extern fn write(s: String): IO[T] = "import"`.
+    fn parse_extern(&mut self, is_pub: bool) -> Result<ExternDecl> {
         let span = self.peek().span;
         self.expect(&Tok::Extern, "expected `extern`")?;
         self.expect(&Tok::Fn, "expected `fn` after `extern`")?;
-        let namespace = self.expect_ident("expected a capability namespace")?;
-        if !self.at(&Tok::Dot) {
+        let name = self.expect_ident("expected a capability name")?;
+        if self.at(&Tok::Dot) {
             return Err(Error::at(
                 self.peek().span,
-                "an extern name needs a capability namespace, such as `stderr.write`",
+                "place a capability in a module, such as `mod stderr { pub extern fn write(...) }`",
             ));
         }
-        self.advance();
-        let name = self.expect_ident("expected a capability name after `.`")?;
         let mut params = Vec::new();
         if self.at(&Tok::LBracket) {
             params.extend(self.parse_params(Tok::LBracket, Tok::RBracket, true)?);
@@ -204,8 +368,9 @@ impl Parser {
         };
         self.advance();
         Ok(ExternDecl {
-            namespace,
+            module: String::new(),
             name,
+            is_pub,
             params,
             ret,
             import,
@@ -658,6 +823,7 @@ impl Parser {
                 f = Expr::Method {
                     receiver: Box::new(f),
                     name,
+                    site: String::new(),
                     implicit,
                     args,
                     span,
@@ -700,10 +866,19 @@ impl Parser {
             Tok::Ident(name) => {
                 let span = self.peek().span;
                 self.advance();
-                if name == "refl" {
-                    Ok(Expr::Refl(span))
+                let mut segments = vec![name];
+                while self.at(&Tok::ColonColon) {
+                    self.advance();
+                    segments.push(self.expect_ident("expected a name after `::`")?);
+                }
+                if segments.len() == 1 {
+                    if segments[0] == "Refl" {
+                        Ok(Expr::Refl(span))
+                    } else {
+                        Ok(Expr::Var(segments.remove(0), span))
+                    }
                 } else {
-                    Ok(Expr::Var(name, span))
+                    Ok(Expr::Path(segments, span))
                 }
             }
             Tok::Numeral(n, suffix) => {
@@ -818,6 +993,11 @@ impl Parser {
             }
             Tok::Ident(name) => {
                 self.advance();
+                let mut segments = vec![name];
+                while self.at(&Tok::ColonColon) {
+                    self.advance();
+                    segments.push(self.expect_ident("expected a name after `::`")?);
+                }
                 if self.at(&Tok::LParen) {
                     self.advance();
                     let mut pats = Vec::new();
@@ -834,9 +1014,11 @@ impl Parser {
                             break;
                         }
                     }
-                    Ok(Pattern::Ctor(name, pats, span))
+                    Ok(Pattern::Ctor(segments.join("::"), pats, span))
+                } else if segments.len() > 1 {
+                    Ok(Pattern::Ctor(segments.join("::"), Vec::new(), span))
                 } else {
-                    Ok(Pattern::Var(name, span))
+                    Ok(Pattern::Var(segments.remove(0), span))
                 }
             }
             _ => Err(Error::at(self.peek().span, "expected a pattern")),

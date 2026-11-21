@@ -1,15 +1,17 @@
-// `extern` declares a host capability. The compiler lowers `stderr.write` to
-// `wasi:cli/stderr@0.2.9#get-stderr` plus
+// `extern` declares a host capability inside a module. The compiler lowers
+// `log::write` to `wasi:cli/stderr@0.2.9#get-stderr` plus
 // `output-stream.blocking-write-and-flush`.
-extern fn stderr.write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+mod log {
+  pub extern fn write(s: String): IO[Result[Unit, IoError]] = "wasi:cli/stderr@0.2.9#write"
+}
 
 fn exit_code(r: Result[Unit, IoError]): IO[U32] {
   match r {
-    ok(_) => io_pure(0u32)
-    err(_) => io_pure(1u32)
+    Ok(_) => IO::pure(0u32)
+    Err(_) => IO::pure(1u32)
   }
 }
 
 fn main(): IO[U32] {
-  io_bind(stderr.write("hello from stderr\n"), exit_code)
+  IO::bind(log::write("hello from stderr\n"), exit_code)
 }

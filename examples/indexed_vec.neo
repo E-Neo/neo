@@ -5,14 +5,14 @@
 // whose `main` returns `Vec[T, n]` can be interpreted, but the WASM backend
 // cannot print fields whose types depend on earlier fields yet.
 enum Vec[T: Type, n: Nat] {
-  vnil : Vec[T, zero]
-  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, succ(m)]
+  vnil : Vec[T, Zero]
+  vcons(m: Nat, x: T, xs: Vec[T, m]) : Vec[T, Succ(m)]
 }
 
 fn add(a: Nat, b: Nat): Nat {
   match a {
-    zero => b
-    succ(k) => succ(add(k, b))
+    Zero => b
+    Succ(k) => Succ(add(k, b))
   }
 }
 
@@ -20,8 +20,8 @@ fn add(a: Nat, b: Nat): Nat {
 // `succ(m)` in the second, which is what makes the recursive call well typed.
 fn length[T: Type, n: Nat](v: Vec[T, n]): Nat {
   match v {
-    vnil => zero
-    vcons(m, x, xs) => succ(length(xs))
+    vnil => Zero
+    vcons(m, x, xs) => Succ(length(xs))
   }
 }
 
@@ -45,5 +45,5 @@ fn three(): Vec[Nat, 3] {
 
 fn main(): IO[Nat] {
   // Try `two()` or `three()` in the REPL to see the vectors.
-  io_pure(length(three()))
+  IO::pure(length(three()))
 }

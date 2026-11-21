@@ -1,4 +1,4 @@
 fn main(): IO[Nat] {
   let x = 42
-  io_pure(x)
+  IO::pure(x)
 }
