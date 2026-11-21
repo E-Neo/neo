@@ -34,5 +34,7 @@ fn main(): IO[U32] {
       + core::demo_termination_good()
       + core::demo_termination_loop()
       + core::demo_termination_succ()
+      + core::demo_infer_match()
+      + core::demo_infer_j()
   )
 }

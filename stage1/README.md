@@ -23,15 +23,16 @@ and conversion, written in Neo.
   application, with a `List[Val]` context and context-environment functions.
 - A Stage 1 global environment (`EnumInfo`/`CtorInfo`/`CtorList`) and typing
   for enum values and constructor applications via `apply_type`.
-- A `Match` term, encoded branch lists, non-dependent branch checking with
-  constructor field telescopes, exhaustiveness checks, and constructor
-  reduction during evaluation.
+- A `Match` term, encoded branch lists, non-dependent branch checking and
+  inference with constructor field telescopes, exhaustiveness checks, and
+  constructor reduction during evaluation.
 - `Eq`, `ReflTm`, and a first `J` slice. Equality values are encoded as
   `VInd("Eq", ...)` and proofs as `VCtor("Refl", ...)`, so the existing
   conversion code handles them. `Refl` checks both sides against the value;
   `J` checks the proof and reduces to its `refl_case`; it also applies the
   motive to both sides, checks `refl_case` against `motive(lhs)`, and checks
-  the expected type against `motive(rhs)`.
+  the expected type against `motive(rhs)`. `infer` can infer a non-dependent
+  match from its first branch and a J result from its motive.
 - A conservative positivity check over enum constructor telescopes. Direct
   positive occurrences are accepted; negative occurrences in function
   domains and nested occurrences under another type constructor are rejected.

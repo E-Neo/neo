@@ -942,7 +942,25 @@ pub fn infer(
         Err(e) => Err(e)
       }
       ReflTm(_) => Err(Unsupported)
-      J(_, _, _, _, _, _) => Err(Unsupported)
+      J(_, lhs, rhs, proof, motive, _) => match eval(k, ctx_env(ctx), lhs) {
+        Ok(vlhs) => match eval(k, ctx_env(ctx), rhs) {
+          Ok(vrhs) => match check(
+            k,
+            globals,
+            ctx,
+            proof,
+            VInd("Eq", VCons(vlhs, VCons(vrhs, VNil)))
+          ) {
+            Ok(Unit) => match eval(k, ctx_env(ctx), motive) {
+              Ok(vmotive) => apply_val(k, vmotive, vrhs)
+              Err(e) => Err(e)
+            }
+            Err(e) => Err(e)
+          }
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
       Const(_) => Err(Unsupported)
       TNil => Err(Unsupported)
       TCons(_, _) => Err(Unsupported)
@@ -966,7 +984,7 @@ pub fn infer(
         }
         None => Err(UnknownEnum)
       }
-      Match(_, _) => Err(Unsupported)
+      Match(scrut, branches) => infer_match(k, globals, ctx, scrut, branches)
       TBrNil => Err(Unsupported)
       TBrCons(_, _, _, _) => Err(Unsupported)
     }
@@ -1079,6 +1097,111 @@ pub fn check(
       Match(scrut, branches) => check_match(k, globals, ctx, scrut, branches, expected)
       TBrNil => check_infer(k, globals, ctx, tm, expected)
       TBrCons(_, _, _, _) => check_infer(k, globals, ctx, tm, expected)
+    }
+  }
+}
+
+pub enum InferState {
+  InferNone
+  InferSome(Val)
+}
+
+fn infer_match(
+  fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
+  ctx: List[Val],
+  scrut: Tm,
+  branches: Tm
+): Result[Val, KernelError] {
+  match infer(fuel, globals, ctx, scrut) {
+    Ok(VInd(enum_name, params)) => match globals(enum_name) {
+      Some(EnumData(_, _, _, _, ctors)) => infer_ctors(
+        fuel,
+        globals,
+        ctx,
+        enum_name,
+        params,
+        ctors,
+        branches,
+        InferNone
+      )
+      None => Err(UnknownEnum)
+    }
+    Ok(VError(e)) => Err(e)
+    Ok(VNil) => Err(Unsupported)
+    Ok(VCons(_, _)) => Err(Unsupported)
+    Ok(VVar(_)) => Err(Unsupported)
+    Ok(VConst(_)) => Err(Unsupported)
+    Ok(VType(_)) => Err(Unsupported)
+    Ok(VProp) => Err(Unsupported)
+    Ok(VCtor(_, _, _)) => Err(Unsupported)
+    Ok(VPi(_, _, _, _)) => Err(Unsupported)
+    Ok(VLam(_, _, _, _)) => Err(Unsupported)
+    Ok(VApp(_, _)) => Err(Unsupported)
+    Err(e) => Err(e)
+  }
+}
+
+fn infer_ctors(
+  fuel: Nat,
+  globals: fn(String) -> Option[EnumInfo],
+  ctx: List[Val],
+  enum_name: String,
+  params: Val,
+  ctors: CtorList,
+  branches: Tm,
+  state: InferState
+): Result[Val, KernelError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match ctors {
+      CNil => match state {
+        InferNone => Err(Unsupported)
+        InferSome(ty) => Ok(ty)
+      }
+      CCons(CtorData(_, _, index, _, num_fields, _), rest) => match branch_at(branches, index) {
+        BSome(binders, body) => match binders == num_fields {
+          True => match constructor_fields(k, globals, enum_name, index, params) {
+            Ok(fields) => match state {
+              InferNone => match infer(k, globals, fields.reverse().append(ctx), body) {
+                Ok(ty) => infer_ctors(
+                  k,
+                  globals,
+                  ctx,
+                  enum_name,
+                  params,
+                  rest,
+                  branches,
+                  InferSome(ty)
+                )
+                Err(e) => Err(e)
+              }
+              InferSome(ty) => match check(
+                k,
+                globals,
+                fields.reverse().append(ctx),
+                body,
+                ty
+              ) {
+                Ok(Unit) => infer_ctors(
+                  k,
+                  globals,
+                  ctx,
+                  enum_name,
+                  params,
+                  rest,
+                  branches,
+                  InferSome(ty)
+                )
+                Err(e) => Err(e)
+              }
+            }
+            Err(e) => Err(e)
+          }
+          False => Err(BadBranch)
+        }
+        BNone => Err(NotExhaustive)
+      }
     }
   }
 }
@@ -2129,5 +2252,64 @@ pub fn demo_termination_succ(): U32 {
     Err(NotDecreasing) => 1u32
     Err(_) => 0u32
     Ok(Unit) => 0u32
+  }
+}
+
+pub fn demo_infer_match(): U32 {
+  match infer(
+    100,
+    bool_globals,
+    Nil,
+    Match(Ctor("Bool", 1u32, TNil), bool_branches())
+  ) {
+    Ok(VType(level)) => match level == 1u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(VNil) => 0u32
+    Ok(VCons(_, _)) => 0u32
+    Ok(VVar(_)) => 0u32
+    Ok(VConst(_)) => 0u32
+    Ok(VProp) => 0u32
+    Ok(VInd(_, _)) => 0u32
+    Ok(VCtor(_, _, _)) => 0u32
+    Ok(VPi(_, _, _, _)) => 0u32
+    Ok(VLam(_, _, _, _)) => 0u32
+    Ok(VApp(_, _)) => 0u32
+    Ok(VError(_)) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_infer_j(): U32 {
+  match infer(
+    100,
+    empty_globals,
+    Nil,
+    J(
+      Ty(0u32),
+      Ty(0u32),
+      Ty(0u32),
+      ReflTm(Ty(0u32)),
+      Lam("x", Ty(0u32), Ty(1u32)),
+      Ty(0u32)
+    )
+  ) {
+    Ok(VType(level)) => match level == 1u32 {
+      True => 1u32
+      False => 0u32
+    }
+    Ok(VNil) => 0u32
+    Ok(VCons(_, _)) => 0u32
+    Ok(VVar(_)) => 0u32
+    Ok(VConst(_)) => 0u32
+    Ok(VProp) => 0u32
+    Ok(VInd(_, _)) => 0u32
+    Ok(VCtor(_, _, _)) => 0u32
+    Ok(VPi(_, _, _, _)) => 0u32
+    Ok(VLam(_, _, _, _)) => 0u32
+    Ok(VApp(_, _)) => 0u32
+    Ok(VError(_)) => 0u32
+    Err(_) => 0u32
   }
 }
