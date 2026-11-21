@@ -31,5 +31,8 @@ fn main(): IO[U32] {
       + core::demo_show_lambda()
       + core::demo_show_pi()
       + core::demo_show_app()
+      + core::demo_termination_good()
+      + core::demo_termination_loop()
+      + core::demo_termination_succ()
   )
 }

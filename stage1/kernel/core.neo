@@ -1737,3 +1737,357 @@ pub fn demo_show_app(): U32 {
     Err(_) => 0u32
   }
 }
+
+pub enum TerminationError {
+  NotDecreasing
+  TooDeep
+}
+
+pub enum FnInfo {
+  FnData(String, U32, Tm)
+}
+
+pub enum FnList {
+  FnNil
+  FnCons(FnInfo, FnList)
+}
+
+fn shift_decreasing(xs: List[U32], by: U32): List[U32] {
+  match xs {
+    Nil => Nil
+    Cons(x, rest) => Cons(x + by, shift_decreasing(rest, by))
+  }
+}
+
+fn add_fields(fuel: Nat, n: U32, acc: List[U32]): List[U32] {
+  match fuel {
+    Zero => acc
+    Succ(k) => match n == 0u32 {
+      True => acc
+      False => add_fields(k, n - 1u32, Cons(n - 1u32, acc))
+    }
+  }
+}
+
+fn member(xs: List[U32], value: U32): Bool {
+  match xs {
+    Nil => False
+    Cons(x, rest) => match x == value {
+      True => True
+      False => member(rest, value)
+    }
+  }
+}
+
+fn contains_decreasing(tm: Tm, decreasing: List[U32]): Bool {
+  match tm {
+    Var(index) => member(decreasing, index)
+    TCons(head, tail) => match contains_decreasing(head, decreasing) {
+      True => True
+      False => contains_decreasing(tail, decreasing)
+    }
+    Ind(_, args) => contains_decreasing(args, decreasing)
+    Ctor(_, _, args) => contains_decreasing(args, decreasing)
+    Const(_) => False
+    Ty(_) => False
+    PropTy => False
+    TNil => False
+    Pi(_, _, _) => False
+    Lam(_, _, _) => False
+    App(_, _) => False
+    Match(_, _) => False
+    TBrNil => False
+    TBrCons(_, _, _, _) => False
+    Eq(_, _) => False
+    ReflTm(_) => False
+    J(_, _, _, _, _, _) => False
+  }
+}
+
+fn has_decreasing_arg(args: Tm, decreasing: List[U32]): Bool {
+  match args {
+    TNil => False
+    TCons(head, tail) => match contains_decreasing(head, decreasing) {
+      True => True
+      False => has_decreasing_arg(tail, decreasing)
+    }
+    Var(_) => False
+    Const(_) => False
+    Ty(_) => False
+    PropTy => False
+    Ind(_, _) => False
+    Ctor(_, _, _) => False
+    Pi(_, _, _) => False
+    Lam(_, _, _) => False
+    App(_, _) => False
+    Match(_, _) => False
+    TBrNil => False
+    TBrCons(_, _, _, _) => False
+    Eq(_, _) => False
+    ReflTm(_) => False
+    J(_, _, _, _, _, _) => False
+  }
+}
+
+fn call_spine(name: String, tm: Tm, acc: Tm): Option[Tm] {
+  match tm {
+    App(f, a) => call_spine(name, f, TCons(a, acc))
+    Const(fname) => match fname == name {
+      True => Some(acc)
+      False => None
+    }
+    Var(_) => None
+    Ty(_) => None
+    PropTy => None
+    TNil => None
+    TCons(_, _) => None
+    Ind(_, _) => None
+    Ctor(_, _, _) => None
+    Pi(_, _, _) => None
+    Lam(_, _, _) => None
+    Match(_, _) => None
+    TBrNil => None
+    TBrCons(_, _, _, _) => None
+    Eq(_, _) => None
+    ReflTm(_) => None
+    J(_, _, _, _, _, _) => None
+  }
+}
+
+fn check_args(
+  fuel: Nat,
+  name: String,
+  depth: U32,
+  decreasing: List[U32],
+  args: Tm
+): Result[Unit, TerminationError] {
+  match fuel {
+    Zero => Err(TerminationError::TooDeep)
+    Succ(k) => match args {
+      TNil => Ok(Unit)
+      TCons(head, tail) => match check_tm(k, name, depth, decreasing, head) {
+        Ok(Unit) => check_args(k, name, depth, decreasing, tail)
+        Err(e) => Err(e)
+      }
+      Var(_) => Ok(Unit)
+      Const(_) => Ok(Unit)
+      Ty(_) => Ok(Unit)
+      PropTy => Ok(Unit)
+      Ind(_, _) => Ok(Unit)
+      Ctor(_, _, _) => Ok(Unit)
+      Pi(_, _, _) => Ok(Unit)
+      Lam(_, _, _) => Ok(Unit)
+      App(_, _) => Ok(Unit)
+      Match(_, _) => Ok(Unit)
+      TBrNil => Ok(Unit)
+      TBrCons(_, _, _, _) => Ok(Unit)
+      Eq(_, _) => Ok(Unit)
+      ReflTm(_) => Ok(Unit)
+      J(_, _, _, _, _, _) => Ok(Unit)
+    }
+  }
+}
+
+fn check_branches(
+  fuel: Nat,
+  name: String,
+  depth: U32,
+  decreasing: List[U32],
+  branches: Tm
+): Result[Unit, TerminationError] {
+  match fuel {
+    Zero => Err(TerminationError::TooDeep)
+    Succ(k) => match branches {
+      TBrNil => Ok(Unit)
+      TBrCons(_, binders, body, rest) => {
+        let shifted = shift_decreasing(decreasing, binders)
+        let inner = add_fields(16, binders, shifted)
+        match check_tm(k, name, depth + binders, inner, body) {
+          Ok(Unit) => check_branches(k, name, depth, decreasing, rest)
+          Err(e) => Err(e)
+        }
+      }
+      TNil => Ok(Unit)
+      TCons(_, _) => Ok(Unit)
+      Var(_) => Ok(Unit)
+      Const(_) => Ok(Unit)
+      Ty(_) => Ok(Unit)
+      PropTy => Ok(Unit)
+      Ind(_, _) => Ok(Unit)
+      Ctor(_, _, _) => Ok(Unit)
+      Pi(_, _, _) => Ok(Unit)
+      Lam(_, _, _) => Ok(Unit)
+      App(_, _) => Ok(Unit)
+      Match(_, _) => Ok(Unit)
+      Eq(_, _) => Ok(Unit)
+      ReflTm(_) => Ok(Unit)
+      J(_, _, _, _, _, _) => Ok(Unit)
+    }
+  }
+}
+
+fn check_tm(
+  fuel: Nat,
+  name: String,
+  depth: U32,
+  decreasing: List[U32],
+  tm: Tm
+): Result[Unit, TerminationError] {
+  match fuel {
+    Zero => Err(TerminationError::TooDeep)
+    Succ(k) => match tm {
+      App(_, _) => match call_spine(name, tm, TNil) {
+        Some(args) => match has_decreasing_arg(args, decreasing) {
+          True => check_args(k, name, depth, decreasing, args)
+          False => Err(NotDecreasing)
+        }
+        None => match tm {
+          App(f, a) => match check_tm(k, name, depth, decreasing, f) {
+            Ok(Unit) => check_tm(k, name, depth, decreasing, a)
+            Err(e) => Err(e)
+          }
+          Const(_) => Ok(Unit)
+          Var(_) => Ok(Unit)
+          Ty(_) => Ok(Unit)
+          PropTy => Ok(Unit)
+          TNil => Ok(Unit)
+          TCons(_, _) => Ok(Unit)
+          Ind(_, _) => Ok(Unit)
+          Ctor(_, _, _) => Ok(Unit)
+          Pi(_, _, _) => Ok(Unit)
+          Lam(_, _, _) => Ok(Unit)
+          Match(_, _) => Ok(Unit)
+          TBrNil => Ok(Unit)
+          TBrCons(_, _, _, _) => Ok(Unit)
+          Eq(_, _) => Ok(Unit)
+          ReflTm(_) => Ok(Unit)
+          J(_, _, _, _, _, _) => Ok(Unit)
+        }
+      }
+      Const(name2) => match call_spine(name, Const(name2), TNil) {
+        Some(args) => match has_decreasing_arg(args, decreasing) {
+          True => Ok(Unit)
+          False => Err(NotDecreasing)
+        }
+        None => Ok(Unit)
+      }
+      Var(_) => Ok(Unit)
+      Ty(_) => Ok(Unit)
+      PropTy => Ok(Unit)
+      TNil => Ok(Unit)
+      TCons(head, tail) => match check_tm(k, name, depth, decreasing, head) {
+        Ok(Unit) => check_tm(k, name, depth, decreasing, tail)
+        Err(e) => Err(e)
+      }
+      Ind(_, args) => check_args(k, name, depth, decreasing, args)
+      Ctor(_, _, args) => check_args(k, name, depth, decreasing, args)
+      Pi(_, dom, cod) => match check_tm(k, name, depth, decreasing, dom) {
+        Ok(Unit) => check_tm(k, name, depth + 1u32, shift_decreasing(decreasing, 1u32), cod)
+        Err(e) => Err(e)
+      }
+      Lam(_, dom, body) => match check_tm(k, name, depth, decreasing, dom) {
+        Ok(Unit) => check_tm(k, name, depth + 1u32, shift_decreasing(decreasing, 1u32), body)
+        Err(e) => Err(e)
+      }
+      Match(scrut, branches) => match check_tm(k, name, depth, decreasing, scrut) {
+        Ok(Unit) => check_branches(k, name, depth, decreasing, branches)
+        Err(e) => Err(e)
+      }
+      TBrNil => Ok(Unit)
+      TBrCons(_, binders, body, rest) => {
+        let shifted = shift_decreasing(decreasing, binders)
+        let inner = add_fields(16, binders, shifted)
+        match check_tm(k, name, depth + binders, inner, body) {
+          Ok(Unit) => check_tm(k, name, depth, decreasing, rest)
+          Err(e) => Err(e)
+        }
+      }
+      Eq(lhs, rhs) => match check_tm(k, name, depth, decreasing, lhs) {
+        Ok(Unit) => check_tm(k, name, depth, decreasing, rhs)
+        Err(e) => Err(e)
+      }
+      ReflTm(value) => check_tm(k, name, depth, decreasing, value)
+      J(a, b, c, d, e, f) => match check_tm(k, name, depth, decreasing, a) {
+        Ok(Unit) => match check_tm(k, name, depth, decreasing, b) {
+          Ok(Unit) => match check_tm(k, name, depth, decreasing, c) {
+            Ok(Unit) => match check_tm(k, name, depth, decreasing, d) {
+              Ok(Unit) => match check_tm(k, name, depth, decreasing, e) {
+                Ok(Unit) => check_tm(k, name, depth, decreasing, f)
+                Err(err) => Err(err)
+              }
+              Err(err) => Err(err)
+            }
+            Err(err) => Err(err)
+          }
+          Err(err) => Err(err)
+        }
+        Err(err) => Err(err)
+      }
+    }
+  }
+}
+
+fn check_fn(info: FnInfo): Result[Unit, TerminationError] {
+  match info {
+    FnData(name, num_params, body) => check_tm(1000, name, num_params, Nil, body)
+  }
+}
+
+pub fn check_termination(fns: FnList): Result[Unit, TerminationError] {
+  match fns {
+    FnNil => Ok(Unit)
+    FnCons(info, rest) => match check_fn(info) {
+      Ok(Unit) => check_termination(rest)
+      Err(e) => Err(e)
+    }
+  }
+}
+
+fn good_add_fns(): FnList {
+  let zero_branch = TBrCons(0u32, 0u32, Var(1u32), TBrNil)
+  let call = App(App(Const("add"), Var(0u32)), Var(1u32))
+  let succ_branch = TBrCons(1u32, 1u32, call, zero_branch)
+  let body = Match(Var(0u32), succ_branch)
+  FnCons(FnData("add", 2u32, body), FnNil)
+}
+
+fn bad_loop_fns(): FnList {
+  FnCons(
+    FnData("loop", 1u32, App(Const("loop"), Var(0u32))),
+    FnNil
+  )
+}
+
+fn bad_succ_fns(): FnList {
+  FnCons(
+    FnData(
+      "loop",
+      1u32,
+      App(Const("loop"), Ctor("Succ", 1u32, TCons(Var(0u32), TNil)))
+    ),
+    FnNil
+  )
+}
+
+pub fn demo_termination_good(): U32 {
+  match check_termination(good_add_fns()) {
+    Ok(Unit) => 1u32
+    Err(_) => 0u32
+  }
+}
+
+pub fn demo_termination_loop(): U32 {
+  match check_termination(bad_loop_fns()) {
+    Err(NotDecreasing) => 1u32
+    Err(_) => 0u32
+    Ok(Unit) => 0u32
+  }
+}
+
+pub fn demo_termination_succ(): U32 {
+  match check_termination(bad_succ_fns()) {
+    Err(NotDecreasing) => 1u32
+    Err(_) => 0u32
+    Ok(Unit) => 0u32
+  }
+}

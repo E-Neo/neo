@@ -36,6 +36,10 @@ and conversion, written in Neo.
   domains and nested occurrences under another type constructor are rejected.
 - A pretty printer for the current term subset, including U32 decimal
   formatting, de Bruijn names, Pi/lambda/application printing, and equality.
+- A conservative termination check. Function bodies are traversed with a set
+  of variables known to be strict subterms; match branch fields are added to
+  that set, and every recursive call must pass one of them (or a constructor
+  built from one).
 - Alpha-renamed lambdas, different universes, unbound variables, fuel
   exhaustion, identity checking, a type error, Pi inference, and application
   inference are tested.
@@ -43,7 +47,7 @@ and conversion, written in Neo.
 ## Next
 
 - Dependent match refinement and full motive application in `J`.
-- Termination checking.
+- A closer match to Stage 0's termination acceptance and rejection behavior.
 - Differential acceptance against Stage 0 on the soundness and corpus suites.
 
 ## Frontend, codegen, and driver slices
