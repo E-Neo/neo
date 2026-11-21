@@ -1,0 +1,65 @@
+// A first-order evaluator slice for the readiness spike.
+//
+// Fuel is explicit so every recursive call is structurally decreasing. This
+// avoids mutual recursion and shows what an NbE port needs beyond this slice.
+
+pub enum Tm {
+  Var(String)
+  Lit(U32)
+  Add(Tm, Tm)
+  IfZero(Tm, Tm, Tm)
+}
+
+pub enum Binding {
+  Bind(String, U32)
+}
+
+pub enum EvalError {
+  OutOfFuel
+  Unbound
+}
+
+pub fn lookup(env: List[Binding], name: String): Option[U32] {
+  match env {
+    Nil => None
+    Cons(Bind(key, value), rest) => match key == name {
+      True => Some(value)
+      False => lookup(rest, name)
+    }
+  }
+}
+
+pub fn eval(fuel: Nat, env: List[Binding], tm: Tm): Result[U32, EvalError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match tm {
+      Var(name) => match lookup(env, name) {
+        Some(value) => Ok(value)
+        None => Err(Unbound)
+      }
+      Lit(n) => Ok(n)
+      Add(a, b) => match eval(k, env, a) {
+        Ok(x) => match eval(k, env, b) {
+          Ok(y) => Ok(x + y)
+          Err(e) => Err(e)
+        }
+        Err(e) => Err(e)
+      }
+      IfZero(cond, yes, no) => match eval(k, env, cond) {
+        Ok(n) => match n == 0u32 {
+          True => eval(k, env, yes)
+          False => eval(k, env, no)
+        }
+        Err(e) => Err(e)
+      }
+    }
+  }
+}
+
+pub fn demo(): U32 {
+  let env: List[Binding] = Cons(Bind("x", 40u32), Nil)
+  match eval(100, env, Add(Var("x"), Lit(2u32))) {
+    Ok(n) => n
+    Err(_) => 0u32
+  }
+}

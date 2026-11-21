@@ -85,6 +85,8 @@ commits and design notes.
 | D40 | **Source-attributed spans.** `Span` carries a `file` id, and `Program` carries the loader's file table. The loader assigns ids while parsing each module file, so diagnostics from child files print the correct path. In-memory `parse_source` uses id 0 and no file table. |
 | D41 | **Deep terms.** The native CLI and `neo-internal` run on a 64 MiB worker thread, and the `wasm32-wasip2` compiler links with a 16 MiB stack. This removes the observed aborts on large `Nat` literals without changing kernel semantics; an explicit recursion budget remains future work. |
 
+| D42 | **Stage 1 readiness spike.** `spike/` validates fuel-driven evaluation, function-valued closure environments, byte parsing, and a pure wasm byte builder. Nested `List[Val]` environments are rejected by positivity, so closures use `fn(String) -> Val`; such environments cannot be compared, so conversion must apply closures to fresh variables. Mutual recursion is still absent; the ports use single-entry recursive functions or need a future mutual-recursion feature. |
+
 ## 3. The `Neo-B` subset
 
 The compiler is written in a subset of the language it accepts. The rule is

@@ -1,0 +1,8 @@
+mod core;
+mod parser;
+mod emit;
+mod closures;
+
+fn main(): IO[U32] {
+  IO::pure(core::demo() + parser::demo_parse() + emit::demo_len() + closures::demo2())
+}

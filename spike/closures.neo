@@ -1,0 +1,64 @@
+pub enum Tm2 {
+  Var(String)
+  Lit(U32)
+  App(Tm2, Tm2)
+  Lam(String, Tm2)
+}
+
+pub enum Val2 {
+  VNat(U32)
+  VUnbound
+  VClosure(String, Tm2, fn(String) -> Val2)
+}
+
+pub enum Err2 {
+  OutOfFuel
+  Unbound
+}
+
+fn env_empty(name: String): Val2 {
+  VUnbound
+}
+
+fn env_extend(env: fn(String) -> Val2, key: String, value: Val2): fn(String) -> Val2 {
+  fn(x: String) => match x == key {
+    True => value
+    False => env(x)
+  }
+}
+
+pub fn eval2(fuel: Nat, env: fn(String) -> Val2, tm: Tm2): Result[Val2, Err2] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match tm {
+      Var(x) => match env(x) {
+        VNat(n) => Ok(VNat(n))
+        VClosure(y, b, e) => Ok(VClosure(y, b, e))
+        VUnbound => Err(Unbound)
+      }
+      Lit(n) => Ok(VNat(n))
+      Lam(x, body) => Ok(VClosure(x, body, env))
+      App(f, a) => match eval2(k, env, f) {
+        Ok(VClosure(x, body, env2)) => match eval2(k, env, a) {
+          Ok(v) => eval2(k, env_extend(env2, x, v), body)
+          Err(e) => Err(e)
+        }
+        Ok(VNat(_)) => Err(Unbound)
+        Ok(VUnbound) => Err(Unbound)
+        Err(e) => Err(e)
+      }
+    }
+  }
+}
+
+pub fn demo2(): U32 {
+  let term = App(Lam("x", Var("x")), Lit(7u32))
+  match eval2(100, env_empty, term) {
+    Ok(VNat(n)) => n
+    Ok(VClosure(x, b, e)) => 0u32
+    Ok(VUnbound) => 0u32
+    Err(_) => 0u32
+  }
+}
+
+fn main(): IO[U32] { IO::pure(demo2()) }

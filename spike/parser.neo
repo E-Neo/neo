@@ -1,0 +1,49 @@
+// A fuel-driven decimal-number parser over Bytes.
+//
+// The parser is a single recursive function; it does not need mutual
+// recursion for this slice.
+
+pub enum Expr {
+  Num(U32)
+}
+
+pub enum ParserError {
+  OutOfFuel
+  Unexpected
+}
+
+pub enum Parsed {
+  Done(Expr, U32)
+}
+
+fn is_digit(byte: U32): Bool {
+  match byte >= 48u32 {
+    True => byte <= 57u32
+    False => False
+  }
+}
+
+pub fn parse_number(
+  fuel: Nat,
+  bytes: Bytes,
+  pos: U32,
+  acc: U32
+): Result[Parsed, ParserError] {
+  match fuel {
+    Zero => Err(OutOfFuel)
+    Succ(k) => match pos >= bytes.length() {
+      True => Ok(Done(Num(acc), pos))
+      False => match is_digit(bytes.get(pos)) {
+        True => parse_number(k, bytes, pos + 1u32, acc * 10u32 + (bytes.get(pos) - 48u32))
+        False => Ok(Done(Num(acc), pos))
+      }
+    }
+  }
+}
+
+pub fn demo_parse(): U32 {
+  match parse_number(10, b"123", 0u32, 0u32) {
+    Ok(Done(Num(n), _)) => n
+    Err(_) => 0u32
+  }
+}

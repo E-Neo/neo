@@ -1,0 +1,43 @@
+// A pure byte builder and a minimal wasm module.
+
+pub enum Builder {
+  Empty
+  Chunk(Bytes)
+  Node(Builder, Builder)
+}
+
+pub fn append(left: Builder, right: Builder): Builder {
+  Node(left, right)
+}
+
+pub fn size(builder: Builder): U32 {
+  match builder {
+    Empty => 0u32
+    Chunk(bytes) => bytes.length()
+    Node(left, right) => size(left) + size(right)
+  }
+}
+
+pub fn render(builder: Builder): Bytes {
+  match builder {
+    Empty => b""
+    Chunk(bytes) => bytes
+    Node(left, right) => render(left).concat(render(right))
+  }
+}
+
+pub fn header(): Bytes {
+  b"\x00asm\x01\x00\x00\x00"
+}
+
+fn custom_section(): Bytes {
+  b"\x00\x02\x00\x00"
+}
+
+pub fn demo_module(): Bytes {
+  render(append(Chunk(header()), Chunk(custom_section())))
+}
+
+pub fn demo_len(): U32 {
+  demo_module().length()
+}
